@@ -2,12 +2,26 @@
 name = "fast_xlsx"
 version = "0.1.0"
 edition = "2021"
-description = "Fast CSV to XLSX converter using rust_xlsxwriter"
+description = "High-performance CSV to XLSX converter with automatic type detection"
+license = "MIT"
+repository = "https://github.com/tstone-1/fast_xlsx"
+keywords = ["excel", "xlsx", "csv", "converter", "performance"]
+categories = ["command-line-utilities", "encoding"]
+
+[lib]
+name = "fast_xlsx"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "fast_xlsx"
+path = "src/main.rs"
 
 [dependencies]
 rust_xlsxwriter = "0.79"
 csv = "1.3"
 clap = { version = "4.5", features = ["derive"] }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
+chrono = "0.4"
 
 [profile.release]
 opt-level = 3
