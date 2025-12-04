@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "0.1.0"
-description = "High-performance CSV to XLSX converter with automatic type detection"
+version = "0.2.0"
+description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
@@ -34,7 +34,7 @@ Repository = "https://github.com/tstone-1/xlsxturbo"
 Issues = "https://github.com/tstone-1/xlsxturbo/issues"
 
 [project.optional-dependencies]
-dev = ["pytest", "pandas", "openpyxl"]
+dev = ["pytest", "pandas", "polars", "openpyxl"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

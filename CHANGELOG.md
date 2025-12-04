@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-12-04
+
+### Added
+- `df_to_xlsx()` function for direct DataFrame export (pandas and polars)
+- Type preservation for DataFrame columns:
+  - Python int/float → Excel numbers
+  - Python bool → Excel booleans
+  - datetime.date → Excel dates with formatting
+  - datetime.datetime / pandas.Timestamp → Excel datetimes with formatting
+  - None/NaN/NaT → Empty cells
+- Type stubs for better IDE support
+
+### Changed
+- Updated documentation to include DataFrame examples
+
 ## [0.1.0] - 2025-12-04
 
 ### Added
@@ -22,4 +37,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.1.0
