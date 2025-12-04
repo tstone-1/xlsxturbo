@@ -271,7 +271,7 @@ fn version() -> &'static str {
 ///     >>> fast_xlsx.csv_to_xlsx("input.csv", "output.xlsx")
 ///     (1000, 50)
 #[pymodule]
-fn fastxlsx(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(csv_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

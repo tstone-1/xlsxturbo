@@ -1,4 +1,4 @@
-# fastxlsx
+# xlsxturbo
 
 High-performance CSV to XLSX converter with automatic type detection. Written in Rust, usable from Python.
 
@@ -18,7 +18,7 @@ High-performance CSV to XLSX converter with automatic type detection. Written in
 ## Installation
 
 ```bash
-pip install fastxlsx
+pip install xlsxturbo
 ```
 
 Or build from source:
@@ -31,23 +31,23 @@ maturin develop --release
 ## Python Usage
 
 ```python
-import fastxlsx
+import xlsxturbo
 
 # Convert CSV to XLSX with automatic type detection
-rows, cols = fastxlsx.csv_to_xlsx("input.csv", "output.xlsx")
+rows, cols = xlsxturbo.csv_to_xlsx("input.csv", "output.xlsx")
 print(f"Converted {rows} rows and {cols} columns")
 
 # Custom sheet name
-fastxlsx.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
+xlsxturbo.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
 
 # Check version
-print(fastxlsx.__version__)
+print(xlsxturbo.__version__)
 ```
 
 ## CLI Usage
 
 ```bash
-fastxlsx input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
+xlsxturbo input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
 ```
 
 ### Options
@@ -58,7 +58,7 @@ fastxlsx input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
 ### Example
 
 ```bash
-fastxlsx sales.csv report.xlsx --sheet-name "Q4 Sales" -v
+xlsxturbo sales.csv report.xlsx --sheet-name "Q4 Sales" -v
 ```
 
 ## Performance
@@ -67,7 +67,7 @@ Benchmarked on 525,684 rows x 98 columns:
 
 | Method | Time | Speedup |
 |--------|------|---------|
-| **fastxlsx** | 28.5s | **26.7x** |
+| **xlsxturbo** | 28.5s | **26.7x** |
 | PyExcelerate | 107s | 7.1x |
 | pandas + xlsxwriter | 374s | 2.0x |
 | pandas + openpyxl | 762s | 1.0x |
