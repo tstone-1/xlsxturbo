@@ -3,7 +3,7 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "fastxlsx"
+name = "xlsxturbo"
 version = "0.1.0"
 description = "High-performance CSV to XLSX converter with automatic type detection"
 readme = "README.md"
@@ -29,9 +29,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tstone-1/fastxlsx"
-Repository = "https://github.com/tstone-1/fastxlsx"
-Issues = "https://github.com/tstone-1/fastxlsx/issues"
+Homepage = "https://github.com/tstone-1/xlsxturbo"
+Repository = "https://github.com/tstone-1/xlsxturbo"
+Issues = "https://github.com/tstone-1/xlsxturbo/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "pandas", "openpyxl"]
@@ -39,4 +39,4 @@ dev = ["pytest", "pandas", "openpyxl"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "fastxlsx"
+module-name = "xlsxturbo"
