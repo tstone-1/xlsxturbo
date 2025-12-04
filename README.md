@@ -1,10 +1,11 @@
 # xlsxturbo
 
-High-performance CSV to XLSX converter with automatic type detection. Written in Rust, usable from Python.
+High-performance Excel writer with automatic type detection. Written in Rust, usable from Python.
 
 ## Features
 
-- **Automatic type detection** from CSV strings:
+- **Direct DataFrame support** for pandas and polars
+- **Automatic type detection** from CSV strings and Python objects:
   - Integers and floats → Excel numbers
   - `true`/`false` → Excel booleans
   - Dates (`2024-01-15`, `15/01/2024`, etc.) → Excel dates with formatting
@@ -29,6 +30,32 @@ maturin develop --release
 ```
 
 ## Python Usage
+
+### DataFrame Export (pandas/polars)
+
+```python
+import xlsxturbo
+import pandas as pd
+
+# Create a DataFrame
+df = pd.DataFrame({
+    'name': ['Alice', 'Bob'],
+    'age': [30, 25],
+    'salary': [50000.50, 60000.75],
+    'active': [True, False]
+})
+
+# Export to XLSX (preserves types: int, float, bool, date, datetime)
+rows, cols = xlsxturbo.df_to_xlsx(df, "output.xlsx")
+print(f"Wrote {rows} rows and {cols} columns")
+
+# Works with polars too!
+import polars as pl
+df_polars = pl.DataFrame({'x': [1, 2, 3], 'y': [4.0, 5.0, 6.0]})
+xlsxturbo.df_to_xlsx(df_polars, "polars_output.xlsx", sheet_name="Data")
+```
+
+### CSV Conversion
 
 ```python
 import xlsxturbo
