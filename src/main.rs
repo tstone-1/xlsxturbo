@@ -9,12 +9,14 @@ use std::time::Instant;
 #[command(name = "fast_xlsx")]
 #[command(version)]
 #[command(about = "Fast CSV to XLSX converter with automatic type detection")]
-#[command(long_about = "Converts CSV files to Excel XLSX format with smart type inference:\n\
+#[command(
+    long_about = "Converts CSV files to Excel XLSX format with smart type inference:\n\
     - Numbers (integers, floats) -> Excel numbers\n\
     - Booleans (true/false) -> Excel booleans\n\
     - Dates (YYYY-MM-DD) -> Excel dates\n\
     - Datetimes (ISO 8601) -> Excel datetimes\n\
-    - NaN/Inf -> Empty cells")]
+    - NaN/Inf -> Empty cells"
+)]
 struct Args {
     /// Input CSV file path
     input: String,
