@@ -1,20 +1,50 @@
 # fast_xlsx
 
-High-performance CSV to XLSX converter written in Rust using `rust_xlsxwriter`.
+High-performance CSV to XLSX converter with automatic type detection. Written in Rust, usable from Python.
 
-## Performance
+## Features
 
-Benchmarked on 525,684 rows x 98 columns:
+- **Automatic type detection** from CSV strings:
+  - Integers and floats → Excel numbers
+  - `true`/`false` → Excel booleans
+  - Dates (`2024-01-15`, `15/01/2024`, etc.) → Excel dates with formatting
+  - Datetimes (ISO 8601) → Excel datetimes
+  - `NaN`/`Inf` → Empty cells (graceful handling)
+  - Everything else → Text
+- **~25x faster** than pandas + openpyxl
+- **Memory efficient** - streams data with 1MB buffer
+- Available as both **Python library** and **CLI tool**
 
-| Method | Time | Speedup |
-|--------|------|---------|
-| **fast_xlsx (Rust)** | 28.5s | **26.7x** |
-| PyExcelerate | 107s | 7.1x |
-| pandas + xlsxwriter | 374s | 2.0x |
-| pandas + openpyxl | 762s | 1.0x |
-| polars.write_excel | 1039s | 0.7x |
+## Installation
 
-## Usage
+```bash
+pip install fast_xlsx
+```
+
+Or build from source:
+
+```bash
+pip install maturin
+maturin develop --release
+```
+
+## Python Usage
+
+```python
+import fast_xlsx
+
+# Convert CSV to XLSX with automatic type detection
+rows, cols = fast_xlsx.csv_to_xlsx("input.csv", "output.xlsx")
+print(f"Converted {rows} rows and {cols} columns")
+
+# Custom sheet name
+fast_xlsx.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
+
+# Check version
+print(fast_xlsx.__version__)
+```
+
+## CLI Usage
 
 ```bash
 fast_xlsx input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
@@ -28,42 +58,56 @@ fast_xlsx input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
 ### Example
 
 ```bash
-fast_xlsx data.csv report.xlsx -v
+fast_xlsx sales.csv report.xlsx --sheet-name "Q4 Sales" -v
 ```
 
-## Building
+## Performance
 
-Requires Rust toolchain:
+Benchmarked on 525,684 rows x 98 columns:
+
+| Method | Time | Speedup |
+|--------|------|---------|
+| **fast_xlsx** | 28.5s | **26.7x** |
+| PyExcelerate | 107s | 7.1x |
+| pandas + xlsxwriter | 374s | 2.0x |
+| pandas + openpyxl | 762s | 1.0x |
+| polars.write_excel | 1039s | 0.7x |
+
+## Type Detection Examples
+
+| CSV Value | Excel Type | Notes |
+|-----------|------------|-------|
+| `123` | Number | Integer |
+| `3.14159` | Number | Float |
+| `true` / `FALSE` | Boolean | Case insensitive |
+| `2024-01-15` | Date | Formatted as date |
+| `2024-01-15T10:30:00` | DateTime | ISO 8601 format |
+| `NaN` | Empty | Graceful handling |
+| `hello world` | Text | Default |
+
+Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, `MM-DD-YYYY`, `MM/DD/YYYY`
+
+## Building from Source
+
+Requires Rust toolchain and maturin:
 
 ```bash
-cargo build --release
+# Install maturin
+pip install maturin
+
+# Development build
+maturin develop
+
+# Release build (optimized)
+maturin develop --release
+
+# Build wheel for distribution
+maturin build --release
 ```
-
-Binary will be at `target/release/fast_xlsx.exe`
-
-## Python Integration
-
-Use with the `ecoglobal_functions.fast_to_excel()` wrapper:
-
-```python
-import ecoglobal
-import ecoglobal_functions as ef
-
-df = ecoglobal.Report('mag').load()
-ef.fast_to_excel(df, 'output.xlsx', verbose=True)
-```
-
-## Features
-
-- Automatic type detection (numbers, booleans, strings)
-- Handles NaN/Inf values gracefully
-- 1MB read buffer for optimal performance
-- Progress reporting with `-v` flag
-- Optimized release build (LTO, stripped binary)
 
 ## Benchmarking
 
-Run the included benchmark script to compare performance:
+Run the included benchmark script:
 
 ```bash
 # Default: 100K rows x 50 columns
@@ -72,8 +116,6 @@ python benchmark.py
 # Custom size
 python benchmark.py --rows 500000 --cols 100
 ```
-
-Requires: `pandas`, `numpy`, and optionally `polars`, `pyexcelerate`, `xlsxwriter`, `openpyxl` for comparison.
 
 ## License
 
