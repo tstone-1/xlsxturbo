@@ -248,7 +248,7 @@ pub fn convert_csv_to_xlsx(
 #[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1"))]
 fn csv_to_xlsx(input_path: &str, output_path: &str, sheet_name: &str) -> PyResult<(u32, u16)> {
     convert_csv_to_xlsx(input_path, output_path, sheet_name)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 /// Get the version of the fast_xlsx library
