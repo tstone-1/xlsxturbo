@@ -22,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
-[0.1.0]: https://github.com/tstone-1/fast_xlsx/releases/tag/v0.1.0
+[0.1.0]: https://github.com/tstone-1/fastxlsx/releases/tag/v0.1.0

@@ -43,7 +43,7 @@ fn main() {
 
     let start = Instant::now();
 
-    match fast_xlsx::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name) {
+    match fastxlsx::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name) {
         Ok((rows, cols)) => {
             if args.verbose {
                 let duration = start.elapsed();
