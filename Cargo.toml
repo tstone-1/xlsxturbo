@@ -1,19 +1,19 @@
 [package]
-name = "fast_xlsx"
+name = "fastxlsx"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance CSV to XLSX converter with automatic type detection"
 license = "MIT"
-repository = "https://github.com/tstone-1/fast_xlsx"
+repository = "https://github.com/tstone-1/fastxlsx"
 keywords = ["excel", "xlsx", "csv", "converter", "performance"]
 categories = ["command-line-utilities", "encoding"]
 
 [lib]
-name = "fast_xlsx"
+name = "fastxlsx"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "fast_xlsx"
+name = "fastxlsx"
 path = "src/main.rs"
 
 [dependencies]
