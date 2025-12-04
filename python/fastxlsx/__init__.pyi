@@ -1,4 +1,4 @@
-"""Type stubs for fast_xlsx"""
+"""Type stubs for fastxlsx"""
 
 def csv_to_xlsx(
     input_path: str,
@@ -20,14 +20,14 @@ def csv_to_xlsx(
         ValueError: If the conversion fails
 
     Example:
-        >>> import fast_xlsx
-        >>> rows, cols = fast_xlsx.csv_to_xlsx("data.csv", "output.xlsx")
+        >>> import fastxlsx
+        >>> rows, cols = fastxlsx.csv_to_xlsx("data.csv", "output.xlsx")
         >>> print(f"Converted {rows} rows and {cols} columns")
     """
     ...
 
 def version() -> str:
-    """Get the version of the fast_xlsx library."""
+    """Get the version of the fastxlsx library."""
     ...
 
 __version__: str
