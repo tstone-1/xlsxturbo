@@ -17,20 +17,20 @@ use std::io::BufReader;
 
 /// Date formats we recognize
 const DATE_PATTERNS: &[&str] = &[
-    "%Y-%m-%d",          // 2024-01-15
-    "%Y/%m/%d",          // 2024/01/15
-    "%d-%m-%Y",          // 15-01-2024
-    "%d/%m/%Y",          // 15/01/2024
-    "%m-%d-%Y",          // 01-15-2024
-    "%m/%d/%Y",          // 01/15/2024
+    "%Y-%m-%d", // 2024-01-15
+    "%Y/%m/%d", // 2024/01/15
+    "%d-%m-%Y", // 15-01-2024
+    "%d/%m/%Y", // 15/01/2024
+    "%m-%d-%Y", // 01-15-2024
+    "%m/%d/%Y", // 01/15/2024
 ];
 
 /// Datetime formats we recognize
 const DATETIME_PATTERNS: &[&str] = &[
-    "%Y-%m-%dT%H:%M:%S",      // ISO 8601
-    "%Y-%m-%d %H:%M:%S",      // Common format
-    "%Y-%m-%dT%H:%M:%S%.f",   // ISO 8601 with fractional seconds
-    "%Y-%m-%d %H:%M:%S%.f",   // With fractional seconds
+    "%Y-%m-%dT%H:%M:%S",    // ISO 8601
+    "%Y-%m-%d %H:%M:%S",    // Common format
+    "%Y-%m-%dT%H:%M:%S%.f", // ISO 8601 with fractional seconds
+    "%Y-%m-%d %H:%M:%S%.f", // With fractional seconds
 ];
 
 /// Represents the detected type of a cell value
@@ -40,8 +40,8 @@ enum CellValue {
     Integer(i64),
     Float(f64),
     Boolean(bool),
-    Date(f64),      // Excel serial date
-    DateTime(f64),  // Excel serial datetime
+    Date(f64),     // Excel serial date
+    DateTime(f64), // Excel serial datetime
     String(String),
 }
 
@@ -161,8 +161,7 @@ pub fn convert_csv_to_xlsx(
     sheet_name: &str,
 ) -> Result<(u32, u16), String> {
     // Open CSV file
-    let file = File::open(input_path)
-        .map_err(|e| format!("Failed to open input file: {}", e))?;
+    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
     let reader = BufReader::with_capacity(1024 * 1024, file);
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
@@ -172,7 +171,8 @@ pub fn convert_csv_to_xlsx(
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
-    worksheet.set_name(sheet_name)
+    worksheet
+        .set_name(sheet_name)
         .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
     // Create formats for dates and datetimes
@@ -199,14 +199,16 @@ pub fn convert_csv_to_xlsx(
                 cell_value,
                 &date_format,
                 &datetime_format,
-            ).map_err(|e| format!("Write error at ({}, {}): {}", row_count, col_idx, e))?;
+            )
+            .map_err(|e| format!("Write error at ({}, {}): {}", row_count, col_idx, e))?;
         }
 
         row_count += 1;
     }
 
     // Save workbook
-    workbook.save(output_path)
+    workbook
+        .save(output_path)
         .map_err(|e| format!("Failed to save workbook: {}", e))?;
 
     Ok((row_count, col_count))
@@ -320,8 +322,14 @@ mod tests {
 
     #[test]
     fn test_parse_datetime() {
-        assert!(matches!(parse_value("2024-01-15T10:30:00"), CellValue::DateTime(_)));
-        assert!(matches!(parse_value("2024-01-15 10:30:00"), CellValue::DateTime(_)));
+        assert!(matches!(
+            parse_value("2024-01-15T10:30:00"),
+            CellValue::DateTime(_)
+        ));
+        assert!(matches!(
+            parse_value("2024-01-15 10:30:00"),
+            CellValue::DateTime(_)
+        ));
     }
 
     #[test]
