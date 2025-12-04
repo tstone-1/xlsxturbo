@@ -61,6 +61,20 @@ ef.fast_to_excel(df, 'output.xlsx', verbose=True)
 - Progress reporting with `-v` flag
 - Optimized release build (LTO, stripped binary)
 
+## Benchmarking
+
+Run the included benchmark script to compare performance:
+
+```bash
+# Default: 100K rows x 50 columns
+python benchmark.py
+
+# Custom size
+python benchmark.py --rows 500000 --cols 100
+```
+
+Requires: `pandas`, `numpy`, and optionally `polars`, `pyexcelerate`, `xlsxwriter`, `openpyxl` for comparison.
+
 ## License
 
 MIT
