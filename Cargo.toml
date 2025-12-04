@@ -1,19 +1,19 @@
 [package]
-name = "fastxlsx"
+name = "xlsxturbo"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance CSV to XLSX converter with automatic type detection"
 license = "MIT"
-repository = "https://github.com/tstone-1/fastxlsx"
+repository = "https://github.com/tstone-1/xlsxturbo"
 keywords = ["excel", "xlsx", "csv", "converter", "performance"]
 categories = ["command-line-utilities", "encoding"]
 
 [lib]
-name = "fastxlsx"
+name = "xlsxturbo"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "fastxlsx"
+name = "xlsxturbo"
 path = "src/main.rs"
 
 [dependencies]
