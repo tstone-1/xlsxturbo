@@ -1,16 +1,19 @@
-//! fast_xlsx - High-performance CSV to XLSX converter with automatic type detection
+//! xlsxturbo - High-performance Excel writer with automatic type detection
 //!
-//! This library provides fast CSV to Excel conversion with smart type inference:
+//! This library provides fast DataFrame and CSV to Excel conversion:
 //! - Integers and floats → Excel numbers
 //! - Booleans (true/false) → Excel booleans
-//! - Dates (YYYY-MM-DD, YYYY/MM/DD) → Excel dates
-//! - Datetimes (ISO 8601) → Excel datetimes
-//! - NaN/Inf → Empty cells
+//! - Dates → Excel dates
+//! - Datetimes → Excel datetimes
+//! - NaN/Inf/None → Empty cells
 //! - Everything else → Strings
+//!
+//! Supports pandas DataFrames, polars DataFrames, and CSV files.
 
 use chrono::Timelike;
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
+use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rust_xlsxwriter::{Format, Workbook, Worksheet, XlsxError};
 use std::fs::File;
 use std::io::BufReader;
@@ -215,6 +218,316 @@ pub fn convert_csv_to_xlsx(
 }
 
 // ============================================================================
+// DataFrame support
+// ============================================================================
+
+/// Write a Python value to the worksheet, detecting type automatically
+fn write_py_value(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    value: &Bound<'_, PyAny>,
+    date_format: &Format,
+    datetime_format: &Format,
+) -> Result<(), String> {
+    // Check for None first
+    if value.is_none() {
+        worksheet
+            .write_string(row, col, "")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Check for pandas NA/NaT
+    let type_name = value
+        .get_type()
+        .name()
+        .map_err(|e| e.to_string())?
+        .to_string();
+    if type_name == "NAType" || type_name == "NaTType" {
+        worksheet
+            .write_string(row, col, "")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try boolean first (before int, since bool is subclass of int in Python)
+    if let Ok(b) = value.downcast::<PyBool>() {
+        worksheet
+            .write_boolean(row, col, b.is_true())
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try datetime (before date, since datetime is subclass of date)
+    // Check by type name since PyDateTime is not available in abi3 mode
+    if type_name == "datetime" || type_name == "Timestamp" {
+        // pandas Timestamp or datetime.datetime
+        let year: i32 = value
+            .getattr("year")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1900);
+        let month: u32 = value
+            .getattr("month")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let day: u32 = value
+            .getattr("day")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let hour: u32 = value
+            .getattr("hour")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+        let minute: u32 = value
+            .getattr("minute")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+        let second: u32 = value
+            .getattr("second")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+            if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
+                let dt = chrono::NaiveDateTime::new(date, time);
+                let excel_dt = naive_datetime_to_excel(dt);
+                worksheet
+                    .write_number_with_format(row, col, excel_dt, datetime_format)
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+    }
+
+    // Try date
+    if type_name == "date" {
+        let year: i32 = value
+            .getattr("year")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1900);
+        let month: u32 = value
+            .getattr("month")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let day: u32 = value
+            .getattr("day")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+            let excel_date = naive_date_to_excel(date);
+            worksheet
+                .write_number_with_format(row, col, excel_date, date_format)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
+    // Try integer
+    if let Ok(i) = value.downcast::<PyInt>() {
+        if let Ok(val) = i.extract::<i64>() {
+            worksheet
+                .write_number(row, col, val as f64)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
+    // Try float
+    if let Ok(f) = value.downcast::<PyFloat>() {
+        if let Ok(val) = f.extract::<f64>() {
+            if val.is_nan() || val.is_infinite() {
+                worksheet
+                    .write_string(row, col, "")
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_number(row, col, val)
+                    .map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+    }
+
+    // Try to extract as f64 (covers numpy types)
+    if let Ok(val) = value.extract::<f64>() {
+        if val.is_nan() || val.is_infinite() {
+            worksheet
+                .write_string(row, col, "")
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_number(row, col, val)
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Try to extract as i64 (covers numpy int types)
+    if let Ok(val) = value.extract::<i64>() {
+        worksheet
+            .write_number(row, col, val as f64)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try to extract as bool
+    if let Ok(val) = value.extract::<bool>() {
+        worksheet
+            .write_boolean(row, col, val)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try string
+    if let Ok(s) = value.downcast::<PyString>() {
+        worksheet
+            .write_string(row, col, s.to_string())
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Fallback: convert to string
+    let s = value.str().map_err(|e| e.to_string())?.to_string();
+    worksheet
+        .write_string(row, col, &s)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Convert a DataFrame (pandas or polars) to XLSX format
+fn convert_dataframe_to_xlsx(
+    _py: Python<'_>,
+    df: &Bound<'_, PyAny>,
+    output_path: &str,
+    sheet_name: &str,
+    include_header: bool,
+) -> Result<(u32, u16), String> {
+    // Create workbook and worksheet
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+
+    // Create formats
+    let date_format = Format::new().set_num_format("yyyy-mm-dd");
+    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+
+    let mut row_idx: u32 = 0;
+
+    // Get column names - check polars first since it also has .columns
+    let columns: Vec<String> =
+        if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
+            // polars DataFrame (has schema but no iloc)
+            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
+            cols.extract().map_err(|e| e.to_string())?
+        } else if df.hasattr("columns").unwrap_or(false) {
+            // pandas DataFrame
+            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
+            let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
+            col_list.extract().map_err(|e| e.to_string())?
+        } else {
+            return Err("Unsupported DataFrame type".to_string());
+        };
+
+    let col_count = columns.len() as u16;
+
+    // Write header if requested
+    if include_header {
+        for (col_idx, col_name) in columns.iter().enumerate() {
+            worksheet
+                .write_string(row_idx, col_idx as u16, col_name)
+                .map_err(|e| e.to_string())?;
+        }
+        row_idx += 1;
+    }
+
+    // Get row count
+    let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
+        let shape = df.getattr("shape").map_err(|e| e.to_string())?;
+        let shape_tuple: (usize, usize) = shape.extract().map_err(|e| e.to_string())?;
+        shape_tuple.0
+    } else {
+        df.call_method0("__len__")
+            .map_err(|e| e.to_string())?
+            .extract()
+            .map_err(|e| e.to_string())?
+    };
+
+    // Check if it's a polars DataFrame
+    let is_polars = df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false);
+
+    if is_polars {
+        // Polars: iterate using rows()
+        let rows = df.call_method0("iter_rows").map_err(|e| e.to_string())?;
+        let iter = rows.try_iter().map_err(|e| e.to_string())?;
+        for row_result in iter {
+            let row = row_result.map_err(|e| e.to_string())?;
+            let row_iter = row.try_iter().map_err(|e| e.to_string())?;
+            let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e: PyErr| e.to_string())?;
+
+            for (col_idx, value) in row_tuple.iter().enumerate() {
+                write_py_value(
+                    worksheet,
+                    row_idx,
+                    col_idx as u16,
+                    value,
+                    &date_format,
+                    &datetime_format,
+                )?;
+            }
+            row_idx += 1;
+        }
+    } else {
+        // Pandas: use .values for faster access
+        let values = df.getattr("values").map_err(|e| e.to_string())?;
+
+        for i in 0..row_count {
+            let row = values
+                .get_item(i)
+                .map_err(|e| format!("Failed to get row {}: {}", i, e))?;
+
+            for col_idx in 0..columns.len() {
+                let value = row
+                    .get_item(col_idx)
+                    .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
+
+                write_py_value(
+                    worksheet,
+                    row_idx,
+                    col_idx as u16,
+                    &value,
+                    &date_format,
+                    &datetime_format,
+                )?;
+            }
+            row_idx += 1;
+        }
+    }
+
+    // Save workbook
+    workbook
+        .save(output_path)
+        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+
+    Ok((row_idx, col_count))
+}
+
+// ============================================================================
 // Python bindings
 // ============================================================================
 
@@ -251,30 +564,70 @@ fn csv_to_xlsx(input_path: &str, output_path: &str, sheet_name: &str) -> PyResul
         .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
-/// Get the version of the fast_xlsx library
+/// Convert a pandas or polars DataFrame to XLSX format.
+///
+/// This function writes a DataFrame directly to an Excel XLSX file,
+/// preserving data types without intermediate CSV conversion.
+///
+/// Args:
+///     df: pandas DataFrame or polars DataFrame to export
+///     output_path: Path for the output XLSX file
+///     sheet_name: Name of the worksheet (default: "Sheet1")
+///     header: Include column names as header row (default: True)
+///
+/// Returns:
+///     Tuple of (rows, columns) written to the Excel file
+///
+/// Raises:
+///     ValueError: If the conversion fails
+///
+/// Example:
+///     >>> import xlsxturbo
+///     >>> import pandas as pd
+///     >>> df = pd.DataFrame({'name': ['Alice', 'Bob'], 'age': [30, 25]})
+///     >>> xlsxturbo.df_to_xlsx(df, "output.xlsx")
+///     (3, 2)
+#[pyfunction]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true))]
+fn df_to_xlsx(
+    py: Python<'_>,
+    df: &Bound<'_, PyAny>,
+    output_path: &str,
+    sheet_name: &str,
+    header: bool,
+) -> PyResult<(u32, u16)> {
+    convert_dataframe_to_xlsx(py, df, output_path, sheet_name, header)
+        .map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
+/// Get the version of the xlsxturbo library
 #[pyfunction]
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// fast_xlsx - High-performance CSV to XLSX converter
+/// xlsxturbo - High-performance Excel writer
 ///
-/// A Rust-powered library for converting CSV files to Excel XLSX format
-/// with automatic type detection. Up to 25x faster than pure Python solutions.
+/// A Rust-powered library for converting DataFrames and CSV files to Excel XLSX format.
+/// Up to 25x faster than pure Python solutions.
 ///
 /// Features:
+/// - Direct DataFrame support (pandas and polars)
 /// - Automatic type detection (numbers, booleans, dates, datetimes)
 /// - Proper Excel formatting for dates and times
-/// - Handles NaN/Inf gracefully
-/// - Memory-efficient streaming for large files
+/// - Handles NaN/Inf/None gracefully
+/// - Memory-efficient for large files
 ///
 /// Example:
-///     >>> import fast_xlsx
-///     >>> fast_xlsx.csv_to_xlsx("input.csv", "output.xlsx")
-///     (1000, 50)
+///     >>> import xlsxturbo
+///     >>> import pandas as pd
+///     >>> df = pd.DataFrame({'a': [1, 2], 'b': [3.14, 2.71]})
+///     >>> xlsxturbo.df_to_xlsx(df, "output.xlsx")
+///     (3, 2)
 #[pymodule]
 fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(csv_to_xlsx, m)?)?;
+    m.add_function(wrap_pyfunction!(df_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
