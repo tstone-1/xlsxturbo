@@ -1,8 +1,8 @@
 [package]
 name = "xlsxturbo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "High-performance CSV to XLSX converter with automatic type detection"
+description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 license = "MIT"
 repository = "https://github.com/tstone-1/xlsxturbo"
 keywords = ["excel", "xlsx", "csv", "converter", "performance"]
