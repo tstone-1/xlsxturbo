@@ -6,9 +6,9 @@ Planned features for xlsxturbo, ordered by priority.
 
 Features that address common use cases and add significant value.
 
-- [ ] **Column auto-width** - Automatically fit column widths to content
+- [x] **Column auto-width** - Automatically fit column widths to content (v0.3.0)
 - [ ] **Header styling** - Option for bold/colored headers
-- [ ] **Freeze panes** - Freeze header row for easier scrolling
+- [x] **Freeze panes** - Freeze header row for easier scrolling (v0.3.0)
 
 ## Medium Priority
 
@@ -17,7 +17,7 @@ Power user features for more control over output.
 - [x] **Multi-core support** - Parallel CSV parsing with rayon (~7% speedup for large files)
 - [ ] **Cell formatting options** - Custom number/date formats per column
 - [ ] **Conditional formatting** - Color scales, data bars, icon sets
-- [ ] **Named tables** - Create Excel tables with auto-filters
+- [x] **Named tables** - Create Excel tables with auto-filters and 61 built-in styles (v0.3.0)
 - [ ] **Column type hints** - Override auto-detection for specific columns
 
 ## Lower Priority

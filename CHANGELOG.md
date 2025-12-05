@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-05
+
+### Added
+- `autofit` parameter - automatically adjust column widths to fit content
+- `table_style` parameter - apply Excel table formatting with 61 built-in styles
+  - Light styles: Light1-Light21
+  - Medium styles: Medium1-Medium28
+  - Dark styles: Dark1-Dark11
+  - Tables include autofilter dropdowns and banded rows
+- `freeze_panes` parameter - freeze header row for easier scrolling
+- All new parameters available in both `df_to_xlsx()` and `dfs_to_xlsx()`
+
+### Changed
+- Updated type stubs with new parameters and documentation
+
 ## [0.2.0] - 2025-12-05
 
 ### Added

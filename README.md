@@ -5,6 +5,9 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 ## Features
 
 - **Direct DataFrame support** for pandas and polars
+- **Excel tables** - filterable tables with 61 built-in styles (banded rows, autofilter)
+- **Auto-fit columns** - automatically adjust column widths to fit content
+- **Freeze panes** - freeze header row for easier scrolling
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
 - **Parallel CSV processing** - optional multi-core parsing for large files
 - **Automatic type detection** from CSV strings and Python objects:
@@ -57,6 +60,29 @@ df_polars = pl.DataFrame({'x': [1, 2, 3], 'y': [4.0, 5.0, 6.0]})
 xlsxturbo.df_to_xlsx(df_polars, "polars_output.xlsx", sheet_name="Data")
 ```
 
+### Excel Tables with Styling
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'Product': ['Widget A', 'Widget B', 'Widget C'],
+    'Price': [19.99, 29.99, 39.99],
+    'Quantity': [100, 75, 50],
+})
+
+# Create a styled Excel table with autofilter, banded rows, and auto-fit columns
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    table_style="Medium9",   # Excel's default table style
+    autofit=True,            # Fit column widths to content
+    freeze_panes=True        # Freeze header row for scrolling
+)
+
+# Available styles: Light1-Light21, Medium1-Medium28, Dark1-Dark11
+xlsxturbo.df_to_xlsx(df, "dark_table.xlsx", table_style="Dark1", autofit=True)
+```
+
 ### Multi-Sheet Workbooks
 
 ```python
@@ -71,6 +97,12 @@ xlsxturbo.dfs_to_xlsx([
     (df1, "Products"),
     (df2, "Regions")
 ], "report.xlsx")
+
+# With styling applied to all sheets
+xlsxturbo.dfs_to_xlsx([
+    (df1, "Products"),
+    (df2, "Regions")
+], "styled_report.xlsx", table_style="Medium2", autofit=True, freeze_panes=True)
 ```
 
 ### CSV Conversion
