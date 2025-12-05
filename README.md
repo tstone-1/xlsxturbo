@@ -5,6 +5,8 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 ## Features
 
 - **Direct DataFrame support** for pandas and polars
+- **Multi-sheet workbooks** - write multiple DataFrames to one file
+- **Parallel CSV processing** - optional multi-core parsing for large files
 - **Automatic type detection** from CSV strings and Python objects:
   - Integers and floats → Excel numbers
   - `true`/`false` → Excel booleans
@@ -55,6 +57,22 @@ df_polars = pl.DataFrame({'x': [1, 2, 3], 'y': [4.0, 5.0, 6.0]})
 xlsxturbo.df_to_xlsx(df_polars, "polars_output.xlsx", sheet_name="Data")
 ```
 
+### Multi-Sheet Workbooks
+
+```python
+import xlsxturbo
+import pandas as pd
+
+# Write multiple DataFrames to separate sheets
+df1 = pd.DataFrame({'product': ['A', 'B'], 'sales': [100, 200]})
+df2 = pd.DataFrame({'region': ['East', 'West'], 'total': [500, 600]})
+
+xlsxturbo.dfs_to_xlsx([
+    (df1, "Products"),
+    (df2, "Regions")
+], "report.xlsx")
+```
+
 ### CSV Conversion
 
 ```python
@@ -67,8 +85,8 @@ print(f"Converted {rows} rows and {cols} columns")
 # Custom sheet name
 xlsxturbo.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
 
-# Check version
-print(xlsxturbo.__version__)
+# For large files (100K+ rows), use parallel processing
+xlsxturbo.csv_to_xlsx("big_data.csv", "output.xlsx", parallel=True)
 ```
 
 ## CLI Usage

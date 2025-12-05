@@ -4,6 +4,7 @@ def csv_to_xlsx(
     input_path: str,
     output_path: str,
     sheet_name: str = "Sheet1",
+    parallel: bool = False,
 ) -> tuple[int, int]:
     """
     Convert a CSV file to XLSX format with automatic type detection.
@@ -12,6 +13,8 @@ def csv_to_xlsx(
         input_path: Path to the input CSV file
         output_path: Path for the output XLSX file
         sheet_name: Name of the worksheet (default: "Sheet1")
+        parallel: Use multi-core parallel processing (default: False).
+                  Faster for large files (100K+ rows) but uses more memory.
 
     Returns:
         Tuple of (rows, columns) written to the Excel file
@@ -22,7 +25,8 @@ def csv_to_xlsx(
     Example:
         >>> import xlsxturbo
         >>> rows, cols = xlsxturbo.csv_to_xlsx("data.csv", "output.xlsx")
-        >>> print(f"Converted {rows} rows and {cols} columns")
+        >>> # For large files, use parallel processing:
+        >>> rows, cols = xlsxturbo.csv_to_xlsx("big.csv", "out.xlsx", parallel=True)
     """
     ...
 
@@ -56,6 +60,38 @@ def df_to_xlsx(
         >>> df = pd.DataFrame({'name': ['Alice', 'Bob'], 'age': [30, 25]})
         >>> rows, cols = xlsxturbo.df_to_xlsx(df, "output.xlsx")
         >>> print(f"Wrote {rows} rows and {cols} columns")
+    """
+    ...
+
+def dfs_to_xlsx(
+    sheets: list[tuple[object, str]],
+    output_path: str,
+    header: bool = True,
+) -> list[tuple[int, int]]:
+    """
+    Write multiple DataFrames to separate sheets in a single workbook.
+
+    This is a convenience function that writes multiple DataFrames to
+    separate sheets in one workbook, which is more efficient than
+    calling df_to_xlsx multiple times.
+
+    Args:
+        sheets: List of (DataFrame, sheet_name) tuples
+        output_path: Path for the output XLSX file
+        header: Include column names as header row (default: True)
+
+    Returns:
+        List of (rows, columns) tuples for each sheet
+
+    Raises:
+        ValueError: If the conversion fails
+
+    Example:
+        >>> import xlsxturbo
+        >>> import pandas as pd
+        >>> df1 = pd.DataFrame({'a': [1, 2]})
+        >>> df2 = pd.DataFrame({'b': [3, 4]})
+        >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx")
     """
     ...
 

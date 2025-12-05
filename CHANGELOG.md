@@ -5,10 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2025-12-04
+## [0.2.0] - 2025-12-05
 
 ### Added
 - `df_to_xlsx()` function for direct DataFrame export (pandas and polars)
+- `dfs_to_xlsx()` function for writing multiple DataFrames to separate sheets
+- `parallel=True` option for `csv_to_xlsx()` using multi-core processing
 - Type preservation for DataFrame columns:
   - Python int/float → Excel numbers
   - Python bool → Excel booleans
@@ -16,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - datetime.datetime / pandas.Timestamp → Excel datetimes with formatting
   - None/NaN/NaT → Empty cells
 - Type stubs for better IDE support
+- rayon dependency for parallel processing
 
 ### Changed
-- Updated documentation to include DataFrame examples
+- Updated documentation to include DataFrame and parallel processing examples
 
 ## [0.1.0] - 2025-12-04
 
