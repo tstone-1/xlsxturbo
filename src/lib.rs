@@ -14,6 +14,7 @@ use chrono::Timelike;
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
+use rayon::prelude::*;
 use rust_xlsxwriter::{Format, Workbook, Worksheet, XlsxError};
 use std::fs::File;
 use std::io::BufReader;
@@ -37,7 +38,7 @@ const DATETIME_PATTERNS: &[&str] = &[
 ];
 
 /// Represents the detected type of a cell value
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum CellValue {
     Empty,
     Integer(i64),
@@ -207,6 +208,77 @@ pub fn convert_csv_to_xlsx(
         }
 
         row_count += 1;
+    }
+
+    // Save workbook
+    workbook
+        .save(output_path)
+        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+
+    Ok((row_count, col_count))
+}
+
+/// Convert a CSV file to XLSX format using parallel processing.
+///
+/// This version reads all records into memory, parses them in parallel,
+/// then writes sequentially. Best for large files with complex type detection.
+pub fn convert_csv_to_xlsx_parallel(
+    input_path: &str,
+    output_path: &str,
+    sheet_name: &str,
+) -> Result<(u32, u16), String> {
+    // Open CSV file
+    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
+    let reader = BufReader::with_capacity(1024 * 1024, file);
+    let mut csv_reader = ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(reader);
+
+    // Read all records into memory
+    let records: Vec<Vec<String>> = csv_reader
+        .records()
+        .enumerate()
+        .map(|(row_idx, result)| {
+            result
+                .map(|record| record.iter().map(|s| s.to_string()).collect())
+                .map_err(|e| format!("CSV parse error at row {}: {}", row_idx, e))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let row_count = records.len() as u32;
+    let col_count = records.iter().map(|r| r.len()).max().unwrap_or(0) as u16;
+
+    // Parse all values in parallel
+    let parsed_rows: Vec<Vec<CellValue>> = records
+        .par_iter()
+        .map(|row| row.iter().map(|value| parse_value(value)).collect())
+        .collect();
+
+    // Create workbook and worksheet
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+
+    // Create formats for dates and datetimes
+    let date_format = Format::new().set_num_format("yyyy-mm-dd");
+    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+
+    // Write parsed values sequentially
+    for (row_idx, row) in parsed_rows.into_iter().enumerate() {
+        for (col_idx, cell_value) in row.into_iter().enumerate() {
+            write_cell(
+                worksheet,
+                row_idx as u32,
+                col_idx as u16,
+                cell_value,
+                &date_format,
+                &datetime_format,
+            )
+            .map_err(|e| format!("Write error at ({}, {}): {}", row_idx, col_idx, e))?;
+        }
     }
 
     // Save workbook
@@ -546,6 +618,8 @@ fn convert_dataframe_to_xlsx(
 ///     input_path: Path to the input CSV file
 ///     output_path: Path for the output XLSX file
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
+///     parallel: Use multi-core parallel processing (default: False).
+///               Faster for large files (100K+ rows) but uses more memory.
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -554,14 +628,24 @@ fn convert_dataframe_to_xlsx(
 ///     ValueError: If the conversion fails
 ///
 /// Example:
-///     >>> import fast_xlsx
-///     >>> rows, cols = fast_xlsx.csv_to_xlsx("data.csv", "output.xlsx")
-///     >>> print(f"Converted {rows} rows and {cols} columns")
+///     >>> import xlsxturbo
+///     >>> rows, cols = xlsxturbo.csv_to_xlsx("data.csv", "output.xlsx")
+///     >>> # For large files, use parallel processing:
+///     >>> rows, cols = xlsxturbo.csv_to_xlsx("big.csv", "out.xlsx", parallel=True)
 #[pyfunction]
-#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1"))]
-fn csv_to_xlsx(input_path: &str, output_path: &str, sheet_name: &str) -> PyResult<(u32, u16)> {
-    convert_csv_to_xlsx(input_path, output_path, sheet_name)
-        .map_err(pyo3::exceptions::PyValueError::new_err)
+#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false))]
+fn csv_to_xlsx(
+    input_path: &str,
+    output_path: &str,
+    sheet_name: &str,
+    parallel: bool,
+) -> PyResult<(u32, u16)> {
+    let result = if parallel {
+        convert_csv_to_xlsx_parallel(input_path, output_path, sheet_name)
+    } else {
+        convert_csv_to_xlsx(input_path, output_path, sheet_name)
+    };
+    result.map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 /// Convert a pandas or polars DataFrame to XLSX format.
@@ -606,6 +690,190 @@ fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Write multiple DataFrames to separate sheets in a single workbook.
+///
+/// This is a convenience function that writes multiple DataFrames to
+/// separate sheets in one workbook, which is more efficient than
+/// calling df_to_xlsx multiple times.
+///
+/// Args:
+///     sheets: List of (DataFrame, sheet_name) tuples
+///     output_path: Path for the output XLSX file
+///     header: Include column names as header row (default: True)
+///
+/// Returns:
+///     List of (rows, columns) tuples for each sheet
+///
+/// Raises:
+///     ValueError: If the conversion fails
+///
+/// Example:
+///     >>> import xlsxturbo
+///     >>> import pandas as pd
+///     >>> df1 = pd.DataFrame({'a': [1, 2]})
+///     >>> df2 = pd.DataFrame({'b': [3, 4]})
+///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx")
+#[pyfunction]
+#[pyo3(signature = (sheets, output_path, header = true))]
+fn dfs_to_xlsx(
+    _py: Python<'_>,
+    sheets: Vec<(Bound<'_, PyAny>, String)>,
+    output_path: &str,
+    header: bool,
+) -> PyResult<Vec<(u32, u16)>> {
+    let mut workbook = Workbook::new();
+    let mut stats = Vec::new();
+
+    // Create formats
+    let date_format = Format::new().set_num_format("yyyy-mm-dd");
+    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+
+    for (df, sheet_name) in sheets {
+        let worksheet = workbook.add_worksheet();
+        worksheet
+            .set_name(&sheet_name)
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "Failed to set sheet name '{}': {}",
+                    sheet_name, e
+                ))
+            })?;
+
+        let mut row_idx: u32 = 0;
+
+        // Get column names - check polars first
+        let columns: Vec<String> =
+            if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
+                let cols = df.getattr("columns").map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?;
+                cols.extract().map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?
+            } else if df.hasattr("columns").unwrap_or(false) {
+                let cols = df.getattr("columns").map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?;
+                let col_list = cols.call_method0("tolist").map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?;
+                col_list.extract().map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?
+            } else {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Unsupported DataFrame type",
+                ));
+            };
+
+        let col_count = columns.len() as u16;
+
+        // Write header if requested
+        if header {
+            for (col_idx, col_name) in columns.iter().enumerate() {
+                worksheet
+                    .write_string(row_idx, col_idx as u16, col_name)
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            }
+            row_idx += 1;
+        }
+
+        // Get row count and check if polars
+        let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
+            let shape = df.getattr("shape").map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(e.to_string())
+            })?;
+            let shape_tuple: (usize, usize) = shape.extract().map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(e.to_string())
+            })?;
+            shape_tuple.0
+        } else {
+            df.call_method0("__len__")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+                .extract()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        };
+
+        let is_polars =
+            df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false);
+
+        // Write data rows
+        if is_polars {
+            let rows = df.call_method0("iter_rows").map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(e.to_string())
+            })?;
+            let iter = rows.try_iter().map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(e.to_string())
+            })?;
+            for row_result in iter {
+                let row = row_result.map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?;
+                let row_iter = row.try_iter().map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(e.to_string())
+                })?;
+                let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e: PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+
+                for (col_idx, value) in row_tuple.iter().enumerate() {
+                    write_py_value(
+                        worksheet,
+                        row_idx,
+                        col_idx as u16,
+                        value,
+                        &date_format,
+                        &datetime_format,
+                    )
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                }
+                row_idx += 1;
+            }
+        } else {
+            let values = df.getattr("values").map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(e.to_string())
+            })?;
+            for i in 0..row_count {
+                let row = values.get_item(i).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "Failed to get row {}: {}",
+                        i, e
+                    ))
+                })?;
+
+                for col_idx in 0..columns.len() {
+                    let value = row.get_item(col_idx).map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Failed to get value at ({}, {}): {}",
+                            i, col_idx, e
+                        ))
+                    })?;
+
+                    write_py_value(
+                        worksheet,
+                        row_idx,
+                        col_idx as u16,
+                        &value,
+                        &date_format,
+                        &datetime_format,
+                    )
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                }
+                row_idx += 1;
+            }
+        }
+
+        stats.push((row_idx, col_count));
+    }
+
+    // Save workbook
+    workbook
+        .save(output_path)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Failed to save: {}", e)))?;
+
+    Ok(stats)
+}
+
 /// xlsxturbo - High-performance Excel writer
 ///
 /// A Rust-powered library for converting DataFrames and CSV files to Excel XLSX format.
@@ -628,6 +896,7 @@ fn version() -> &'static str {
 fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(csv_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(df_to_xlsx, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
