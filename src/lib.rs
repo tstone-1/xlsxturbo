@@ -15,7 +15,7 @@ use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rayon::prelude::*;
-use rust_xlsxwriter::{Format, Workbook, Worksheet, XlsxError};
+use rust_xlsxwriter::{Format, Table, TableStyle, Workbook, Worksheet, XlsxError};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -47,6 +47,75 @@ enum CellValue {
     Date(f64),     // Excel serial date
     DateTime(f64), // Excel serial datetime
     String(String),
+}
+
+/// Parse a table style string to TableStyle enum.
+/// Supports: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
+fn parse_table_style(style: &str) -> TableStyle {
+    match style {
+        "None" => TableStyle::None,
+        "Light1" => TableStyle::Light1,
+        "Light2" => TableStyle::Light2,
+        "Light3" => TableStyle::Light3,
+        "Light4" => TableStyle::Light4,
+        "Light5" => TableStyle::Light5,
+        "Light6" => TableStyle::Light6,
+        "Light7" => TableStyle::Light7,
+        "Light8" => TableStyle::Light8,
+        "Light9" => TableStyle::Light9,
+        "Light10" => TableStyle::Light10,
+        "Light11" => TableStyle::Light11,
+        "Light12" => TableStyle::Light12,
+        "Light13" => TableStyle::Light13,
+        "Light14" => TableStyle::Light14,
+        "Light15" => TableStyle::Light15,
+        "Light16" => TableStyle::Light16,
+        "Light17" => TableStyle::Light17,
+        "Light18" => TableStyle::Light18,
+        "Light19" => TableStyle::Light19,
+        "Light20" => TableStyle::Light20,
+        "Light21" => TableStyle::Light21,
+        "Medium1" => TableStyle::Medium1,
+        "Medium2" => TableStyle::Medium2,
+        "Medium3" => TableStyle::Medium3,
+        "Medium4" => TableStyle::Medium4,
+        "Medium5" => TableStyle::Medium5,
+        "Medium6" => TableStyle::Medium6,
+        "Medium7" => TableStyle::Medium7,
+        "Medium8" => TableStyle::Medium8,
+        "Medium9" => TableStyle::Medium9,
+        "Medium10" => TableStyle::Medium10,
+        "Medium11" => TableStyle::Medium11,
+        "Medium12" => TableStyle::Medium12,
+        "Medium13" => TableStyle::Medium13,
+        "Medium14" => TableStyle::Medium14,
+        "Medium15" => TableStyle::Medium15,
+        "Medium16" => TableStyle::Medium16,
+        "Medium17" => TableStyle::Medium17,
+        "Medium18" => TableStyle::Medium18,
+        "Medium19" => TableStyle::Medium19,
+        "Medium20" => TableStyle::Medium20,
+        "Medium21" => TableStyle::Medium21,
+        "Medium22" => TableStyle::Medium22,
+        "Medium23" => TableStyle::Medium23,
+        "Medium24" => TableStyle::Medium24,
+        "Medium25" => TableStyle::Medium25,
+        "Medium26" => TableStyle::Medium26,
+        "Medium27" => TableStyle::Medium27,
+        "Medium28" => TableStyle::Medium28,
+        "Dark1" => TableStyle::Dark1,
+        "Dark2" => TableStyle::Dark2,
+        "Dark3" => TableStyle::Dark3,
+        "Dark4" => TableStyle::Dark4,
+        "Dark5" => TableStyle::Dark5,
+        "Dark6" => TableStyle::Dark6,
+        "Dark7" => TableStyle::Dark7,
+        "Dark8" => TableStyle::Dark8,
+        "Dark9" => TableStyle::Dark9,
+        "Dark10" => TableStyle::Dark10,
+        "Dark11" => TableStyle::Dark11,
+        _ => TableStyle::Medium9, // Default Excel table style
+    }
 }
 
 /// Parse a string value and detect its type
@@ -485,6 +554,9 @@ fn convert_dataframe_to_xlsx(
     output_path: &str,
     sheet_name: &str,
     include_header: bool,
+    autofit: bool,
+    table_style: Option<&str>,
+    freeze_panes: bool,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -516,8 +588,8 @@ fn convert_dataframe_to_xlsx(
 
     let col_count = columns.len() as u16;
 
-    // Write header if requested
-    if include_header {
+    // Write header if requested (and not using table, since table handles headers)
+    if include_header && table_style.is_none() {
         for (col_idx, col_name) in columns.iter().enumerate() {
             worksheet
                 .write_string(row_idx, col_idx as u16, col_name)
@@ -525,6 +597,19 @@ fn convert_dataframe_to_xlsx(
         }
         row_idx += 1;
     }
+
+    // If using table with header, write header in row 0
+    let data_start_row = if table_style.is_some() && include_header {
+        for (col_idx, col_name) in columns.iter().enumerate() {
+            worksheet
+                .write_string(0, col_idx as u16, col_name)
+                .map_err(|e| e.to_string())?;
+        }
+        row_idx = 1;
+        0u32
+    } else {
+        row_idx.saturating_sub(1)
+    };
 
     // Get row count
     let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
@@ -589,6 +674,33 @@ fn convert_dataframe_to_xlsx(
             }
             row_idx += 1;
         }
+    }
+
+    // Add Excel Table if requested
+    if let Some(style_name) = table_style {
+        let style = parse_table_style(style_name);
+        let table = Table::new().set_style(style);
+
+        let last_row = row_idx.saturating_sub(1);
+        let last_col = col_count.saturating_sub(1);
+
+        if last_row >= data_start_row {
+            worksheet
+                .add_table(data_start_row, 0, last_row, last_col, &table)
+                .map_err(|e| format!("Failed to add table: {}", e))?;
+        }
+    }
+
+    // Freeze panes (freeze header row)
+    if freeze_panes && include_header {
+        worksheet
+            .set_freeze_panes(1, 0)
+            .map_err(|e| format!("Failed to freeze panes: {}", e))?;
+    }
+
+    // Autofit columns
+    if autofit {
+        worksheet.autofit();
     }
 
     // Save workbook
@@ -658,6 +770,11 @@ fn csv_to_xlsx(
 ///     output_path: Path for the output XLSX file
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
 ///     header: Include column names as header row (default: True)
+///     autofit: Automatically adjust column widths to fit content (default: False)
+///     table_style: Apply Excel table formatting with this style name (default: None).
+///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
+///                  Tables include autofilter dropdowns and banded rows.
+///     freeze_panes: Freeze the header row for easier scrolling (default: False)
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -671,16 +788,21 @@ fn csv_to_xlsx(
 ///     >>> df = pd.DataFrame({'name': ['Alice', 'Bob'], 'age': [30, 25]})
 ///     >>> xlsxturbo.df_to_xlsx(df, "output.xlsx")
 ///     (3, 2)
+///     >>> # With table formatting and auto-width columns:
+///     >>> xlsxturbo.df_to_xlsx(df, "styled.xlsx", table_style="Medium9", autofit=True, freeze_panes=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false))]
 fn df_to_xlsx(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
     output_path: &str,
     sheet_name: &str,
     header: bool,
+    autofit: bool,
+    table_style: Option<&str>,
+    freeze_panes: bool,
 ) -> PyResult<(u32, u16)> {
-    convert_dataframe_to_xlsx(py, df, output_path, sheet_name, header)
+    convert_dataframe_to_xlsx(py, df, output_path, sheet_name, header, autofit, table_style, freeze_panes)
         .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
@@ -700,6 +822,11 @@ fn version() -> &'static str {
 ///     sheets: List of (DataFrame, sheet_name) tuples
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
+///     autofit: Automatically adjust column widths to fit content (default: False)
+///     table_style: Apply Excel table formatting with this style name (default: None).
+///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
+///                  Tables include autofilter dropdowns and banded rows.
+///     freeze_panes: Freeze the header row for easier scrolling (default: False)
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -713,13 +840,19 @@ fn version() -> &'static str {
 ///     >>> df1 = pd.DataFrame({'a': [1, 2]})
 ///     >>> df2 = pd.DataFrame({'b': [3, 4]})
 ///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx")
+///     >>> # With styling applied to all sheets:
+///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sales"), (df2, "Regions")], "report.xlsx",
+///     ...                       table_style="Medium9", autofit=True, freeze_panes=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false))]
 fn dfs_to_xlsx(
     _py: Python<'_>,
     sheets: Vec<(Bound<'_, PyAny>, String)>,
     output_path: &str,
     header: bool,
+    autofit: bool,
+    table_style: Option<&str>,
+    freeze_panes: bool,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -861,6 +994,39 @@ fn dfs_to_xlsx(
                 }
                 row_idx += 1;
             }
+        }
+
+        // Add Excel Table if requested
+        if let Some(style_name) = table_style {
+            let style = parse_table_style(style_name);
+            let table = Table::new().set_style(style);
+
+            let data_start_row = 0u32;
+            let last_row = row_idx.saturating_sub(1);
+            let last_col = col_count.saturating_sub(1);
+
+            if last_row >= data_start_row {
+                worksheet
+                    .add_table(data_start_row, 0, last_row, last_col, &table)
+                    .map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Failed to add table: {}",
+                            e
+                        ))
+                    })?;
+            }
+        }
+
+        // Freeze panes (freeze header row)
+        if freeze_panes && header {
+            worksheet.set_freeze_panes(1, 0).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("Failed to freeze panes: {}", e))
+            })?;
+        }
+
+        // Autofit columns
+        if autofit {
+            worksheet.autofit();
         }
 
         stats.push((row_idx, col_count));
