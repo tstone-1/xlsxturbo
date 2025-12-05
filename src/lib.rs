@@ -802,8 +802,17 @@ fn df_to_xlsx(
     table_style: Option<&str>,
     freeze_panes: bool,
 ) -> PyResult<(u32, u16)> {
-    convert_dataframe_to_xlsx(py, df, output_path, sheet_name, header, autofit, table_style, freeze_panes)
-        .map_err(pyo3::exceptions::PyValueError::new_err)
+    convert_dataframe_to_xlsx(
+        py,
+        df,
+        output_path,
+        sheet_name,
+        header,
+        autofit,
+        table_style,
+        freeze_panes,
+    )
+    .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 /// Get the version of the xlsxturbo library
@@ -863,36 +872,33 @@ fn dfs_to_xlsx(
 
     for (df, sheet_name) in sheets {
         let worksheet = workbook.add_worksheet();
-        worksheet
-            .set_name(&sheet_name)
-            .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "Failed to set sheet name '{}': {}",
-                    sheet_name, e
-                ))
-            })?;
+        worksheet.set_name(&sheet_name).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to set sheet name '{}': {}",
+                sheet_name, e
+            ))
+        })?;
 
         let mut row_idx: u32 = 0;
 
         // Get column names - check polars first
         let columns: Vec<String> =
             if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
-                let cols = df.getattr("columns").map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                cols.extract().map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?
+                let cols = df
+                    .getattr("columns")
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                cols.extract()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
             } else if df.hasattr("columns").unwrap_or(false) {
-                let cols = df.getattr("columns").map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                let col_list = cols.call_method0("tolist").map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                col_list.extract().map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?
+                let cols = df
+                    .getattr("columns")
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                let col_list = cols
+                    .call_method0("tolist")
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                col_list
+                    .extract()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
             } else {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "Unsupported DataFrame type",
@@ -913,12 +919,12 @@ fn dfs_to_xlsx(
 
         // Get row count and check if polars
         let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
-            let shape = df.getattr("shape").map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(e.to_string())
-            })?;
-            let shape_tuple: (usize, usize) = shape.extract().map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(e.to_string())
-            })?;
+            let shape = df
+                .getattr("shape")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let shape_tuple: (usize, usize) = shape
+                .extract()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             shape_tuple.0
         } else {
             df.call_method0("__len__")
@@ -932,19 +938,18 @@ fn dfs_to_xlsx(
 
         // Write data rows
         if is_polars {
-            let rows = df.call_method0("iter_rows").map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(e.to_string())
-            })?;
-            let iter = rows.try_iter().map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(e.to_string())
-            })?;
+            let rows = df
+                .call_method0("iter_rows")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let iter = rows
+                .try_iter()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             for row_result in iter {
-                let row = row_result.map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
-                let row_iter = row.try_iter().map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(e.to_string())
-                })?;
+                let row = row_result
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                let row_iter = row
+                    .try_iter()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
                 let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e: PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
@@ -963,9 +968,9 @@ fn dfs_to_xlsx(
                 row_idx += 1;
             }
         } else {
-            let values = df.getattr("values").map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(e.to_string())
-            })?;
+            let values = df
+                .getattr("values")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             for i in 0..row_count {
                 let row = values.get_item(i).map_err(|e| {
                     pyo3::exceptions::PyValueError::new_err(format!(
