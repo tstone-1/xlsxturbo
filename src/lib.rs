@@ -548,6 +548,7 @@ fn write_py_value(
 }
 
 /// Convert a DataFrame (pandas or polars) to XLSX format
+#[allow(clippy::too_many_arguments)]
 fn convert_dataframe_to_xlsx(
     _py: Python<'_>,
     df: &Bound<'_, PyAny>,
@@ -792,6 +793,7 @@ fn csv_to_xlsx(
 ///     >>> xlsxturbo.df_to_xlsx(df, "styled.xlsx", table_style="Medium9", autofit=True, freeze_panes=True)
 #[pyfunction]
 #[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false))]
+#[allow(clippy::too_many_arguments)]
 fn df_to_xlsx(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
