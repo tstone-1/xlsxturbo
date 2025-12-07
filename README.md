@@ -7,6 +7,8 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Direct DataFrame support** for pandas and polars
 - **Excel tables** - filterable tables with 61 built-in styles (banded rows, autofilter)
 - **Auto-fit columns** - automatically adjust column widths to fit content
+- **Custom column widths** - set specific widths per column
+- **Custom row heights** - set specific heights per row
 - **Freeze panes** - freeze header row for easier scrolling
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
 - **Parallel CSV processing** - optional multi-core parsing for large files
@@ -83,6 +85,37 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 xlsxturbo.df_to_xlsx(df, "dark_table.xlsx", table_style="Dark1", autofit=True)
 ```
 
+### Custom Column Widths and Row Heights
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'Name': ['Alice', 'Bob', 'Charlie'],
+    'Department': ['Engineering', 'Marketing', 'Sales'],
+    'Salary': [75000, 65000, 55000]
+})
+
+# Set specific column widths (column index -> width in characters)
+xlsxturbo.df_to_xlsx(df, "report.xlsx", 
+    column_widths={0: 20, 1: 25, 2: 15}
+)
+
+# Set specific row heights (row index -> height in points)
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    row_heights={0: 25}  # Make header row taller
+)
+
+# Combine with other options
+xlsxturbo.df_to_xlsx(df, "styled.xlsx",
+    table_style="Medium9",
+    freeze_panes=True,
+    column_widths={0: 20, 1: 30, 2: 15},
+    row_heights={0: 22}
+)
+```
+
 ### Multi-Sheet Workbooks
 
 ```python
@@ -103,6 +136,12 @@ xlsxturbo.dfs_to_xlsx([
     (df1, "Products"),
     (df2, "Regions")
 ], "styled_report.xlsx", table_style="Medium2", autofit=True, freeze_panes=True)
+
+# With column widths applied to all sheets
+xlsxturbo.dfs_to_xlsx([
+    (df1, "Products"),
+    (df2, "Regions")
+], "report.xlsx", column_widths={0: 20, 1: 15})
 ```
 
 ### CSV Conversion

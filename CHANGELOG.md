@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `column_widths` parameter - set custom column widths by index
+  - Dict mapping column index (0-based) to width in characters
+  - Example: `column_widths={0: 25, 1: 15, 3: 30}`
+- `row_heights` parameter - set custom row heights by index
+  - Dict mapping row index (0-based) to height in points
+  - Example: `row_heights={0: 22, 5: 30}`
+- Both parameters available in `df_to_xlsx()` and `dfs_to_xlsx()`
+
 ## [0.3.0] - 2025-12-05
 
 ### Added

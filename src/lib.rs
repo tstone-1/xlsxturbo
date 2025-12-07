@@ -13,9 +13,10 @@
 use chrono::Timelike;
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use rayon::prelude::*;
 use rust_xlsxwriter::{Format, Table, TableStyle, Workbook, Worksheet, XlsxError};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -558,6 +559,8 @@ fn convert_dataframe_to_xlsx(
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
+    column_widths: Option<&HashMap<u16, f64>>,
+    row_heights: Option<&HashMap<u32, f64>>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -699,8 +702,26 @@ fn convert_dataframe_to_xlsx(
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
     }
 
-    // Autofit columns
-    if autofit {
+    // Apply custom column widths if specified
+    if let Some(widths) = column_widths {
+        for (&col_idx, &width) in widths.iter() {
+            worksheet
+                .set_column_width(col_idx, width)
+                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        }
+    }
+
+    // Apply custom row heights if specified
+    if let Some(heights) = row_heights {
+        for (&row_idx, &height) in heights.iter() {
+            worksheet
+                .set_row_height(row_idx, height)
+                .map_err(|e| format!("Failed to set row height: {}", e))?;
+        }
+    }
+
+    // Autofit columns (only for columns not explicitly set)
+    if autofit && column_widths.is_none() {
         worksheet.autofit();
     }
 
@@ -776,6 +797,10 @@ fn csv_to_xlsx(
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
+///     column_widths: Dict mapping column index (0-based) to width in characters (default: None)
+///                    Example: {0: 20, 1: 15, 3: 30} sets widths for columns A, B, and D
+///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
+///                  Example: {0: 20, 5: 30} sets heights for specific rows
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -791,8 +816,10 @@ fn csv_to_xlsx(
 ///     (3, 2)
 ///     >>> # With table formatting and auto-width columns:
 ///     >>> xlsxturbo.df_to_xlsx(df, "styled.xlsx", table_style="Medium9", autofit=True, freeze_panes=True)
+///     >>> # With custom column widths and row heights:
+///     >>> xlsxturbo.df_to_xlsx(df, "custom.xlsx", column_widths={0: 25, 1: 10}, row_heights={0: 20})
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx(
     py: Python<'_>,
@@ -803,6 +830,8 @@ fn df_to_xlsx(
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
+    column_widths: Option<HashMap<u16, f64>>,
+    row_heights: Option<HashMap<u32, f64>>,
 ) -> PyResult<(u32, u16)> {
     convert_dataframe_to_xlsx(
         py,
@@ -813,6 +842,8 @@ fn df_to_xlsx(
         autofit,
         table_style,
         freeze_panes,
+        column_widths.as_ref(),
+        row_heights.as_ref(),
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -854,8 +885,10 @@ fn version() -> &'static str {
 ///     >>> # With styling applied to all sheets:
 ///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sales"), (df2, "Regions")], "report.xlsx",
 ///     ...                       table_style="Medium9", autofit=True, freeze_panes=True)
+///     >>> # With column widths applied to all sheets:
+///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx", column_widths={0: 25})
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None))]
 fn dfs_to_xlsx(
     _py: Python<'_>,
     sheets: Vec<(Bound<'_, PyAny>, String)>,
@@ -864,6 +897,8 @@ fn dfs_to_xlsx(
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
+    column_widths: Option<HashMap<u16, f64>>,
+    row_heights: Option<HashMap<u32, f64>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -1031,8 +1066,26 @@ fn dfs_to_xlsx(
             })?;
         }
 
-        // Autofit columns
-        if autofit {
+        // Apply custom column widths if specified
+        if let Some(ref widths) = column_widths {
+            for (&col_idx, &width) in widths.iter() {
+                worksheet.set_column_width(col_idx, width).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("Failed to set column width: {}", e))
+                })?;
+            }
+        }
+
+        // Apply custom row heights if specified
+        if let Some(ref heights) = row_heights {
+            for (&row_idx_h, &height) in heights.iter() {
+                worksheet.set_row_height(row_idx_h, height).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("Failed to set row height: {}", e))
+                })?;
+            }
+        }
+
+        // Autofit columns (only for columns not explicitly set)
+        if autofit && column_widths.is_none() {
             worksheet.autofit();
         }
 
