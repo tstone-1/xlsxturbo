@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-12-07
+
+### Fixed
+- Updated type stubs to include v0.4.0 parameters (`column_widths`, `row_heights`, `constant_memory`)
+- Cleaned up ROADMAP.md
+
 ## [0.4.0] - 2025-12-07
 
 ### Added
@@ -72,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.4.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.1
 [0.4.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
