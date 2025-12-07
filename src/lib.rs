@@ -13,7 +13,7 @@
 use chrono::Timelike;
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rayon::prelude::*;
 use rust_xlsxwriter::{Format, Table, TableStyle, Workbook, Worksheet, XlsxError};
 use std::collections::HashMap;
@@ -910,6 +910,7 @@ fn version() -> &'static str {
 ///     >>> xlsxturbo.dfs_to_xlsx([(large_df, "Data")], "big.xlsx", constant_memory=True)
 #[pyfunction]
 #[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
+#[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx(
     _py: Python<'_>,
     sheets: Vec<(Bound<'_, PyAny>, String)>,
@@ -1098,7 +1099,10 @@ fn dfs_to_xlsx(
         if let Some(ref widths) = column_widths {
             for (&col_idx, &width) in widths.iter() {
                 worksheet.set_column_width(col_idx, width).map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(format!("Failed to set column width: {}", e))
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "Failed to set column width: {}",
+                        e
+                    ))
                 })?;
             }
         }
@@ -1108,7 +1112,10 @@ fn dfs_to_xlsx(
             if !constant_memory {
                 for (&row_idx_h, &height) in heights.iter() {
                     worksheet.set_row_height(row_idx_h, height).map_err(|e| {
-                        pyo3::exceptions::PyValueError::new_err(format!("Failed to set row height: {}", e))
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Failed to set row height: {}",
+                            e
+                        ))
                     })?;
                 }
             }
