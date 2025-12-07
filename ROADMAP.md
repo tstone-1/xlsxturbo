@@ -4,13 +4,18 @@ Planned features for xlsxturbo, ordered by priority.
 
 ## High Priority
 
-Features that address common use cases and add significant value.
+Features that would enable more migrations from pandas/polars write_excel.
 
 - [x] **Column auto-width** - Automatically fit column widths to content (v0.3.0)
-- [x] **Custom column widths** - Set specific widths per column
-- [x] **Custom row heights** - Set specific heights per row
-- [ ] **Header styling** - Option for bold/colored headers
+- [x] **Custom column widths** - Set specific widths per column (v0.4.0)
+- [x] **Custom row heights** - Set specific heights per row (v0.4.0)
+- [ ] **Per-sheet options in dfs_to_xlsx** - Allow different settings per sheet
+  - Currently all sheets share the same header/autofit/table_style/freeze_panes
+  - API idea: `sheets=[(df1, "Sheet1", {"header": True}), (df2, "Sheet2", {"header": False})]`
+- [ ] **Header styling** - Option for bold/colored headers (`header_format` parameter)
 - [x] **Freeze panes** - Freeze header row for easier scrolling (v0.3.0)
+- [ ] **Global column width cap** - `column_widths={'_all': value}` to limit all column widths
+- [ ] **Table name** - `table_name` parameter for named Excel tables
 
 ## Medium Priority
 
@@ -18,10 +23,10 @@ Power user features for more control over output.
 
 - [x] **Multi-core support** - Parallel CSV parsing with rayon (~7% speedup for large files)
 - [ ] **Cell formatting options** - Custom number/date formats per column
-- [ ] **Cell styling** - Background color, font color, bold, borders
+- [ ] **Cell styling** - Background color, font color, bold, borders per cell/column
 - [ ] **Merged cells** - Merge cell ranges for headers/documentation sheets
 - [ ] **Conditional formatting** - Color scales, data bars, icon sets
-- [x] **Named tables** - Create Excel tables with auto-filters and 61 built-in styles (v0.3.0)
+- [x] **Table styles** - Create Excel tables with auto-filters and 61 built-in styles (v0.3.0)
 - [ ] **Column type hints** - Override auto-detection for specific columns
 
 ## Lower Priority
@@ -30,7 +35,7 @@ Niche features for specific use cases.
 
 - [ ] **Formulas** - Add calculated columns with Excel formulas
 - [ ] **Data validation** - Dropdowns, input constraints
-- [x] **Constant memory mode** - Handle very large datasets with minimal RAM usage
+- [x] **Constant memory mode** - Handle very large datasets with minimal RAM (v0.4.0)
 - [ ] **Append mode** - Add sheets to existing workbook
 
 ## Completed
@@ -42,6 +47,6 @@ Niche features for specific use cases.
 - [x] Parallel CSV parsing with `parallel=True` (v0.2.0)
 - [x] Date/datetime formatting (v0.1.0)
 - [x] CLI tool (v0.1.0)
-- [x] Custom column widths with `column_widths` parameter
-- [x] Custom row heights with `row_heights` parameter
-- [x] Constant memory mode with `constant_memory` parameter
+- [x] Custom column widths with `column_widths` parameter (v0.4.0)
+- [x] Custom row heights with `row_heights` parameter (v0.4.0)
+- [x] Constant memory mode with `constant_memory` parameter (v0.4.0)

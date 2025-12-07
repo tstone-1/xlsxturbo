@@ -38,6 +38,9 @@ def df_to_xlsx(
     autofit: bool = False,
     table_style: str | None = None,
     freeze_panes: bool = False,
+    column_widths: dict[int, float] | None = None,
+    row_heights: dict[int, float] | None = None,
+    constant_memory: bool = False,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -55,6 +58,13 @@ def df_to_xlsx(
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
             Tables include autofilter dropdowns and banded rows.
         freeze_panes: Freeze the header row for easier scrolling (default: False)
+        column_widths: Dict mapping column index (0-based) to width in characters.
+            Example: {0: 25, 1: 15} sets column A to 25 and B to 15.
+        row_heights: Dict mapping row index (0-based) to height in points.
+            Example: {0: 22, 5: 30} sets row 1 to 22pt and row 6 to 30pt.
+        constant_memory: Use streaming mode for minimal RAM usage (default: False).
+            Ideal for very large files (millions of rows). Note: Disables
+            table_style, freeze_panes, row_heights, and autofit.
 
     Returns:
         Tuple of (rows, columns) written to the Excel file
@@ -70,6 +80,8 @@ def df_to_xlsx(
         >>> print(f"Wrote {rows} rows and {cols} columns")
         >>> # With table formatting and auto-width columns:
         >>> xlsxturbo.df_to_xlsx(df, "styled.xlsx", table_style="Medium9", autofit=True, freeze_panes=True)
+        >>> # For very large files with minimal memory:
+        >>> xlsxturbo.df_to_xlsx(big_df, "big.xlsx", constant_memory=True)
     """
     ...
 
@@ -80,6 +92,9 @@ def dfs_to_xlsx(
     autofit: bool = False,
     table_style: str | None = None,
     freeze_panes: bool = False,
+    column_widths: dict[int, float] | None = None,
+    row_heights: dict[int, float] | None = None,
+    constant_memory: bool = False,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -97,6 +112,12 @@ def dfs_to_xlsx(
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
             Tables include autofilter dropdowns and banded rows.
         freeze_panes: Freeze the header row for easier scrolling (default: False)
+        column_widths: Dict mapping column index (0-based) to width in characters.
+            Applied to all sheets. Example: {0: 25, 1: 15}.
+        row_heights: Dict mapping row index (0-based) to height in points.
+            Applied to all sheets. Example: {0: 22, 5: 30}.
+        constant_memory: Use streaming mode for minimal RAM usage (default: False).
+            Note: Disables table_style, freeze_panes, row_heights, and autofit.
 
     Returns:
         List of (rows, columns) tuples for each sheet
