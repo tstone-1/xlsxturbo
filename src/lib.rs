@@ -561,10 +561,15 @@ fn convert_dataframe_to_xlsx(
     freeze_panes: bool,
     column_widths: Option<&HashMap<u16, f64>>,
     row_heights: Option<&HashMap<u32, f64>>,
+    constant_memory: bool,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
-    let worksheet = workbook.add_worksheet();
+    let worksheet = if constant_memory {
+        workbook.add_worksheet_with_constant_memory()
+    } else {
+        workbook.add_worksheet()
+    };
     worksheet
         .set_name(sheet_name)
         .map_err(|e| format!("Failed to set sheet name: {}", e))?;
@@ -680,23 +685,25 @@ fn convert_dataframe_to_xlsx(
         }
     }
 
-    // Add Excel Table if requested
+    // Add Excel Table if requested (not supported in constant_memory mode)
     if let Some(style_name) = table_style {
-        let style = parse_table_style(style_name);
-        let table = Table::new().set_style(style);
+        if !constant_memory {
+            let style = parse_table_style(style_name);
+            let table = Table::new().set_style(style);
 
-        let last_row = row_idx.saturating_sub(1);
-        let last_col = col_count.saturating_sub(1);
+            let last_row = row_idx.saturating_sub(1);
+            let last_col = col_count.saturating_sub(1);
 
-        if last_row >= data_start_row {
-            worksheet
-                .add_table(data_start_row, 0, last_row, last_col, &table)
-                .map_err(|e| format!("Failed to add table: {}", e))?;
+            if last_row >= data_start_row {
+                worksheet
+                    .add_table(data_start_row, 0, last_row, last_col, &table)
+                    .map_err(|e| format!("Failed to add table: {}", e))?;
+            }
         }
     }
 
-    // Freeze panes (freeze header row)
-    if freeze_panes && include_header {
+    // Freeze panes (freeze header row) - not supported in constant_memory mode
+    if freeze_panes && include_header && !constant_memory {
         worksheet
             .set_freeze_panes(1, 0)
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
@@ -711,17 +718,19 @@ fn convert_dataframe_to_xlsx(
         }
     }
 
-    // Apply custom row heights if specified
+    // Apply custom row heights if specified (not supported in constant_memory mode)
     if let Some(heights) = row_heights {
-        for (&row_idx, &height) in heights.iter() {
-            worksheet
-                .set_row_height(row_idx, height)
-                .map_err(|e| format!("Failed to set row height: {}", e))?;
+        if !constant_memory {
+            for (&row_idx, &height) in heights.iter() {
+                worksheet
+                    .set_row_height(row_idx, height)
+                    .map_err(|e| format!("Failed to set row height: {}", e))?;
+            }
         }
     }
 
-    // Autofit columns (only for columns not explicitly set)
-    if autofit && column_widths.is_none() {
+    // Autofit columns (only for columns not explicitly set, not supported in constant_memory mode)
+    if autofit && column_widths.is_none() && !constant_memory {
         worksheet.autofit();
     }
 
@@ -801,6 +810,9 @@ fn csv_to_xlsx(
 ///                    Example: {0: 20, 1: 15, 3: 30} sets widths for columns A, B, and D
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///                  Example: {0: 20, 5: 30} sets heights for specific rows
+///     constant_memory: Use constant memory mode for large files (default: False).
+///                      Reduces memory usage but disables table_style, freeze_panes,
+///                      row_heights, and autofit features.
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -818,8 +830,10 @@ fn csv_to_xlsx(
 ///     >>> xlsxturbo.df_to_xlsx(df, "styled.xlsx", table_style="Medium9", autofit=True, freeze_panes=True)
 ///     >>> # With custom column widths and row heights:
 ///     >>> xlsxturbo.df_to_xlsx(df, "custom.xlsx", column_widths={0: 25, 1: 10}, row_heights={0: 20})
+///     >>> # For very large files, use constant_memory mode:
+///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx(
     py: Python<'_>,
@@ -832,6 +846,7 @@ fn df_to_xlsx(
     freeze_panes: bool,
     column_widths: Option<HashMap<u16, f64>>,
     row_heights: Option<HashMap<u32, f64>>,
+    constant_memory: bool,
 ) -> PyResult<(u32, u16)> {
     convert_dataframe_to_xlsx(
         py,
@@ -844,6 +859,7 @@ fn df_to_xlsx(
         freeze_panes,
         column_widths.as_ref(),
         row_heights.as_ref(),
+        constant_memory,
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -869,6 +885,9 @@ fn version() -> &'static str {
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
+///     constant_memory: Use constant memory mode for large files (default: False).
+///                      Reduces memory usage but disables table_style, freeze_panes,
+///                      row_heights, and autofit features.
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -887,8 +906,10 @@ fn version() -> &'static str {
 ///     ...                       table_style="Medium9", autofit=True, freeze_panes=True)
 ///     >>> # With column widths applied to all sheets:
 ///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx", column_widths={0: 25})
+///     >>> # For very large files, use constant_memory mode:
+///     >>> xlsxturbo.dfs_to_xlsx([(large_df, "Data")], "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
 fn dfs_to_xlsx(
     _py: Python<'_>,
     sheets: Vec<(Bound<'_, PyAny>, String)>,
@@ -899,6 +920,7 @@ fn dfs_to_xlsx(
     freeze_panes: bool,
     column_widths: Option<HashMap<u16, f64>>,
     row_heights: Option<HashMap<u32, f64>>,
+    constant_memory: bool,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -908,7 +930,11 @@ fn dfs_to_xlsx(
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
 
     for (df, sheet_name) in sheets {
-        let worksheet = workbook.add_worksheet();
+        let worksheet = if constant_memory {
+            workbook.add_worksheet_with_constant_memory()
+        } else {
+            workbook.add_worksheet()
+        };
         worksheet.set_name(&sheet_name).map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
                 "Failed to set sheet name '{}': {}",
@@ -1038,29 +1064,31 @@ fn dfs_to_xlsx(
             }
         }
 
-        // Add Excel Table if requested
+        // Add Excel Table if requested (not supported in constant_memory mode)
         if let Some(style_name) = table_style {
-            let style = parse_table_style(style_name);
-            let table = Table::new().set_style(style);
+            if !constant_memory {
+                let style = parse_table_style(style_name);
+                let table = Table::new().set_style(style);
 
-            let data_start_row = 0u32;
-            let last_row = row_idx.saturating_sub(1);
-            let last_col = col_count.saturating_sub(1);
+                let data_start_row = 0u32;
+                let last_row = row_idx.saturating_sub(1);
+                let last_col = col_count.saturating_sub(1);
 
-            if last_row >= data_start_row {
-                worksheet
-                    .add_table(data_start_row, 0, last_row, last_col, &table)
-                    .map_err(|e| {
-                        pyo3::exceptions::PyValueError::new_err(format!(
-                            "Failed to add table: {}",
-                            e
-                        ))
-                    })?;
+                if last_row >= data_start_row {
+                    worksheet
+                        .add_table(data_start_row, 0, last_row, last_col, &table)
+                        .map_err(|e| {
+                            pyo3::exceptions::PyValueError::new_err(format!(
+                                "Failed to add table: {}",
+                                e
+                            ))
+                        })?;
+                }
             }
         }
 
-        // Freeze panes (freeze header row)
-        if freeze_panes && header {
+        // Freeze panes (freeze header row) - not supported in constant_memory mode
+        if freeze_panes && header && !constant_memory {
             worksheet.set_freeze_panes(1, 0).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!("Failed to freeze panes: {}", e))
             })?;
@@ -1075,17 +1103,19 @@ fn dfs_to_xlsx(
             }
         }
 
-        // Apply custom row heights if specified
+        // Apply custom row heights if specified (not supported in constant_memory mode)
         if let Some(ref heights) = row_heights {
-            for (&row_idx_h, &height) in heights.iter() {
-                worksheet.set_row_height(row_idx_h, height).map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(format!("Failed to set row height: {}", e))
-                })?;
+            if !constant_memory {
+                for (&row_idx_h, &height) in heights.iter() {
+                    worksheet.set_row_height(row_idx_h, height).map_err(|e| {
+                        pyo3::exceptions::PyValueError::new_err(format!("Failed to set row height: {}", e))
+                    })?;
+                }
             }
         }
 
-        // Autofit columns (only for columns not explicitly set)
-        if autofit && column_widths.is_none() {
+        // Autofit columns (only for columns not explicitly set, not supported in constant_memory mode)
+        if autofit && column_widths.is_none() && !constant_memory {
             worksheet.autofit();
         }
 

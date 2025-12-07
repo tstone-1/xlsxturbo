@@ -30,7 +30,7 @@ Niche features for specific use cases.
 
 - [ ] **Formulas** - Add calculated columns with Excel formulas
 - [ ] **Data validation** - Dropdowns, input constraints
-- [ ] **Streaming write** - Handle datasets larger than available RAM
+- [x] **Constant memory mode** - Handle very large datasets with minimal RAM usage
 - [ ] **Append mode** - Add sheets to existing workbook
 
 ## Completed
@@ -44,3 +44,4 @@ Niche features for specific use cases.
 - [x] CLI tool (v0.1.0)
 - [x] Custom column widths with `column_widths` parameter
 - [x] Custom row heights with `row_heights` parameter
+- [x] Constant memory mode with `constant_memory` parameter
