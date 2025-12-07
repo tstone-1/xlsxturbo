@@ -8,13 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `constant_memory` parameter - minimize RAM usage for very large files
+  - Uses rust_xlsxwriter's streaming mode to flush rows to disk
+  - Ideal for files with millions of rows
+  - Note: Disables `table_style`, `freeze_panes`, `row_heights`, and `autofit`
+  - Column widths still work in constant memory mode
+  - Example: `xlsxturbo.df_to_xlsx(df, "big.xlsx", constant_memory=True)`
 - `column_widths` parameter - set custom column widths by index
   - Dict mapping column index (0-based) to width in characters
   - Example: `column_widths={0: 25, 1: 15, 3: 30}`
 - `row_heights` parameter - set custom row heights by index
   - Dict mapping row index (0-based) to height in points
   - Example: `row_heights={0: 22, 5: 30}`
-- Both parameters available in `df_to_xlsx()` and `dfs_to_xlsx()`
+- All new parameters available in `df_to_xlsx()` and `dfs_to_xlsx()`
 
 ## [0.3.0] - 2025-12-05
 

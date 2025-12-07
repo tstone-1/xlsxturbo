@@ -11,6 +11,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Custom row heights** - set specific heights per row
 - **Freeze panes** - freeze header row for easier scrolling
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
+- **Constant memory mode** - minimize RAM usage for very large files
 - **Parallel CSV processing** - optional multi-core parsing for large files
 - **Automatic type detection** from CSV strings and Python objects:
   - Integers and floats → Excel numbers
@@ -143,6 +144,37 @@ xlsxturbo.dfs_to_xlsx([
     (df2, "Regions")
 ], "report.xlsx", column_widths={0: 20, 1: 15})
 ```
+
+### Constant Memory Mode (Large Files)
+
+For very large files (millions of rows), use `constant_memory=True` to minimize RAM usage:
+
+```python
+import xlsxturbo
+import polars as pl
+
+# Generate a large DataFrame
+large_df = pl.DataFrame({
+    'id': range(1_000_000),
+    'value': [i * 1.5 for i in range(1_000_000)]
+})
+
+# Use constant_memory mode for large files
+xlsxturbo.df_to_xlsx(large_df, "big_file.xlsx", constant_memory=True)
+
+# Also works with dfs_to_xlsx
+xlsxturbo.dfs_to_xlsx([
+    (large_df, "Data")
+], "multi_sheet.xlsx", constant_memory=True)
+```
+
+**Note:** Constant memory mode disables some features that require random access:
+- `table_style` (Excel tables)
+- `freeze_panes`
+- `row_heights`
+- `autofit`
+
+Column widths still work in constant memory mode.
 
 ### CSV Conversion
 
