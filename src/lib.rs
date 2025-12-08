@@ -51,13 +51,15 @@ enum CellValue {
 }
 
 /// Per-sheet configuration options (all optional, defaults to global settings)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct SheetConfig {
     header: Option<bool>,
     autofit: Option<bool>,
     table_style: Option<Option<String>>, // None = use default, Some(None) = explicitly no style
     freeze_panes: Option<bool>,
-    column_widths: Option<HashMap<u16, f64>>,
+    column_widths: Option<HashMap<String, f64>>, // Keys: "0", "1", "_all" for global cap
+    table_name: Option<String>,
+    header_format: Option<HashMap<String, PyObject>>,
     row_heights: Option<HashMap<u32, f64>>,
 }
 
@@ -108,12 +110,44 @@ fn extract_sheet_info<'py>(
         }
         if let Ok(val) = opts.get_item("column_widths") {
             if !val.is_none() {
-                config.column_widths = Some(val.extract()?);
+                // Support both integer keys {0: 20} and string keys {"_all": 50}
+                let mut widths: HashMap<String, f64> = HashMap::new();
+                if let Ok(dict) = val.downcast::<pyo3::types::PyDict>() {
+                    for (k, v) in dict.iter() {
+                        let key_str = if let Ok(i) = k.extract::<i64>() {
+                            i.to_string()
+                        } else {
+                            k.extract::<String>()?
+                        };
+                        widths.insert(key_str, v.extract()?);
+                    }
+                }
+                if !widths.is_empty() {
+                    config.column_widths = Some(widths);
+                }
             }
         }
         if let Ok(val) = opts.get_item("row_heights") {
             if !val.is_none() {
                 config.row_heights = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("table_name") {
+            if !val.is_none() {
+                config.table_name = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("header_format") {
+            if !val.is_none() {
+                let mut fmt: HashMap<String, PyObject> = HashMap::new();
+                if let Ok(dict) = val.downcast::<pyo3::types::PyDict>() {
+                    for (k, v) in dict.iter() {
+                        fmt.insert(k.extract()?, v.unbind());
+                    }
+                }
+                if !fmt.is_empty() {
+                    config.header_format = Some(fmt);
+                }
             }
         }
 
@@ -192,6 +226,191 @@ fn parse_table_style(style: &str) -> TableStyle {
         "Dark11" => TableStyle::Dark11,
         _ => TableStyle::Medium9, // Default Excel table style
     }
+}
+
+/// Apply column widths to worksheet, supporting '_all' global cap
+fn apply_column_widths(
+    worksheet: &mut Worksheet,
+    col_count: u16,
+    widths: &HashMap<String, f64>,
+) -> Result<(), String> {
+    let global_width = widths.get("_all").copied();
+
+    for col_idx in 0..col_count {
+        let col_key = col_idx.to_string();
+        // Specific column overrides '_all'
+        if let Some(width) = widths.get(&col_key) {
+            worksheet
+                .set_column_width(col_idx, *width)
+                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        } else if let Some(width) = global_width {
+            worksheet
+                .set_column_width(col_idx, width)
+                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Apply column widths with autofit cap: autofit first, then cap columns at '_all' width
+fn apply_column_widths_with_autofit_cap(
+    worksheet: &mut Worksheet,
+    col_count: u16,
+    widths: &HashMap<String, f64>,
+    constant_memory: bool,
+) -> Result<(), String> {
+    // First autofit
+    if !constant_memory {
+        worksheet.autofit();
+    }
+
+    // Then apply specific widths and cap at '_all' if specified
+    let global_cap = widths.get("_all").copied();
+
+    for col_idx in 0..col_count {
+        let col_key = col_idx.to_string();
+        if let Some(width) = widths.get(&col_key) {
+            // Specific width overrides autofit completely
+            worksheet
+                .set_column_width(col_idx, *width)
+                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        } else if let Some(cap) = global_cap {
+            // '_all' acts as a cap - only set if current width exceeds cap
+            // Since we can't read current width, just set the cap
+            worksheet
+                .set_column_width(col_idx, cap)
+                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Extract column_widths from Python dict, supporting both integer and string keys
+fn extract_column_widths(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, f64>> {
+    let mut widths: HashMap<String, f64> = HashMap::new();
+    for (k, v) in py_dict.iter() {
+        let key_str = if let Ok(i) = k.extract::<i64>() {
+            i.to_string()
+        } else {
+            k.extract::<String>()?
+        };
+        widths.insert(key_str, v.extract()?);
+    }
+    Ok(widths)
+}
+
+/// Extract header_format from Python dict
+fn extract_header_format(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, PyObject>> {
+    let mut fmt: HashMap<String, PyObject> = HashMap::new();
+    for (k, v) in py_dict.iter() {
+        fmt.insert(k.extract()?, v.unbind());
+    }
+    Ok(fmt)
+}
+
+/// Sanitize table name for Excel (alphanumeric + underscore, must start with letter/underscore)
+fn sanitize_table_name(name: &str) -> String {
+    let mut sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    // Must start with letter or underscore
+    if sanitized.chars().next().is_none_or(|c| c.is_ascii_digit()) {
+        sanitized = format!("_{}", sanitized);
+    }
+
+    // Max 255 chars
+    sanitized.truncate(255);
+    sanitized
+}
+
+/// Parse color string (hex #RRGGBB or named color) to u32
+fn parse_color(color_str: &str) -> Result<u32, String> {
+    let color = color_str.trim();
+    if let Some(hex) = color.strip_prefix('#') {
+        u32::from_str_radix(hex, 16).map_err(|_| format!("Invalid hex color: {}", color))
+    } else {
+        match color.to_lowercase().as_str() {
+            "white" => Ok(0xFFFFFF),
+            "black" => Ok(0x000000),
+            "red" => Ok(0xFF0000),
+            "green" => Ok(0x00FF00),
+            "blue" => Ok(0x0000FF),
+            "yellow" => Ok(0xFFFF00),
+            "cyan" => Ok(0x00FFFF),
+            "magenta" => Ok(0xFF00FF),
+            "gray" | "grey" => Ok(0x808080),
+            "silver" => Ok(0xC0C0C0),
+            "orange" => Ok(0xFFA500),
+            "purple" => Ok(0x800080),
+            "navy" => Ok(0x000080),
+            "teal" => Ok(0x008080),
+            "maroon" => Ok(0x800000),
+            _ => Err(format!("Unknown color: {}", color)),
+        }
+    }
+}
+
+/// Parse header format dictionary into rust_xlsxwriter Format
+fn parse_header_format(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, PyObject>,
+) -> Result<Format, String> {
+    let mut format = Format::new();
+
+    if let Some(bold_obj) = fmt_dict.get("bold") {
+        let bold: bool = bold_obj.bind(py).extract().unwrap_or(false);
+        if bold {
+            format = format.set_bold();
+        }
+    }
+
+    if let Some(italic_obj) = fmt_dict.get("italic") {
+        let italic: bool = italic_obj.bind(py).extract().unwrap_or(false);
+        if italic {
+            format = format.set_italic();
+        }
+    }
+
+    if let Some(bg_obj) = fmt_dict.get("bg_color") {
+        if let Ok(color_str) = bg_obj.bind(py).extract::<String>() {
+            let color = parse_color(&color_str)?;
+            format = format.set_background_color(color);
+        }
+    }
+
+    if let Some(font_obj) = fmt_dict.get("font_color") {
+        if let Ok(color_str) = font_obj.bind(py).extract::<String>() {
+            let color = parse_color(&color_str)?;
+            format = format.set_font_color(color);
+        }
+    }
+
+    if let Some(size_obj) = fmt_dict.get("font_size") {
+        if let Ok(size) = size_obj.bind(py).extract::<f64>() {
+            format = format.set_font_size(size);
+        }
+    }
+
+    if let Some(underline_obj) = fmt_dict.get("underline") {
+        let underline: bool = underline_obj.bind(py).extract().unwrap_or(false);
+        if underline {
+            format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
+        }
+    }
+
+    Ok(format)
 }
 
 /// Parse a string value and detect its type
@@ -626,7 +845,7 @@ fn write_py_value(
 /// Convert a DataFrame (pandas or polars) to XLSX format
 #[allow(clippy::too_many_arguments)]
 fn convert_dataframe_to_xlsx(
-    _py: Python<'_>,
+    py: Python<'_>,
     df: &Bound<'_, PyAny>,
     output_path: &str,
     sheet_name: &str,
@@ -634,7 +853,9 @@ fn convert_dataframe_to_xlsx(
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
-    column_widths: Option<&HashMap<u16, f64>>,
+    column_widths: Option<&HashMap<String, f64>>,
+    table_name: Option<&str>,
+    header_format: Option<&HashMap<String, PyObject>>,
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
 ) -> Result<(u32, u16), String> {
@@ -652,6 +873,13 @@ fn convert_dataframe_to_xlsx(
     // Create formats
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+
+    // Parse header format if provided
+    let header_fmt = if let Some(fmt_dict) = header_format {
+        Some(parse_header_format(py, fmt_dict)?)
+    } else {
+        None
+    };
 
     let mut row_idx: u32 = 0;
 
@@ -675,9 +903,15 @@ fn convert_dataframe_to_xlsx(
     // Write header if requested (and not using table, since table handles headers)
     if include_header && table_style.is_none() {
         for (col_idx, col_name) in columns.iter().enumerate() {
-            worksheet
-                .write_string(row_idx, col_idx as u16, col_name)
-                .map_err(|e| e.to_string())?;
+            if let Some(ref fmt) = header_fmt {
+                worksheet
+                    .write_string_with_format(row_idx, col_idx as u16, col_name, fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_string(row_idx, col_idx as u16, col_name)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         row_idx += 1;
     }
@@ -685,9 +919,15 @@ fn convert_dataframe_to_xlsx(
     // If using table with header, write header in row 0
     let data_start_row = if table_style.is_some() && include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
-            worksheet
-                .write_string(0, col_idx as u16, col_name)
-                .map_err(|e| e.to_string())?;
+            if let Some(ref fmt) = header_fmt {
+                worksheet
+                    .write_string_with_format(0, col_idx as u16, col_name, fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_string(0, col_idx as u16, col_name)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         row_idx = 1;
         0u32
@@ -764,7 +1004,13 @@ fn convert_dataframe_to_xlsx(
     if let Some(style_name) = table_style {
         if !constant_memory {
             let style = parse_table_style(style_name);
-            let table = Table::new().set_style(style);
+            let mut table = Table::new().set_style(style);
+
+            // Apply table name if provided
+            if let Some(name) = table_name {
+                let sanitized = sanitize_table_name(name);
+                table = table.set_name(&sanitized);
+            }
 
             let last_row = row_idx.saturating_sub(1);
             let last_col = col_count.saturating_sub(1);
@@ -784,29 +1030,29 @@ fn convert_dataframe_to_xlsx(
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
     }
 
-    // Apply custom column widths if specified
+    // Apply custom column widths and/or autofit
     if let Some(widths) = column_widths {
-        for (&col_idx, &width) in widths.iter() {
-            worksheet
-                .set_column_width(col_idx, width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
+        if autofit && widths.contains_key("_all") && !constant_memory {
+            // Autofit first, then apply cap from '_all' and specific widths
+            apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)?;
+        } else {
+            // Just apply the specified widths
+            apply_column_widths(worksheet, col_count, widths)?;
         }
+    } else if autofit && !constant_memory {
+        // Just autofit, no width constraints
+        worksheet.autofit();
     }
 
     // Apply custom row heights if specified (not supported in constant_memory mode)
     if let Some(heights) = row_heights {
         if !constant_memory {
-            for (&row_idx, &height) in heights.iter() {
+            for (&row_idx_h, &height) in heights.iter() {
                 worksheet
-                    .set_row_height(row_idx, height)
+                    .set_row_height(row_idx_h, height)
                     .map_err(|e| format!("Failed to set row height: {}", e))?;
             }
         }
-    }
-
-    // Autofit columns (only for columns not explicitly set, not supported in constant_memory mode)
-    if autofit && column_widths.is_none() && !constant_memory {
-        worksheet.autofit();
     }
 
     // Save workbook
@@ -908,21 +1154,45 @@ fn csv_to_xlsx(
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false))]
 #[allow(clippy::too_many_arguments)]
-fn df_to_xlsx(
-    py: Python<'_>,
-    df: &Bound<'_, PyAny>,
+fn df_to_xlsx<'py>(
+    py: Python<'py>,
+    df: &Bound<'py, PyAny>,
     output_path: &str,
     sheet_name: &str,
     header: bool,
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
-    column_widths: Option<HashMap<u16, f64>>,
+    column_widths: Option<&Bound<'py, PyAny>>,
+    table_name: Option<String>,
+    header_format: Option<&Bound<'py, PyAny>>,
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
 ) -> PyResult<(u32, u16)> {
+    // Extract column_widths if provided
+    let extracted_column_widths = if let Some(cw) = column_widths {
+        if let Ok(dict) = cw.downcast::<pyo3::types::PyDict>() {
+            Some(extract_column_widths(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract header_format if provided
+    let extracted_header_format = if let Some(hf) = header_format {
+        if let Ok(dict) = hf.downcast::<pyo3::types::PyDict>() {
+            Some(extract_header_format(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     convert_dataframe_to_xlsx(
         py,
         df,
@@ -932,7 +1202,9 @@ fn df_to_xlsx(
         autofit,
         table_style,
         freeze_panes,
-        column_widths.as_ref(),
+        extracted_column_widths.as_ref(),
+        table_name.as_deref(),
+        extracted_header_format.as_ref(),
         row_heights.as_ref(),
         constant_memory,
     )
@@ -956,7 +1228,7 @@ fn version() -> &'static str {
 ///             - (DataFrame, sheet_name) - uses global defaults
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
-///             column_widths, row_heights
+///             column_widths, row_heights, table_name, header_format
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -964,9 +1236,13 @@ fn version() -> &'static str {
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
+///     column_widths: Dict mapping column index or "_all" to width in characters (default: None)
+///                    Example: {0: 20, "_all": 50} sets col A to 20, caps others at 50
+///     table_name: Name for Excel table (default: auto-generated)
+///     header_format: Dict with header cell formatting options (default: None)
+///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
+///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///     constant_memory: Use constant memory mode for large files (default: False).
-///                      Reduces memory usage but disables table_style, freeze_panes,
-///                      row_heights, and autofit features.
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -989,26 +1265,57 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false))]
 #[allow(clippy::too_many_arguments)]
-fn dfs_to_xlsx(
-    _py: Python<'_>,
-    sheets: Vec<Bound<'_, PyAny>>,
+fn dfs_to_xlsx<'py>(
+    py: Python<'py>,
+    sheets: Vec<Bound<'py, PyAny>>,
     output_path: &str,
     header: bool,
     autofit: bool,
     table_style: Option<&str>,
     freeze_panes: bool,
-    column_widths: Option<HashMap<u16, f64>>,
+    column_widths: Option<&Bound<'py, PyAny>>,
+    table_name: Option<String>,
+    header_format: Option<&Bound<'py, PyAny>>,
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
 
+    // Extract global column_widths if provided
+    let extracted_column_widths = if let Some(cw) = column_widths {
+        if let Ok(dict) = cw.downcast::<pyo3::types::PyDict>() {
+            Some(extract_column_widths(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global header_format if provided
+    let extracted_header_format = if let Some(hf) = header_format {
+        if let Ok(dict) = hf.downcast::<pyo3::types::PyDict>() {
+            Some(extract_header_format(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Create formats
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+
+    // Parse global header format if provided
+    let global_header_fmt = if let Some(ref fmt_dict) = extracted_header_format {
+        Some(parse_header_format(py, fmt_dict).map_err(pyo3::exceptions::PyValueError::new_err)?)
+    } else {
+        None
+    };
 
     for sheet_tuple in sheets {
         // Extract sheet info (supports both 2-tuple and 3-tuple formats)
@@ -1018,15 +1325,26 @@ fn dfs_to_xlsx(
         let effective_header = sheet_config.header.unwrap_or(header);
         let effective_autofit = sheet_config.autofit.unwrap_or(autofit);
         let effective_table_style: Option<String> = match sheet_config.table_style {
-            Some(style_opt) => style_opt, // Per-sheet override (could be Some(str) or None)
-            None => table_style.map(|s| s.to_string()), // Use global default
+            Some(style_opt) => style_opt,
+            None => table_style.map(|s| s.to_string()),
         };
         let effective_freeze_panes = sheet_config.freeze_panes.unwrap_or(freeze_panes);
         let effective_column_widths = sheet_config
             .column_widths
             .as_ref()
-            .or(column_widths.as_ref());
+            .or(extracted_column_widths.as_ref());
         let effective_row_heights = sheet_config.row_heights.as_ref().or(row_heights.as_ref());
+        let effective_table_name = sheet_config.table_name.as_ref().or(table_name.as_ref());
+
+        // Parse per-sheet header format or use global
+        let effective_header_fmt = if let Some(ref fmt_dict) = sheet_config.header_format {
+            Some(
+                parse_header_format(py, fmt_dict)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?,
+            )
+        } else {
+            global_header_fmt.clone()
+        };
 
         let worksheet = if constant_memory {
             workbook.add_worksheet_with_constant_memory()
@@ -1071,9 +1389,15 @@ fn dfs_to_xlsx(
         // Write header if requested
         if effective_header {
             for (col_idx, col_name) in columns.iter().enumerate() {
-                worksheet
-                    .write_string(row_idx, col_idx as u16, col_name)
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                if let Some(ref fmt) = effective_header_fmt {
+                    worksheet
+                        .write_string_with_format(row_idx, col_idx as u16, col_name, fmt)
+                        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                } else {
+                    worksheet
+                        .write_string(row_idx, col_idx as u16, col_name)
+                        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                }
             }
             row_idx += 1;
         }
@@ -1166,7 +1490,13 @@ fn dfs_to_xlsx(
         if let Some(ref style_name) = effective_table_style {
             if !constant_memory {
                 let style = parse_table_style(style_name);
-                let table = Table::new().set_style(style);
+                let mut table = Table::new().set_style(style);
+
+                // Apply table name if provided
+                if let Some(name) = effective_table_name {
+                    let sanitized = sanitize_table_name(name);
+                    table = table.set_name(&sanitized);
+                }
 
                 let data_start_row = 0u32;
                 let last_row = row_idx.saturating_sub(1);
@@ -1192,16 +1522,20 @@ fn dfs_to_xlsx(
             })?;
         }
 
-        // Apply custom column widths if specified
+        // Apply custom column widths and/or autofit
         if let Some(widths) = effective_column_widths {
-            for (&col_idx, &width) in widths.iter() {
-                worksheet.set_column_width(col_idx, width).map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
-                        "Failed to set column width: {}",
-                        e
-                    ))
-                })?;
+            if effective_autofit && widths.contains_key("_all") && !constant_memory {
+                // Autofit first, then apply cap from '_all' and specific widths
+                apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            } else {
+                // Just apply the specified widths
+                apply_column_widths(worksheet, col_count, widths)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
             }
+        } else if effective_autofit && !constant_memory {
+            // Just autofit, no width constraints
+            worksheet.autofit();
         }
 
         // Apply custom row heights if specified (not supported in constant_memory mode)
@@ -1216,11 +1550,6 @@ fn dfs_to_xlsx(
                     })?;
                 }
             }
-        }
-
-        // Autofit columns (only for columns not explicitly set, not supported in constant_memory mode)
-        if effective_autofit && effective_column_widths.is_none() && !constant_memory {
-            worksheet.autofit();
         }
 
         stats.push((row_idx, col_count));
