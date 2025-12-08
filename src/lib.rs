@@ -1022,7 +1022,10 @@ fn dfs_to_xlsx(
             None => table_style.map(|s| s.to_string()), // Use global default
         };
         let effective_freeze_panes = sheet_config.freeze_panes.unwrap_or(freeze_panes);
-        let effective_column_widths = sheet_config.column_widths.as_ref().or(column_widths.as_ref());
+        let effective_column_widths = sheet_config
+            .column_widths
+            .as_ref()
+            .or(column_widths.as_ref());
         let effective_row_heights = sheet_config.row_heights.as_ref().or(row_heights.as_ref());
 
         let worksheet = if constant_memory {
