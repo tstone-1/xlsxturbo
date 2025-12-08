@@ -50,6 +50,81 @@ enum CellValue {
     String(String),
 }
 
+/// Per-sheet configuration options (all optional, defaults to global settings)
+#[derive(Debug, Clone, Default)]
+struct SheetConfig {
+    header: Option<bool>,
+    autofit: Option<bool>,
+    table_style: Option<Option<String>>, // None = use default, Some(None) = explicitly no style
+    freeze_panes: Option<bool>,
+    column_widths: Option<HashMap<u16, f64>>,
+    row_heights: Option<HashMap<u32, f64>>,
+}
+
+/// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
+/// 2-tuple: (df, sheet_name)
+/// 3-tuple: (df, sheet_name, options_dict)
+fn extract_sheet_info<'py>(
+    sheet_tuple: &Bound<'py, PyAny>,
+) -> PyResult<(Bound<'py, PyAny>, String, SheetConfig)> {
+    let len: usize = sheet_tuple.len()?;
+
+    if len < 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Sheet tuple must have at least 2 elements: (df, sheet_name)",
+        ));
+    }
+
+    let df = sheet_tuple.get_item(0)?;
+    let sheet_name: String = sheet_tuple.get_item(1)?.extract()?;
+
+    let config = if len >= 3 {
+        let opts = sheet_tuple.get_item(2)?;
+        let mut config = SheetConfig::default();
+
+        // Extract optional fields from the dict
+        if let Ok(val) = opts.get_item("header") {
+            if !val.is_none() {
+                config.header = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("autofit") {
+            if !val.is_none() {
+                config.autofit = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("table_style") {
+            // Handle both None and string values
+            if val.is_none() {
+                config.table_style = Some(None); // Explicitly no style
+            } else {
+                config.table_style = Some(Some(val.extract()?));
+            }
+        }
+        if let Ok(val) = opts.get_item("freeze_panes") {
+            if !val.is_none() {
+                config.freeze_panes = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("column_widths") {
+            if !val.is_none() {
+                config.column_widths = Some(val.extract()?);
+            }
+        }
+        if let Ok(val) = opts.get_item("row_heights") {
+            if !val.is_none() {
+                config.row_heights = Some(val.extract()?);
+            }
+        }
+
+        config
+    } else {
+        SheetConfig::default()
+    };
+
+    Ok((df, sheet_name, config))
+}
+
 /// Parse a table style string to TableStyle enum.
 /// Supports: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 fn parse_table_style(style: &str) -> TableStyle {
@@ -877,7 +952,11 @@ fn version() -> &'static str {
 /// calling df_to_xlsx multiple times.
 ///
 /// Args:
-///     sheets: List of (DataFrame, sheet_name) tuples
+///     sheets: List of tuples. Each tuple can be:
+///             - (DataFrame, sheet_name) - uses global defaults
+///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
+///             Options dict keys: header, autofit, table_style, freeze_panes,
+///             column_widths, row_heights
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -904,16 +983,17 @@ fn version() -> &'static str {
 ///     >>> # With styling applied to all sheets:
 ///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sales"), (df2, "Regions")], "report.xlsx",
 ///     ...                       table_style="Medium9", autofit=True, freeze_panes=True)
-///     >>> # With column widths applied to all sheets:
-///     >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx", column_widths={0: 25})
-///     >>> # For very large files, use constant_memory mode:
-///     >>> xlsxturbo.dfs_to_xlsx([(large_df, "Data")], "big.xlsx", constant_memory=True)
+///     >>> # With per-sheet options (header=False for one sheet):
+///     >>> xlsxturbo.dfs_to_xlsx([
+///     ...     (df1, "Data", {"header": True, "table_style": "Medium2"}),
+///     ...     (df2, "Instructions", {"header": False})
+///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
 #[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, row_heights = None, constant_memory = false))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx(
     _py: Python<'_>,
-    sheets: Vec<(Bound<'_, PyAny>, String)>,
+    sheets: Vec<Bound<'_, PyAny>>,
     output_path: &str,
     header: bool,
     autofit: bool,
@@ -930,7 +1010,21 @@ fn dfs_to_xlsx(
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
 
-    for (df, sheet_name) in sheets {
+    for sheet_tuple in sheets {
+        // Extract sheet info (supports both 2-tuple and 3-tuple formats)
+        let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
+
+        // Merge per-sheet options with global defaults
+        let effective_header = sheet_config.header.unwrap_or(header);
+        let effective_autofit = sheet_config.autofit.unwrap_or(autofit);
+        let effective_table_style: Option<String> = match sheet_config.table_style {
+            Some(style_opt) => style_opt, // Per-sheet override (could be Some(str) or None)
+            None => table_style.map(|s| s.to_string()), // Use global default
+        };
+        let effective_freeze_panes = sheet_config.freeze_panes.unwrap_or(freeze_panes);
+        let effective_column_widths = sheet_config.column_widths.as_ref().or(column_widths.as_ref());
+        let effective_row_heights = sheet_config.row_heights.as_ref().or(row_heights.as_ref());
+
         let worksheet = if constant_memory {
             workbook.add_worksheet_with_constant_memory()
         } else {
@@ -972,7 +1066,7 @@ fn dfs_to_xlsx(
         let col_count = columns.len() as u16;
 
         // Write header if requested
-        if header {
+        if effective_header {
             for (col_idx, col_name) in columns.iter().enumerate() {
                 worksheet
                     .write_string(row_idx, col_idx as u16, col_name)
@@ -1066,7 +1160,7 @@ fn dfs_to_xlsx(
         }
 
         // Add Excel Table if requested (not supported in constant_memory mode)
-        if let Some(style_name) = table_style {
+        if let Some(ref style_name) = effective_table_style {
             if !constant_memory {
                 let style = parse_table_style(style_name);
                 let table = Table::new().set_style(style);
@@ -1089,14 +1183,14 @@ fn dfs_to_xlsx(
         }
 
         // Freeze panes (freeze header row) - not supported in constant_memory mode
-        if freeze_panes && header && !constant_memory {
+        if effective_freeze_panes && effective_header && !constant_memory {
             worksheet.set_freeze_panes(1, 0).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!("Failed to freeze panes: {}", e))
             })?;
         }
 
         // Apply custom column widths if specified
-        if let Some(ref widths) = column_widths {
+        if let Some(widths) = effective_column_widths {
             for (&col_idx, &width) in widths.iter() {
                 worksheet.set_column_width(col_idx, width).map_err(|e| {
                     pyo3::exceptions::PyValueError::new_err(format!(
@@ -1108,7 +1202,7 @@ fn dfs_to_xlsx(
         }
 
         // Apply custom row heights if specified (not supported in constant_memory mode)
-        if let Some(ref heights) = row_heights {
+        if let Some(heights) = effective_row_heights {
             if !constant_memory {
                 for (&row_idx_h, &height) in heights.iter() {
                     worksheet.set_row_height(row_idx_h, height).map_err(|e| {
@@ -1122,7 +1216,7 @@ fn dfs_to_xlsx(
         }
 
         // Autofit columns (only for columns not explicitly set, not supported in constant_memory mode)
-        if autofit && column_widths.is_none() && !constant_memory {
+        if effective_autofit && effective_column_widths.is_none() && !constant_memory {
             worksheet.autofit();
         }
 
