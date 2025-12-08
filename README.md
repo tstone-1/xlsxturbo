@@ -7,7 +7,9 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Direct DataFrame support** for pandas and polars
 - **Excel tables** - filterable tables with 61 built-in styles (banded rows, autofilter)
 - **Auto-fit columns** - automatically adjust column widths to fit content
-- **Custom column widths** - set specific widths per column
+- **Custom column widths** - set specific widths per column or cap all with _all
+- **Header styling** - bold, colors, font size for header row
+- **Named tables** - set custom table names
 - **Custom row heights** - set specific heights per row
 - **Freeze panes** - freeze header row for easier scrolling
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
@@ -118,6 +120,83 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx",
 )
 ```
 
+### Global Column Width Cap
+
+Use `column_widths={'_all': value}` to cap all columns at a maximum width:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'Name': ['Alice', 'Bob'],
+    'VeryLongDescription': ['A' * 100, 'B' * 100],
+    'Score': [95, 87]
+})
+
+# Cap all columns at 30 characters
+xlsxturbo.df_to_xlsx(df, "capped.xlsx", column_widths={'_all': 30})
+
+# Mix specific widths with global cap (specific overrides '_all')
+xlsxturbo.df_to_xlsx(df, "mixed.xlsx", column_widths={0: 15, '_all': 30})
+
+# Autofit with cap: fit content, but never exceed 25 characters
+xlsxturbo.df_to_xlsx(df, "fitted.xlsx", autofit=True, column_widths={'_all': 25})
+```
+
+### Named Excel Tables
+
+Set custom names for Excel tables:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'Product': ['A', 'B'], 'Price': [10, 20]})
+
+# Name the Excel table
+xlsxturbo.df_to_xlsx(df, "report.xlsx", 
+    table_style="Medium2", 
+    table_name="ProductPrices"
+)
+
+# Invalid characters are auto-sanitized, digits get underscore prefix
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    table_style="Medium2",
+    table_name="2024 Sales Data!"  # Becomes "_2024_Sales_Data_"
+)
+```
+
+### Header Styling
+
+Apply custom formatting to header cells:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'Name': ['Alice', 'Bob'], 'Score': [95, 87]})
+
+# Bold headers
+xlsxturbo.df_to_xlsx(df, "bold.xlsx", header_format={'bold': True})
+
+# Full styling with colors
+xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
+    'bold': True,
+    'bg_color': '#4F81BD',   # Blue background
+    'font_color': 'white'    # White text
+})
+
+# Available options:
+# - bold (bool): Bold text
+# - italic (bool): Italic text
+# - font_color (str): '#RRGGBB' or named color (white, black, red, blue, etc.)
+# - bg_color (str): Background color
+# - font_size (float): Font size in points
+# - underline (bool): Underlined text
+```
+
+
 ### Multi-Sheet Workbooks
 
 ```python
@@ -179,6 +258,8 @@ Available per-sheet options:
 - `freeze_panes` (bool): Freeze header row
 - `column_widths` (dict): Custom column widths
 - `row_heights` (dict): Custom row heights
+- `table_name` (str): Custom Excel table name
+- `header_format` (dict): Header cell styling
 
 ### Constant Memory Mode (Large Files)
 
