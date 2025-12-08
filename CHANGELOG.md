@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-08
+
+### Added
+- **Per-sheet options for `dfs_to_xlsx()`** - override global settings per sheet
+  - Each sheet can now be a 3-tuple: `(df, sheet_name, options_dict)`
+  - Options dict supports: `header`, `autofit`, `table_style`, `freeze_panes`, `column_widths`, `row_heights`
+  - Old 2-tuple API `(df, sheet_name)` still works (backward compatible)
+  - Example: `[(df1, "Data", {"table_style": "Medium2"}), (df2, "Instructions", {"header": False})]`
+- `SheetOptions` TypedDict for type hints
+
+### Changed
+- `dfs_to_xlsx()` signature now accepts mixed tuple formats internally
+- Updated type stubs with new `SheetOptions` class and updated `dfs_to_xlsx` signature
+
 ## [0.4.1] - 2025-12-07
 
 ### Fixed
@@ -83,3 +97,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.3.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.1.0
+[0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
