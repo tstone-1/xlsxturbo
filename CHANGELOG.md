@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-12-08
+
+### Added
+- **Global column width cap** - `column_widths={'_all': 50}` to cap all columns at a maximum width
+  - Can be combined with specific column widths: `{0: 20, '_all': 50}` (specific overrides '_all')
+  - Works with autofit as a cap: `autofit=True, column_widths={'_all': 30}` fits then caps
+- **Table name parameter** - `table_name="MyTable"` to set custom Excel table names
+  - Invalid characters are automatically sanitized (spaces/special chars become underscores)
+  - Names starting with digits get underscore prefix (Excel requirement)
+  - Per-sheet table names in `dfs_to_xlsx()` via options dict
+- **Header styling** - `header_format={'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white'}`
+  - Supported options: `bold`, `italic`, `font_color`, `bg_color`, `font_size`, `underline`
+  - Colors accept hex (`#RRGGBB`) or named colors (white, black, red, blue, etc.)
+  - Per-sheet header formats in `dfs_to_xlsx()` via options dict
+- Per-sheet options now support: `table_name`, `header_format`, `column_widths` with '_all'
+
+### Changed
+- `column_widths` parameter now accepts both integer keys (`{0: 20}`) and string keys (`{"_all": 50}`)
+
 ## [0.5.0] - 2025-12-08
 
 ### Added
@@ -98,3 +117,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.1.0
 [0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
+[0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
