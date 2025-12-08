@@ -11,6 +11,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Custom row heights** - set specific heights per row
 - **Freeze panes** - freeze header row for easier scrolling
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
+- **Per-sheet options** - override settings per sheet in multi-sheet workbooks
 - **Constant memory mode** - minimize RAM usage for very large files
 - **Parallel CSV processing** - optional multi-core parsing for large files
 - **Automatic type detection** from CSV strings and Python objects:
@@ -144,6 +145,40 @@ xlsxturbo.dfs_to_xlsx([
     (df2, "Regions")
 ], "report.xlsx", column_widths={0: 20, 1: 15})
 ```
+
+### Per-Sheet Options
+
+Override global settings for individual sheets using a 3-tuple with options dict:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df_data = pd.DataFrame({'Product': ['A', 'B'], 'Price': [10, 20]})
+df_instructions = pd.DataFrame({'Step': [1, 2], 'Action': ['Open file', 'Review data']})
+
+# Different settings per sheet:
+# - "Data" sheet: has header, table style, autofit
+# - "Instructions" sheet: no header (raw data), no table style
+xlsxturbo.dfs_to_xlsx([
+    (df_data, "Data", {"header": True, "table_style": "Medium2"}),
+    (df_instructions, "Instructions", {"header": False, "table_style": None})
+], "report.xlsx", autofit=True)
+
+# Old 2-tuple API still works - uses global defaults
+xlsxturbo.dfs_to_xlsx([
+    (df_data, "Sheet1"),  # Uses global header=True, table_style=None
+    (df_instructions, "Sheet2", {"header": False})  # Override just header
+], "mixed.xlsx", header=True, autofit=True)
+```
+
+Available per-sheet options:
+- `header` (bool): Include column names as header row
+- `autofit` (bool): Automatically adjust column widths
+- `table_style` (str|None): Excel table style or None to disable
+- `freeze_panes` (bool): Freeze header row
+- `column_widths` (dict): Custom column widths
+- `row_heights` (dict): Custom row heights
 
 ### Constant Memory Mode (Large Files)
 

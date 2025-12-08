@@ -1,5 +1,16 @@
 """Type stubs for xlsxturbo"""
 
+from typing import TypedDict
+
+class SheetOptions(TypedDict, total=False):
+    """Per-sheet options for dfs_to_xlsx. All fields are optional."""
+    header: bool
+    autofit: bool
+    table_style: str | None
+    freeze_panes: bool
+    column_widths: dict[int, float] | None
+    row_heights: dict[int, float] | None
+
 def csv_to_xlsx(
     input_path: str,
     output_path: str,
@@ -86,7 +97,7 @@ def df_to_xlsx(
     ...
 
 def dfs_to_xlsx(
-    sheets: list[tuple[object, str]],
+    sheets: list[tuple[object, str] | tuple[object, str, SheetOptions]],
     output_path: str,
     header: bool = True,
     autofit: bool = False,
@@ -99,12 +110,18 @@ def dfs_to_xlsx(
     """
     Write multiple DataFrames to separate sheets in a single workbook.
 
-    This is a convenience function that writes multiple DataFrames to
-    separate sheets in one workbook, which is more efficient than
-    calling df_to_xlsx multiple times.
+    This function writes multiple DataFrames to separate sheets in one workbook,
+    which is more efficient than calling df_to_xlsx multiple times.
+
+    Supports per-sheet options: each sheet can override global defaults by
+    providing a 3-tuple (df, sheet_name, options_dict) instead of 2-tuple.
 
     Args:
-        sheets: List of (DataFrame, sheet_name) tuples
+        sheets: List of tuples. Each tuple can be:
+            - (DataFrame, sheet_name) - uses global defaults
+            - (DataFrame, sheet_name, options_dict) - per-sheet overrides
+            Options dict keys: header, autofit, table_style, freeze_panes,
+            column_widths, row_heights
         output_path: Path for the output XLSX file
         header: Include column names as header row (default: True)
         autofit: Automatically adjust column widths to fit content (default: False)
@@ -113,9 +130,9 @@ def dfs_to_xlsx(
             Tables include autofilter dropdowns and banded rows.
         freeze_panes: Freeze the header row for easier scrolling (default: False)
         column_widths: Dict mapping column index (0-based) to width in characters.
-            Applied to all sheets. Example: {0: 25, 1: 15}.
+            Applied to all sheets unless overridden. Example: {0: 25, 1: 15}.
         row_heights: Dict mapping row index (0-based) to height in points.
-            Applied to all sheets. Example: {0: 22, 5: 30}.
+            Applied to all sheets unless overridden. Example: {0: 22, 5: 30}.
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
             Note: Disables table_style, freeze_panes, row_heights, and autofit.
 
@@ -130,10 +147,13 @@ def dfs_to_xlsx(
         >>> import pandas as pd
         >>> df1 = pd.DataFrame({'a': [1, 2]})
         >>> df2 = pd.DataFrame({'b': [3, 4]})
+        >>> # Old API still works:
         >>> xlsxturbo.dfs_to_xlsx([(df1, "Sheet1"), (df2, "Sheet2")], "out.xlsx")
-        >>> # With styling applied to all sheets:
-        >>> xlsxturbo.dfs_to_xlsx([(df1, "Sales"), (df2, "Regions")], "report.xlsx",
-        ...                       table_style="Medium9", autofit=True, freeze_panes=True)
+        >>> # With per-sheet options (header=False for one sheet):
+        >>> xlsxturbo.dfs_to_xlsx([
+        ...     (df1, "Data", {"header": True, "table_style": "Medium2"}),
+        ...     (df2, "Instructions", {"header": False})
+        ... ], "report.xlsx", autofit=True)
     """
     ...
 
