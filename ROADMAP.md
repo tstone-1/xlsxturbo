@@ -10,10 +10,10 @@ Features that would enable more migrations from pandas/polars write_excel.
 - [x] **Custom column widths** - Set specific widths per column (v0.4.0)
 - [x] **Custom row heights** - Set specific heights per row (v0.4.0)
 - [x] **Per-sheet options in dfs_to_xlsx** - Allow different settings per sheet (v0.5.0)
-- [ ] **Header styling** - Option for bold/colored headers (`header_format` parameter)
+- [x] **Header styling** - Option for bold/colored headers (`header_format` parameter) (v0.6.0)
 - [x] **Freeze panes** - Freeze header row for easier scrolling (v0.3.0)
-- [ ] **Global column width cap** - `column_widths={'_all': value}` to limit all column widths
-- [ ] **Table name** - `table_name` parameter for named Excel tables
+- [x] **Global column width cap** - `column_widths={'_all': value}` to limit all column widths (v0.6.0)
+- [x] **Table name** - `table_name` parameter for named Excel tables (v0.6.0)
 
 ## Medium Priority
 
@@ -38,6 +38,9 @@ Niche features for specific use cases.
 
 ## Completed
 
+- [x] Global column width cap with `column_widths={'_all': value}` (v0.6.0)
+- [x] Table name parameter with `table_name` (v0.6.0)
+- [x] Header styling with `header_format` (v0.6.0)
 - [x] CSV to XLSX conversion with type detection (v0.1.0)
 - [x] pandas DataFrame support (v0.2.0)
 - [x] polars DataFrame support (v0.2.0)
