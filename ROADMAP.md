@@ -9,9 +9,7 @@ Features that would enable more migrations from pandas/polars write_excel.
 - [x] **Column auto-width** - Automatically fit column widths to content (v0.3.0)
 - [x] **Custom column widths** - Set specific widths per column (v0.4.0)
 - [x] **Custom row heights** - Set specific heights per row (v0.4.0)
-- [ ] **Per-sheet options in dfs_to_xlsx** - Allow different settings per sheet
-  - Currently all sheets share the same header/autofit/table_style/freeze_panes
-  - API idea: `sheets=[(df1, "Sheet1", {"header": True}), (df2, "Sheet2", {"header": False})]`
+- [x] **Per-sheet options in dfs_to_xlsx** - Allow different settings per sheet (v0.5.0)
 - [ ] **Header styling** - Option for bold/colored headers (`header_format` parameter)
 - [x] **Freeze panes** - Freeze header row for easier scrolling (v0.3.0)
 - [ ] **Global column width cap** - `column_widths={'_all': value}` to limit all column widths
@@ -50,3 +48,4 @@ Niche features for specific use cases.
 - [x] Custom column widths with `column_widths` parameter (v0.4.0)
 - [x] Custom row heights with `row_heights` parameter (v0.4.0)
 - [x] Constant memory mode with `constant_memory` parameter (v0.4.0)
+- [x] Per-sheet options in `dfs_to_xlsx()` (v0.5.0)
