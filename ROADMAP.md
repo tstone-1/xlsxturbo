@@ -20,8 +20,10 @@ Features that would enable more migrations from pandas/polars write_excel.
 Power user features for more control over output.
 
 - [x] **Multi-core support** - Parallel CSV parsing with rayon (~7% speedup for large files)
-- [ ] **Cell formatting options** - Custom number/date formats per column
-- [ ] **Cell styling** - Background color, font color, bold, borders per cell/column
+- [x] **Column formatting with wildcards** - `column_formats` with pattern matching (v0.7.0)
+  - Supports: `prefix*`, `*suffix`, `*contains*`, exact match
+  - Format options: bg_color, font_color, num_format, bold, italic, underline, border
+- [ ] **Row-level cell formatting** - Conditional styling based on cell values
 - [ ] **Merged cells** - Merge cell ranges for headers/documentation sheets
 - [ ] **Conditional formatting** - Color scales, data bars, icon sets
 - [x] **Table styles** - Create Excel tables with auto-filters and 61 built-in styles (v0.3.0)
@@ -38,6 +40,7 @@ Niche features for specific use cases.
 
 ## Completed
 
+- [x] Column formatting with wildcards via `column_formats` parameter (v0.7.0)
 - [x] Global column width cap with `column_widths={'_all': value}` (v0.6.0)
 - [x] Table name parameter with `table_name` (v0.6.0)
 - [x] Header styling with `header_format` (v0.6.0)
