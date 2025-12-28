@@ -61,6 +61,7 @@ struct SheetConfig {
     table_name: Option<String>,
     header_format: Option<HashMap<String, PyObject>>,
     row_heights: Option<HashMap<u32, f64>>,
+    column_formats: Option<HashMap<String, HashMap<String, PyObject>>>, // Pattern -> format dict
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -147,6 +148,26 @@ fn extract_sheet_info<'py>(
                 }
                 if !fmt.is_empty() {
                     config.header_format = Some(fmt);
+                }
+            }
+        }
+        if let Ok(val) = opts.get_item("column_formats") {
+            if !val.is_none() {
+                if let Ok(outer_dict) = val.downcast::<pyo3::types::PyDict>() {
+                    let mut col_fmts: HashMap<String, HashMap<String, PyObject>> = HashMap::new();
+                    for (pattern, fmt_dict) in outer_dict.iter() {
+                        let pattern_str: String = pattern.extract()?;
+                        if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
+                            let mut fmt: HashMap<String, PyObject> = HashMap::new();
+                            for (k, v) in inner_dict.iter() {
+                                fmt.insert(k.extract()?, v.unbind());
+                            }
+                            col_fmts.insert(pattern_str, fmt);
+                        }
+                    }
+                    if !col_fmts.is_empty() {
+                        config.column_formats = Some(col_fmts);
+                    }
                 }
             }
         }
@@ -312,6 +333,24 @@ fn extract_header_format(
     Ok(fmt)
 }
 
+/// Extract column_formats from Python dict (pattern -> format dict)
+fn extract_column_formats(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, HashMap<String, PyObject>>> {
+    let mut col_fmts: HashMap<String, HashMap<String, PyObject>> = HashMap::new();
+    for (pattern, fmt_dict) in py_dict.iter() {
+        let pattern_str: String = pattern.extract()?;
+        if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
+            let mut fmt: HashMap<String, PyObject> = HashMap::new();
+            for (k, v) in inner_dict.iter() {
+                fmt.insert(k.extract()?, v.unbind());
+            }
+            col_fmts.insert(pattern_str, fmt);
+        }
+    }
+    Ok(col_fmts)
+}
+
 /// Sanitize table name for Excel (alphanumeric + underscore, must start with letter/underscore)
 fn sanitize_table_name(name: &str) -> String {
     let mut sanitized: String = name
@@ -411,6 +450,126 @@ fn parse_header_format(
     }
 
     Ok(format)
+}
+
+/// Check if a column name matches a wildcard pattern.
+/// Supports: "prefix*", "*suffix", "*contains*", or exact match
+fn matches_pattern(column_name: &str, pattern: &str) -> bool {
+    let starts_with_star = pattern.starts_with('*');
+    let ends_with_star = pattern.ends_with('*');
+
+    match (starts_with_star, ends_with_star) {
+        (true, true) => {
+            // *contains* - match substring
+            let inner = &pattern[1..pattern.len() - 1];
+            column_name.contains(inner)
+        }
+        (true, false) => {
+            // *suffix - match ending
+            let suffix = &pattern[1..];
+            column_name.ends_with(suffix)
+        }
+        (false, true) => {
+            // prefix* - match beginning
+            let prefix = &pattern[..pattern.len() - 1];
+            column_name.starts_with(prefix)
+        }
+        (false, false) => {
+            // Exact match
+            column_name == pattern
+        }
+    }
+}
+
+/// Parse column format dictionary into rust_xlsxwriter Format
+/// Similar to parse_header_format but also supports num_format
+fn parse_column_format(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, PyObject>,
+) -> Result<Format, String> {
+    let mut format = Format::new();
+
+    if let Some(bold_obj) = fmt_dict.get("bold") {
+        let bold: bool = bold_obj.bind(py).extract().unwrap_or(false);
+        if bold {
+            format = format.set_bold();
+        }
+    }
+
+    if let Some(italic_obj) = fmt_dict.get("italic") {
+        let italic: bool = italic_obj.bind(py).extract().unwrap_or(false);
+        if italic {
+            format = format.set_italic();
+        }
+    }
+
+    if let Some(bg_obj) = fmt_dict.get("bg_color") {
+        if let Ok(color_str) = bg_obj.bind(py).extract::<String>() {
+            let color = parse_color(&color_str)?;
+            format = format.set_background_color(color);
+        }
+    }
+
+    if let Some(font_obj) = fmt_dict.get("font_color") {
+        if let Ok(color_str) = font_obj.bind(py).extract::<String>() {
+            let color = parse_color(&color_str)?;
+            format = format.set_font_color(color);
+        }
+    }
+
+    if let Some(size_obj) = fmt_dict.get("font_size") {
+        if let Ok(size) = size_obj.bind(py).extract::<f64>() {
+            format = format.set_font_size(size);
+        }
+    }
+
+    if let Some(underline_obj) = fmt_dict.get("underline") {
+        let underline: bool = underline_obj.bind(py).extract().unwrap_or(false);
+        if underline {
+            format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
+        }
+    }
+
+    // Support num_format for number formatting (e.g., "0.00000", "#,##0")
+    if let Some(num_fmt_obj) = fmt_dict.get("num_format") {
+        if let Ok(num_fmt_str) = num_fmt_obj.bind(py).extract::<String>() {
+            format = format.set_num_format(&num_fmt_str);
+        }
+    }
+
+    // Support border (adds thin border around cell)
+    if let Some(border_obj) = fmt_dict.get("border") {
+        let border: bool = border_obj.bind(py).extract().unwrap_or(false);
+        if border {
+            format = format.set_border(rust_xlsxwriter::FormatBorder::Thin);
+        }
+    }
+
+    Ok(format)
+}
+
+/// Build a vector of column formats, one for each column.
+/// Returns None for columns with no matching pattern.
+fn build_column_formats(
+    py: Python<'_>,
+    columns: &[String],
+    column_formats: &HashMap<String, HashMap<String, PyObject>>,
+) -> Result<Vec<Option<Format>>, String> {
+    let mut formats = Vec::with_capacity(columns.len());
+
+    for col_name in columns {
+        // Find the first matching pattern
+        let mut matched_format: Option<Format> = None;
+        for (pattern, fmt_dict) in column_formats {
+            if matches_pattern(col_name, pattern) {
+                matched_format = Some(parse_column_format(py, fmt_dict)?);
+                break;
+            }
+        }
+        formats.push(matched_format);
+    }
+
+    Ok(formats)
 }
 
 /// Parse a string value and detect its type
@@ -658,6 +817,7 @@ pub fn convert_csv_to_xlsx_parallel(
 // ============================================================================
 
 /// Write a Python value to the worksheet, detecting type automatically
+#[allow(dead_code)]
 fn write_py_value(
     worksheet: &mut Worksheet,
     row: u32,
@@ -842,6 +1002,250 @@ fn write_py_value(
     Ok(())
 }
 
+/// Write a Python value to the worksheet with optional column format
+fn write_py_value_with_format(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    value: &Bound<'_, PyAny>,
+    date_format: &Format,
+    datetime_format: &Format,
+    column_format: Option<&Format>,
+) -> Result<(), String> {
+    // Check for None first
+    if value.is_none() {
+        if let Some(fmt) = column_format {
+            worksheet
+                .write_string_with_format(row, col, "", fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_string(row, col, "")
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Check for pandas NA/NaT
+    let type_name = value
+        .get_type()
+        .name()
+        .map_err(|e| e.to_string())?
+        .to_string();
+    if type_name == "NAType" || type_name == "NaTType" {
+        if let Some(fmt) = column_format {
+            worksheet
+                .write_string_with_format(row, col, "", fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_string(row, col, "")
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Try boolean first (before int, since bool is subclass of int in Python)
+    if let Ok(b) = value.downcast::<PyBool>() {
+        worksheet
+            .write_boolean(row, col, b.is_true())
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try datetime (before date, since datetime is subclass of date)
+    if type_name == "datetime" || type_name == "Timestamp" {
+        let year: i32 = value
+            .getattr("year")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1900);
+        let month: u32 = value
+            .getattr("month")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let day: u32 = value
+            .getattr("day")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let hour: u32 = value
+            .getattr("hour")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+        let minute: u32 = value
+            .getattr("minute")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+        let second: u32 = value
+            .getattr("second")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+            if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
+                let dt = chrono::NaiveDateTime::new(date, time);
+                let excel_dt = naive_datetime_to_excel(dt);
+                // For datetime, use column format if provided, otherwise datetime_format
+                let fmt = column_format.unwrap_or(datetime_format);
+                worksheet
+                    .write_number_with_format(row, col, excel_dt, fmt)
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+    }
+
+    // Try date
+    if type_name == "date" {
+        let year: i32 = value
+            .getattr("year")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1900);
+        let month: u32 = value
+            .getattr("month")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+        let day: u32 = value
+            .getattr("day")
+            .ok()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(1);
+
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+            let excel_date = naive_date_to_excel(date);
+            // For date, use column format if provided, otherwise date_format
+            let fmt = column_format.unwrap_or(date_format);
+            worksheet
+                .write_number_with_format(row, col, excel_date, fmt)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
+    // Try integer
+    if let Ok(i) = value.downcast::<PyInt>() {
+        if let Ok(val) = i.extract::<i64>() {
+            if let Some(fmt) = column_format {
+                worksheet
+                    .write_number_with_format(row, col, val as f64, fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_number(row, col, val as f64)
+                    .map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+    }
+
+    // Try float
+    if let Ok(f) = value.downcast::<PyFloat>() {
+        if let Ok(val) = f.extract::<f64>() {
+            if val.is_nan() || val.is_infinite() {
+                if let Some(fmt) = column_format {
+                    worksheet
+                        .write_string_with_format(row, col, "", fmt)
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    worksheet
+                        .write_string(row, col, "")
+                        .map_err(|e| e.to_string())?;
+                }
+            } else if let Some(fmt) = column_format {
+                worksheet
+                    .write_number_with_format(row, col, val, fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_number(row, col, val)
+                    .map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+    }
+
+    // Try to extract as f64 (covers numpy types)
+    if let Ok(val) = value.extract::<f64>() {
+        if val.is_nan() || val.is_infinite() {
+            if let Some(fmt) = column_format {
+                worksheet
+                    .write_string_with_format(row, col, "", fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_string(row, col, "")
+                    .map_err(|e| e.to_string())?;
+            }
+        } else if let Some(fmt) = column_format {
+            worksheet
+                .write_number_with_format(row, col, val, fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_number(row, col, val)
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Try to extract as i64 (covers numpy int types)
+    if let Ok(val) = value.extract::<i64>() {
+        if let Some(fmt) = column_format {
+            worksheet
+                .write_number_with_format(row, col, val as f64, fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_number(row, col, val as f64)
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Try to extract as bool
+    if let Ok(val) = value.extract::<bool>() {
+        worksheet
+            .write_boolean(row, col, val)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Try string
+    if let Ok(s) = value.downcast::<PyString>() {
+        if let Some(fmt) = column_format {
+            worksheet
+                .write_string_with_format(row, col, s.to_string(), fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_string(row, col, s.to_string())
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Fallback: convert to string
+    let s = value.str().map_err(|e| e.to_string())?.to_string();
+    if let Some(fmt) = column_format {
+        worksheet
+            .write_string_with_format(row, col, &s, fmt)
+            .map_err(|e| e.to_string())?;
+    } else {
+        worksheet
+            .write_string(row, col, &s)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 /// Convert a DataFrame (pandas or polars) to XLSX format
 #[allow(clippy::too_many_arguments)]
 fn convert_dataframe_to_xlsx(
@@ -858,6 +1262,7 @@ fn convert_dataframe_to_xlsx(
     header_format: Option<&HashMap<String, PyObject>>,
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
+    column_formats: Option<&HashMap<String, HashMap<String, PyObject>>>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -899,6 +1304,13 @@ fn convert_dataframe_to_xlsx(
         };
 
     let col_count = columns.len() as u16;
+
+    // Build column formats if provided
+    let col_formats: Vec<Option<Format>> = if let Some(cf) = column_formats {
+        build_column_formats(py, &columns, cf)?
+    } else {
+        vec![None; columns.len()]
+    };
 
     // Write header if requested (and not using table, since table handles headers)
     if include_header && table_style.is_none() {
@@ -962,13 +1374,14 @@ fn convert_dataframe_to_xlsx(
                 .map_err(|e: PyErr| e.to_string())?;
 
             for (col_idx, value) in row_tuple.iter().enumerate() {
-                write_py_value(
+                write_py_value_with_format(
                     worksheet,
                     row_idx,
                     col_idx as u16,
                     value,
                     &date_format,
                     &datetime_format,
+                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
                 )?;
             }
             row_idx += 1;
@@ -987,13 +1400,14 @@ fn convert_dataframe_to_xlsx(
                     .get_item(col_idx)
                     .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
 
-                write_py_value(
+                write_py_value_with_format(
                     worksheet,
                     row_idx,
                     col_idx as u16,
                     &value,
                     &date_format,
                     &datetime_format,
+                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
                 )?;
             }
             row_idx += 1;
@@ -1134,6 +1548,10 @@ fn csv_to_xlsx(
 ///     constant_memory: Use constant memory mode for large files (default: False).
 ///                      Reduces memory usage but disables table_style, freeze_panes,
 ///                      row_heights, and autofit features.
+///     column_formats: Dict mapping column name patterns to format dicts (default: None)
+///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
+///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
+///                     Example: {"mcpt_*": {"bg_color": "#D6EAF8", "num_format": "0.00000"}}
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -1154,7 +1572,7 @@ fn csv_to_xlsx(
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
     py: Python<'py>,
@@ -1170,6 +1588,7 @@ fn df_to_xlsx<'py>(
     header_format: Option<&Bound<'py, PyAny>>,
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
+    column_formats: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     // Extract column_widths if provided
     let extracted_column_widths = if let Some(cw) = column_widths {
@@ -1193,6 +1612,17 @@ fn df_to_xlsx<'py>(
         None
     };
 
+    // Extract column_formats if provided
+    let extracted_column_formats = if let Some(cf) = column_formats {
+        if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
+            Some(extract_column_formats(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     convert_dataframe_to_xlsx(
         py,
         df,
@@ -1207,6 +1637,7 @@ fn df_to_xlsx<'py>(
         extracted_header_format.as_ref(),
         row_heights.as_ref(),
         constant_memory,
+        extracted_column_formats.as_ref(),
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -1228,7 +1659,7 @@ fn version() -> &'static str {
 ///             - (DataFrame, sheet_name) - uses global defaults
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
-///             column_widths, row_heights, table_name, header_format
+///             column_widths, row_heights, table_name, header_format, column_formats
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -1243,6 +1674,10 @@ fn version() -> &'static str {
 ///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///     constant_memory: Use constant memory mode for large files (default: False).
+///     column_formats: Dict mapping column name patterns to format dicts (default: None)
+///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
+///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
+///                     Example: {"mcpt_*": {"bg_color": "#D6EAF8", "num_format": "0.00000"}}
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -1265,7 +1700,7 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
@@ -1280,6 +1715,7 @@ fn dfs_to_xlsx<'py>(
     header_format: Option<&Bound<'py, PyAny>>,
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
+    column_formats: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -1299,6 +1735,17 @@ fn dfs_to_xlsx<'py>(
     let extracted_header_format = if let Some(hf) = header_format {
         if let Ok(dict) = hf.downcast::<pyo3::types::PyDict>() {
             Some(extract_header_format(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global column_formats if provided
+    let extracted_column_formats = if let Some(cf) = column_formats {
+        if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
+            Some(extract_column_formats(dict)?)
         } else {
             None
         }
@@ -1346,6 +1793,12 @@ fn dfs_to_xlsx<'py>(
             global_header_fmt.clone()
         };
 
+        // Get effective column formats (per-sheet or global)
+        let effective_column_formats = sheet_config
+            .column_formats
+            .as_ref()
+            .or(extracted_column_formats.as_ref());
+
         let worksheet = if constant_memory {
             workbook.add_worksheet_with_constant_memory()
         } else {
@@ -1385,6 +1838,14 @@ fn dfs_to_xlsx<'py>(
             };
 
         let col_count = columns.len() as u16;
+
+        // Build column formats if provided
+        let col_formats: Vec<Option<Format>> = if let Some(cf) = effective_column_formats {
+            build_column_formats(py, &columns, cf)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?
+        } else {
+            vec![None; columns.len()]
+        };
 
         // Write header if requested
         if effective_header {
@@ -1440,13 +1901,14 @@ fn dfs_to_xlsx<'py>(
                     .map_err(|e: PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
                 for (col_idx, value) in row_tuple.iter().enumerate() {
-                    write_py_value(
+                    write_py_value_with_format(
                         worksheet,
                         row_idx,
                         col_idx as u16,
                         value,
                         &date_format,
                         &datetime_format,
+                        col_formats.get(col_idx).and_then(|f| f.as_ref()),
                     )
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 }
@@ -1472,13 +1934,14 @@ fn dfs_to_xlsx<'py>(
                         ))
                     })?;
 
-                    write_py_value(
+                    write_py_value_with_format(
                         worksheet,
                         row_idx,
                         col_idx as u16,
                         &value,
                         &date_format,
                         &datetime_format,
+                        col_formats.get(col_idx).and_then(|f| f.as_ref()),
                     )
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 }
@@ -1646,5 +2109,33 @@ mod tests {
     #[test]
     fn test_parse_string() {
         assert!(matches!(parse_value("hello"), CellValue::String(_)));
+    }
+
+    #[test]
+    fn test_matches_pattern_exact() {
+        assert!(matches_pattern("column_name", "column_name"));
+        assert!(!matches_pattern("column_name", "other"));
+    }
+
+    #[test]
+    fn test_matches_pattern_prefix() {
+        assert!(matches_pattern("mcpt_weight", "mcpt_*"));
+        assert!(matches_pattern("mcpt_", "mcpt_*"));
+        assert!(!matches_pattern("cc_weight", "mcpt_*"));
+    }
+
+    #[test]
+    fn test_matches_pattern_suffix() {
+        assert!(matches_pattern("col_weight", "*_weight"));
+        assert!(matches_pattern("_weight", "*_weight"));
+        assert!(!matches_pattern("col_height", "*_weight"));
+    }
+
+    #[test]
+    fn test_matches_pattern_contains() {
+        assert!(matches_pattern("leadframe_difference", "*difference*"));
+        assert!(matches_pattern("difference", "*difference*"));
+        assert!(matches_pattern("my_difference_col", "*difference*"));
+        assert!(!matches_pattern("other_column", "*difference*"));
     }
 }

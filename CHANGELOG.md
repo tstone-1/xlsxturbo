@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-12-28
+
+### Added
+- **Column formatting with wildcards** - `column_formats` parameter for styling columns by pattern
+  - Wildcard patterns: `prefix*`, `*suffix`, `*contains*`, or exact match
+  - Format options: `bg_color`, `font_color`, `num_format`, `bold`, `italic`, `underline`, `border`
+  - Example: `column_formats={'mcpt_*': {'bg_color': '#D6EAF8', 'num_format': '0.00000', 'border': True}}`
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()`
+  - Per-sheet column formats via options dict in `dfs_to_xlsx()`
+
 ## [0.6.0] - 2025-12-08
 
 ### Added
@@ -111,10 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.7.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.7.0
+[0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
+[0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
 [0.4.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.1
 [0.4.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.1.0
-[0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
-[0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
