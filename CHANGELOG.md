@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Uses `indexmap` crate to preserve pattern insertion order
+- Updated `pyo3` 0.23 → 0.27, `rust_xlsxwriter` 0.79 → 0.92
+- Added Dependabot for automated dependency updates
 
 ## [0.7.0] - 2025-12-28
 

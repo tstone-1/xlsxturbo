@@ -303,6 +303,7 @@ Available per-sheet options:
 - `row_heights` (dict): Custom row heights
 - `table_name` (str): Custom Excel table name
 - `header_format` (dict): Header cell styling
+- `column_formats` (dict): Column formatting with pattern matching
 
 ### Constant Memory Mode (Large Files)
 
