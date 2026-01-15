@@ -24,6 +24,30 @@ class ColumnFormat(TypedDict, total=False):
     num_format: str  # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
     border: bool     # Add thin border around cells
 
+class ConditionalFormat(TypedDict, total=False):
+    """Conditional formatting options for a column. 'type' is required.
+
+    Supported types:
+    - '2_color_scale': Gradient from min_color to max_color
+    - '3_color_scale': Gradient with min_color, mid_color, max_color
+    - 'data_bar': In-cell bar chart
+    - 'icon_set': Traffic lights, arrows, or other icons
+    """
+    type: str  # Required: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'
+    # For color scales:
+    min_color: str   # '#RRGGBB' or named color for minimum value
+    mid_color: str   # '#RRGGBB' or named color for midpoint (3_color_scale only)
+    max_color: str   # '#RRGGBB' or named color for maximum value
+    # For data bars:
+    bar_color: str   # '#RRGGBB' or named color for the bar fill
+    border_color: str  # '#RRGGBB' or named color for bar border
+    solid: bool      # True for solid fill, False for gradient (default)
+    direction: str   # 'left_to_right', 'right_to_left', or 'context' (default)
+    # For icon sets:
+    icon_type: str   # '3_arrows', '3_traffic_lights', '3_flags', '4_arrows', '5_arrows', etc. (see README for full list)
+    reverse: bool    # Reverse icon order
+    icons_only: bool # Show only icons, hide values
+
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional."""
     header: bool
@@ -35,6 +59,7 @@ class SheetOptions(TypedDict, total=False):
     table_name: str | None
     header_format: HeaderFormat | None
     column_formats: dict[str, ColumnFormat] | None  # Pattern -> format. Patterns: 'prefix*', '*suffix', '*contains*', exact
+    conditional_formats: dict[str, ConditionalFormat] | None  # Column name/pattern -> conditional format config
 
 def csv_to_xlsx(
     input_path: str,
@@ -79,6 +104,7 @@ def df_to_xlsx(
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
     column_formats: dict[str, ColumnFormat] | None = None,
+    conditional_formats: dict[str, ConditionalFormat] | None = None,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -100,6 +126,9 @@ def df_to_xlsx(
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             First matching pattern wins (order preserved).
+        conditional_formats: Dict mapping column names to conditional format configs.
+            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
+            Example: {'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}
     """
     ...
 
@@ -116,6 +145,7 @@ def dfs_to_xlsx(
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
     column_formats: dict[str, ColumnFormat] | None = None,
+    conditional_formats: dict[str, ConditionalFormat] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -134,6 +164,8 @@ def dfs_to_xlsx(
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
+        conditional_formats: Dict mapping column names to conditional format configs.
+            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
     """
     ...
 
