@@ -14,20 +14,16 @@ Features that close the gap with XlsxWriter/openpyxl for common use cases.
   - Supports: 2_color_scale, 3_color_scale, data_bar, icon_set
   - API: `conditional_formats={'column': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}`
 
-- [ ] **Formulas** - Add calculated columns with Excel formulas
-  - rust_xlsxwriter: supported (including Excel 365 dynamic arrays)
-  - Enables: SUM, VLOOKUP, custom calculations that update in Excel
-  - API: `formula_columns={'Total': '=B{row}*C{row}'}`
+- [x] **Formulas** - Add calculated columns with Excel formulas (v0.9.0)
+  - API: `formula_columns={'Total': '=A{row}+B{row}', 'Percentage': '=C{row}/D{row}*100'}`
+  - Use `{row}` placeholder for row numbers (1-based)
 
-- [ ] **Merged cells** - Merge cell ranges for headers/documentation sheets
-  - rust_xlsxwriter: supported
-  - Enables: report headers, grouped labels, multi-row titles
-  - API: `merged_ranges=[('A1:D1', 'Report Title', format_dict)]`
+- [x] **Merged cells** - Merge cell ranges for headers/documentation sheets (v0.9.0)
+  - API: `merged_ranges=[('A1:D1', 'Report Title'), ('A2:D2', 'Subtitle', {'bold': True})]`
 
-- [ ] **Hyperlinks** - Add clickable links to cells
-  - rust_xlsxwriter: supported
-  - Enables: links to URLs, other sheets, or external files
-  - API: `hyperlinks={'A1': 'https://example.com'}` or in column_formats
+- [x] **Hyperlinks** - Add clickable links to cells (v0.9.0)
+  - API: `hyperlinks=[('A1', 'https://example.com'), ('B1', 'https://google.com', 'Google')]`
+  - Optional display text (defaults to URL if omitted)
 
 ## Medium Priority
 
@@ -85,6 +81,9 @@ Niche features for specific use cases.
 
 ## Completed
 
+- [x] Hyperlinks via `hyperlinks` parameter (v0.9.0)
+- [x] Merged cells via `merged_ranges` parameter (v0.9.0)
+- [x] Formula columns via `formula_columns` parameter (v0.9.0)
 - [x] Conditional formatting via `conditional_formats` parameter (v0.9.0)
 - [x] Column formatting with wildcards via `column_formats` parameter (v0.7.0)
 - [x] Global column width cap with `column_widths={'_all': value}` (v0.6.0)
