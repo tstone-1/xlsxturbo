@@ -1,8 +1,8 @@
 """
-Tests for xlsxturbo v0.6.0 features:
-- Global column width cap (column_widths={'_all': value})
-- Table name parameter (table_name)
-- Header styling (header_format)
+Tests for xlsxturbo features (v0.6.0+):
+- Global column width cap, table names, header styling (v0.6.0)
+- Column formatting with wildcards (v0.7.0)
+- Date order for CSV parsing, edge cases (v0.8.0)
 """
 
 import xlsxturbo
