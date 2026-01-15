@@ -111,9 +111,9 @@ struct SheetConfig {
     freeze_panes: Option<bool>,
     column_widths: Option<HashMap<String, f64>>, // Keys: "0", "1", "_all" for global cap
     table_name: Option<String>,
-    header_format: Option<HashMap<String, PyObject>>,
+    header_format: Option<HashMap<String, Py<PyAny>>>,
     row_heights: Option<HashMap<u32, f64>>,
-    column_formats: Option<IndexMap<String, HashMap<String, PyObject>>>, // Pattern -> format dict (ordered)
+    column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Pattern -> format dict (ordered)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -165,7 +165,7 @@ fn extract_sheet_info<'py>(
             if !val.is_none() {
                 // Support both integer keys {0: 20} and string keys {"_all": 50}
                 let mut widths: HashMap<String, f64> = HashMap::new();
-                if let Ok(dict) = val.downcast::<pyo3::types::PyDict>() {
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
                     for (k, v) in dict.iter() {
                         let key_str = if let Ok(i) = k.extract::<i64>() {
                             i.to_string()
@@ -192,8 +192,8 @@ fn extract_sheet_info<'py>(
         }
         if let Ok(val) = opts.get_item("header_format") {
             if !val.is_none() {
-                let mut fmt: HashMap<String, PyObject> = HashMap::new();
-                if let Ok(dict) = val.downcast::<pyo3::types::PyDict>() {
+                let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
                     for (k, v) in dict.iter() {
                         fmt.insert(k.extract()?, v.unbind());
                     }
@@ -205,12 +205,13 @@ fn extract_sheet_info<'py>(
         }
         if let Ok(val) = opts.get_item("column_formats") {
             if !val.is_none() {
-                if let Ok(outer_dict) = val.downcast::<pyo3::types::PyDict>() {
-                    let mut col_fmts: IndexMap<String, HashMap<String, PyObject>> = IndexMap::new();
+                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
+                    let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
+                        IndexMap::new();
                     for (pattern, fmt_dict) in outer_dict.iter() {
                         let pattern_str: String = pattern.extract()?;
-                        if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, PyObject> = HashMap::new();
+                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
+                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
                             for (k, v) in inner_dict.iter() {
                                 fmt.insert(k.extract()?, v.unbind());
                             }
@@ -380,8 +381,8 @@ fn extract_column_widths(
 /// Extract header_format from Python dict
 fn extract_header_format(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, PyObject>> {
-    let mut fmt: HashMap<String, PyObject> = HashMap::new();
+) -> PyResult<HashMap<String, Py<PyAny>>> {
+    let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
     for (k, v) in py_dict.iter() {
         fmt.insert(k.extract()?, v.unbind());
     }
@@ -392,12 +393,12 @@ fn extract_header_format(
 /// Uses IndexMap to preserve insertion order from Python dict
 fn extract_column_formats(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<IndexMap<String, HashMap<String, PyObject>>> {
-    let mut col_fmts: IndexMap<String, HashMap<String, PyObject>> = IndexMap::new();
+) -> PyResult<IndexMap<String, HashMap<String, Py<PyAny>>>> {
+    let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
     for (pattern, fmt_dict) in py_dict.iter() {
         let pattern_str: String = pattern.extract()?;
-        if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
-            let mut fmt: HashMap<String, PyObject> = HashMap::new();
+        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
+            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
             for (k, v) in inner_dict.iter() {
                 fmt.insert(k.extract()?, v.unbind());
             }
@@ -467,7 +468,7 @@ fn parse_color(color_str: &str) -> Result<u32, String> {
 /// Parse header format dictionary into rust_xlsxwriter Format
 fn parse_header_format(
     py: Python<'_>,
-    fmt_dict: &HashMap<String, PyObject>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
 ) -> Result<Format, String> {
     let mut format = Format::new();
 
@@ -548,7 +549,7 @@ fn matches_pattern(column_name: &str, pattern: &str) -> bool {
 /// Similar to parse_header_format but also supports num_format
 fn parse_column_format(
     py: Python<'_>,
-    fmt_dict: &HashMap<String, PyObject>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
 ) -> Result<Format, String> {
     let mut format = Format::new();
 
@@ -617,7 +618,7 @@ fn parse_column_format(
 fn build_column_formats(
     py: Python<'_>,
     columns: &[String],
-    column_formats: &IndexMap<String, HashMap<String, PyObject>>,
+    column_formats: &IndexMap<String, HashMap<String, Py<PyAny>>>,
 ) -> Result<Vec<Option<Format>>, String> {
     let mut formats = Vec::with_capacity(columns.len());
 
@@ -931,7 +932,7 @@ fn write_py_value_with_format(
     }
 
     // Try boolean first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = value.downcast::<PyBool>() {
+    if let Ok(b) = value.cast::<PyBool>() {
         worksheet
             .write_boolean(row, col, b.is_true())
             .map_err(|e| e.to_string())?;
@@ -1015,7 +1016,7 @@ fn write_py_value_with_format(
     }
 
     // Try integer
-    if let Ok(i) = value.downcast::<PyInt>() {
+    if let Ok(i) = value.cast::<PyInt>() {
         if let Ok(val) = i.extract::<i64>() {
             if let Some(fmt) = column_format {
                 worksheet
@@ -1031,7 +1032,7 @@ fn write_py_value_with_format(
     }
 
     // Try float
-    if let Ok(f) = value.downcast::<PyFloat>() {
+    if let Ok(f) = value.cast::<PyFloat>() {
         if let Ok(val) = f.extract::<f64>() {
             if val.is_nan() || val.is_infinite() {
                 if let Some(fmt) = column_format {
@@ -1103,7 +1104,7 @@ fn write_py_value_with_format(
     }
 
     // Try string
-    if let Ok(s) = value.downcast::<PyString>() {
+    if let Ok(s) = value.cast::<PyString>() {
         if let Some(fmt) = column_format {
             worksheet
                 .write_string_with_format(row, col, s.to_string(), fmt)
@@ -1144,10 +1145,10 @@ fn convert_dataframe_to_xlsx(
     freeze_panes: bool,
     column_widths: Option<&HashMap<String, f64>>,
     table_name: Option<&str>,
-    header_format: Option<&HashMap<String, PyObject>>,
+    header_format: Option<&HashMap<String, Py<PyAny>>>,
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
-    column_formats: Option<&IndexMap<String, HashMap<String, PyObject>>>,
+    column_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -1178,12 +1179,12 @@ fn convert_dataframe_to_xlsx(
         if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
             // polars DataFrame (has schema but no iloc)
             let cols = df.getattr("columns").map_err(|e| e.to_string())?;
-            cols.extract().map_err(|e| e.to_string())?
+            cols.extract().map_err(|e: pyo3::PyErr| e.to_string())?
         } else if df.hasattr("columns").unwrap_or(false) {
             // pandas DataFrame
             let cols = df.getattr("columns").map_err(|e| e.to_string())?;
             let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
-            col_list.extract().map_err(|e| e.to_string())?
+            col_list.extract().map_err(|e: pyo3::PyErr| e.to_string())?
         } else {
             return Err("Unsupported DataFrame type".to_string());
         };
@@ -1234,14 +1235,17 @@ fn convert_dataframe_to_xlsx(
 
     // Get row count
     let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
-        let shape = df.getattr("shape").map_err(|e| e.to_string())?;
-        let shape_tuple: (usize, usize) = shape.extract().map_err(|e| e.to_string())?;
+        let shape = df
+            .getattr("shape")
+            .map_err(|e: pyo3::PyErr| e.to_string())?;
+        let shape_tuple: (usize, usize) =
+            shape.extract().map_err(|e: pyo3::PyErr| e.to_string())?;
         shape_tuple.0
     } else {
         df.call_method0("__len__")
-            .map_err(|e| e.to_string())?
+            .map_err(|e: pyo3::PyErr| e.to_string())?
             .extract()
-            .map_err(|e| e.to_string())?
+            .map_err(|e: pyo3::PyErr| e.to_string())?
     };
 
     // Check if it's a polars DataFrame
@@ -1492,7 +1496,7 @@ fn df_to_xlsx<'py>(
 ) -> PyResult<(u32, u16)> {
     // Extract column_widths if provided
     let extracted_column_widths = if let Some(cw) = column_widths {
-        if let Ok(dict) = cw.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = cw.cast::<pyo3::types::PyDict>() {
             Some(extract_column_widths(dict)?)
         } else {
             None
@@ -1503,7 +1507,7 @@ fn df_to_xlsx<'py>(
 
     // Extract header_format if provided
     let extracted_header_format = if let Some(hf) = header_format {
-        if let Ok(dict) = hf.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = hf.cast::<pyo3::types::PyDict>() {
             Some(extract_header_format(dict)?)
         } else {
             None
@@ -1514,7 +1518,7 @@ fn df_to_xlsx<'py>(
 
     // Extract column_formats if provided (uses IndexMap to preserve order)
     let extracted_column_formats = if let Some(cf) = column_formats {
-        if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
             Some(extract_column_formats(dict)?)
         } else {
             None
@@ -1622,7 +1626,7 @@ fn dfs_to_xlsx<'py>(
 
     // Extract global column_widths if provided
     let extracted_column_widths = if let Some(cw) = column_widths {
-        if let Ok(dict) = cw.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = cw.cast::<pyo3::types::PyDict>() {
             Some(extract_column_widths(dict)?)
         } else {
             None
@@ -1633,7 +1637,7 @@ fn dfs_to_xlsx<'py>(
 
     // Extract global header_format if provided
     let extracted_header_format = if let Some(hf) = header_format {
-        if let Ok(dict) = hf.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = hf.cast::<pyo3::types::PyDict>() {
             Some(extract_header_format(dict)?)
         } else {
             None
@@ -1644,7 +1648,7 @@ fn dfs_to_xlsx<'py>(
 
     // Extract global column_formats if provided (uses IndexMap to preserve order)
     let extracted_column_formats = if let Some(cf) = column_formats {
-        if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
+        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
             Some(extract_column_formats(dict)?)
         } else {
             None
@@ -1714,28 +1718,29 @@ fn dfs_to_xlsx<'py>(
         let mut row_idx: u32 = 0;
 
         // Get column names - check polars first
-        let columns: Vec<String> =
-            if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
-                let cols = df
-                    .getattr("columns")
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                cols.extract()
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-            } else if df.hasattr("columns").unwrap_or(false) {
-                let cols = df
-                    .getattr("columns")
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                let col_list = cols
-                    .call_method0("tolist")
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                col_list
-                    .extract()
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-            } else {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Unsupported DataFrame type",
-                ));
-            };
+        let columns: Vec<String> = if df.hasattr("schema").unwrap_or(false)
+            && !df.hasattr("iloc").unwrap_or(false)
+        {
+            let cols = df
+                .getattr("columns")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            cols.extract()
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        } else if df.hasattr("columns").unwrap_or(false) {
+            let cols = df
+                .getattr("columns")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let col_list = cols
+                .call_method0("tolist")
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            col_list
+                .extract()
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        } else {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Unsupported DataFrame type",
+            ));
+        };
 
         let col_count = columns.len() as u16;
 
@@ -1767,16 +1772,16 @@ fn dfs_to_xlsx<'py>(
         let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
             let shape = df
                 .getattr("shape")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             let shape_tuple: (usize, usize) = shape
                 .extract()
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             shape_tuple.0
         } else {
             df.call_method0("__len__")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
                 .extract()
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
         };
 
         let is_polars =
