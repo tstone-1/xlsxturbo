@@ -1,6 +1,6 @@
 [package]
 name = "xlsxturbo"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 license = "MIT"
@@ -23,6 +23,7 @@ clap = { version = "4.5", features = ["derive"] }
 pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
 chrono = "0.4"
 rayon = "1.10"
+indexmap = "2.7"
 
 [profile.release]
 opt-level = 3
