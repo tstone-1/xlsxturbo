@@ -12,6 +12,7 @@
 
 use chrono::Timelike;
 use csv::ReaderBuilder;
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rayon::prelude::*;
@@ -20,15 +21,66 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 
-/// Date formats we recognize
-const DATE_PATTERNS: &[&str] = &[
+/// Date formats by locale/order preference
+/// ISO formats (YYYY-MM-DD) are always tried first as they're unambiguous
+const DATE_PATTERNS_ISO: &[&str] = &[
     "%Y-%m-%d", // 2024-01-15
     "%Y/%m/%d", // 2024/01/15
+];
+
+/// European date formats (day first): DD-MM-YYYY
+const DATE_PATTERNS_DMY: &[&str] = &[
     "%d-%m-%Y", // 15-01-2024
     "%d/%m/%Y", // 15/01/2024
+];
+
+/// US date formats (month first): MM-DD-YYYY
+const DATE_PATTERNS_MDY: &[&str] = &[
     "%m-%d-%Y", // 01-15-2024
     "%m/%d/%Y", // 01/15/2024
 ];
+
+/// Date order preference for ambiguous dates like 01-02-2024
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DateOrder {
+    /// Year-Month-Day first, then Day-Month-Year, then Month-Day-Year (default)
+    #[default]
+    Auto,
+    /// US format: Month-Day-Year (01-02-2024 = January 2)
+    MDY,
+    /// European format: Day-Month-Year (01-02-2024 = February 1)
+    DMY,
+}
+
+impl DateOrder {
+    /// Parse from string, returns None for invalid input
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "auto" => Some(DateOrder::Auto),
+            "mdy" | "us" => Some(DateOrder::MDY),
+            "dmy" | "eu" | "european" => Some(DateOrder::DMY),
+            _ => None,
+        }
+    }
+
+    /// Get date patterns in order of preference
+    fn patterns(&self) -> Vec<&'static str> {
+        let mut patterns = Vec::with_capacity(6);
+        // ISO formats are always first (unambiguous)
+        patterns.extend_from_slice(DATE_PATTERNS_ISO);
+        match self {
+            DateOrder::Auto | DateOrder::DMY => {
+                patterns.extend_from_slice(DATE_PATTERNS_DMY);
+                patterns.extend_from_slice(DATE_PATTERNS_MDY);
+            }
+            DateOrder::MDY => {
+                patterns.extend_from_slice(DATE_PATTERNS_MDY);
+                patterns.extend_from_slice(DATE_PATTERNS_DMY);
+            }
+        }
+        patterns
+    }
+}
 
 /// Datetime formats we recognize
 const DATETIME_PATTERNS: &[&str] = &[
@@ -61,7 +113,7 @@ struct SheetConfig {
     table_name: Option<String>,
     header_format: Option<HashMap<String, PyObject>>,
     row_heights: Option<HashMap<u32, f64>>,
-    column_formats: Option<HashMap<String, HashMap<String, PyObject>>>, // Pattern -> format dict
+    column_formats: Option<IndexMap<String, HashMap<String, PyObject>>>, // Pattern -> format dict (ordered)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -154,7 +206,7 @@ fn extract_sheet_info<'py>(
         if let Ok(val) = opts.get_item("column_formats") {
             if !val.is_none() {
                 if let Ok(outer_dict) = val.downcast::<pyo3::types::PyDict>() {
-                    let mut col_fmts: HashMap<String, HashMap<String, PyObject>> = HashMap::new();
+                    let mut col_fmts: IndexMap<String, HashMap<String, PyObject>> = IndexMap::new();
                     for (pattern, fmt_dict) in outer_dict.iter() {
                         let pattern_str: String = pattern.extract()?;
                         if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
@@ -182,70 +234,73 @@ fn extract_sheet_info<'py>(
 
 /// Parse a table style string to TableStyle enum.
 /// Supports: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
-fn parse_table_style(style: &str) -> TableStyle {
+fn parse_table_style(style: &str) -> Result<TableStyle, String> {
     match style {
-        "None" => TableStyle::None,
-        "Light1" => TableStyle::Light1,
-        "Light2" => TableStyle::Light2,
-        "Light3" => TableStyle::Light3,
-        "Light4" => TableStyle::Light4,
-        "Light5" => TableStyle::Light5,
-        "Light6" => TableStyle::Light6,
-        "Light7" => TableStyle::Light7,
-        "Light8" => TableStyle::Light8,
-        "Light9" => TableStyle::Light9,
-        "Light10" => TableStyle::Light10,
-        "Light11" => TableStyle::Light11,
-        "Light12" => TableStyle::Light12,
-        "Light13" => TableStyle::Light13,
-        "Light14" => TableStyle::Light14,
-        "Light15" => TableStyle::Light15,
-        "Light16" => TableStyle::Light16,
-        "Light17" => TableStyle::Light17,
-        "Light18" => TableStyle::Light18,
-        "Light19" => TableStyle::Light19,
-        "Light20" => TableStyle::Light20,
-        "Light21" => TableStyle::Light21,
-        "Medium1" => TableStyle::Medium1,
-        "Medium2" => TableStyle::Medium2,
-        "Medium3" => TableStyle::Medium3,
-        "Medium4" => TableStyle::Medium4,
-        "Medium5" => TableStyle::Medium5,
-        "Medium6" => TableStyle::Medium6,
-        "Medium7" => TableStyle::Medium7,
-        "Medium8" => TableStyle::Medium8,
-        "Medium9" => TableStyle::Medium9,
-        "Medium10" => TableStyle::Medium10,
-        "Medium11" => TableStyle::Medium11,
-        "Medium12" => TableStyle::Medium12,
-        "Medium13" => TableStyle::Medium13,
-        "Medium14" => TableStyle::Medium14,
-        "Medium15" => TableStyle::Medium15,
-        "Medium16" => TableStyle::Medium16,
-        "Medium17" => TableStyle::Medium17,
-        "Medium18" => TableStyle::Medium18,
-        "Medium19" => TableStyle::Medium19,
-        "Medium20" => TableStyle::Medium20,
-        "Medium21" => TableStyle::Medium21,
-        "Medium22" => TableStyle::Medium22,
-        "Medium23" => TableStyle::Medium23,
-        "Medium24" => TableStyle::Medium24,
-        "Medium25" => TableStyle::Medium25,
-        "Medium26" => TableStyle::Medium26,
-        "Medium27" => TableStyle::Medium27,
-        "Medium28" => TableStyle::Medium28,
-        "Dark1" => TableStyle::Dark1,
-        "Dark2" => TableStyle::Dark2,
-        "Dark3" => TableStyle::Dark3,
-        "Dark4" => TableStyle::Dark4,
-        "Dark5" => TableStyle::Dark5,
-        "Dark6" => TableStyle::Dark6,
-        "Dark7" => TableStyle::Dark7,
-        "Dark8" => TableStyle::Dark8,
-        "Dark9" => TableStyle::Dark9,
-        "Dark10" => TableStyle::Dark10,
-        "Dark11" => TableStyle::Dark11,
-        _ => TableStyle::Medium9, // Default Excel table style
+        "None" => Ok(TableStyle::None),
+        "Light1" => Ok(TableStyle::Light1),
+        "Light2" => Ok(TableStyle::Light2),
+        "Light3" => Ok(TableStyle::Light3),
+        "Light4" => Ok(TableStyle::Light4),
+        "Light5" => Ok(TableStyle::Light5),
+        "Light6" => Ok(TableStyle::Light6),
+        "Light7" => Ok(TableStyle::Light7),
+        "Light8" => Ok(TableStyle::Light8),
+        "Light9" => Ok(TableStyle::Light9),
+        "Light10" => Ok(TableStyle::Light10),
+        "Light11" => Ok(TableStyle::Light11),
+        "Light12" => Ok(TableStyle::Light12),
+        "Light13" => Ok(TableStyle::Light13),
+        "Light14" => Ok(TableStyle::Light14),
+        "Light15" => Ok(TableStyle::Light15),
+        "Light16" => Ok(TableStyle::Light16),
+        "Light17" => Ok(TableStyle::Light17),
+        "Light18" => Ok(TableStyle::Light18),
+        "Light19" => Ok(TableStyle::Light19),
+        "Light20" => Ok(TableStyle::Light20),
+        "Light21" => Ok(TableStyle::Light21),
+        "Medium1" => Ok(TableStyle::Medium1),
+        "Medium2" => Ok(TableStyle::Medium2),
+        "Medium3" => Ok(TableStyle::Medium3),
+        "Medium4" => Ok(TableStyle::Medium4),
+        "Medium5" => Ok(TableStyle::Medium5),
+        "Medium6" => Ok(TableStyle::Medium6),
+        "Medium7" => Ok(TableStyle::Medium7),
+        "Medium8" => Ok(TableStyle::Medium8),
+        "Medium9" => Ok(TableStyle::Medium9),
+        "Medium10" => Ok(TableStyle::Medium10),
+        "Medium11" => Ok(TableStyle::Medium11),
+        "Medium12" => Ok(TableStyle::Medium12),
+        "Medium13" => Ok(TableStyle::Medium13),
+        "Medium14" => Ok(TableStyle::Medium14),
+        "Medium15" => Ok(TableStyle::Medium15),
+        "Medium16" => Ok(TableStyle::Medium16),
+        "Medium17" => Ok(TableStyle::Medium17),
+        "Medium18" => Ok(TableStyle::Medium18),
+        "Medium19" => Ok(TableStyle::Medium19),
+        "Medium20" => Ok(TableStyle::Medium20),
+        "Medium21" => Ok(TableStyle::Medium21),
+        "Medium22" => Ok(TableStyle::Medium22),
+        "Medium23" => Ok(TableStyle::Medium23),
+        "Medium24" => Ok(TableStyle::Medium24),
+        "Medium25" => Ok(TableStyle::Medium25),
+        "Medium26" => Ok(TableStyle::Medium26),
+        "Medium27" => Ok(TableStyle::Medium27),
+        "Medium28" => Ok(TableStyle::Medium28),
+        "Dark1" => Ok(TableStyle::Dark1),
+        "Dark2" => Ok(TableStyle::Dark2),
+        "Dark3" => Ok(TableStyle::Dark3),
+        "Dark4" => Ok(TableStyle::Dark4),
+        "Dark5" => Ok(TableStyle::Dark5),
+        "Dark6" => Ok(TableStyle::Dark6),
+        "Dark7" => Ok(TableStyle::Dark7),
+        "Dark8" => Ok(TableStyle::Dark8),
+        "Dark9" => Ok(TableStyle::Dark9),
+        "Dark10" => Ok(TableStyle::Dark10),
+        "Dark11" => Ok(TableStyle::Dark11),
+        _ => Err(format!(
+            "Unknown table_style '{}'. Valid styles: Light1-Light21, Medium1-Medium28, Dark1-Dark11, None",
+            style
+        )),
     }
 }
 
@@ -334,10 +389,11 @@ fn extract_header_format(
 }
 
 /// Extract column_formats from Python dict (pattern -> format dict)
+/// Uses IndexMap to preserve insertion order from Python dict
 fn extract_column_formats(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, HashMap<String, PyObject>>> {
-    let mut col_fmts: HashMap<String, HashMap<String, PyObject>> = HashMap::new();
+) -> PyResult<IndexMap<String, HashMap<String, PyObject>>> {
+    let mut col_fmts: IndexMap<String, HashMap<String, PyObject>> = IndexMap::new();
     for (pattern, fmt_dict) in py_dict.iter() {
         let pattern_str: String = pattern.extract()?;
         if let Ok(inner_dict) = fmt_dict.downcast::<pyo3::types::PyDict>() {
@@ -378,6 +434,13 @@ fn sanitize_table_name(name: &str) -> String {
 fn parse_color(color_str: &str) -> Result<u32, String> {
     let color = color_str.trim();
     if let Some(hex) = color.strip_prefix('#') {
+        if hex.len() != 6 {
+            return Err(format!(
+                "Invalid hex color '{}': expected 6 characters after #, got {}",
+                color,
+                hex.len()
+            ));
+        }
         u32::from_str_radix(hex, 16).map_err(|_| format!("Invalid hex color: {}", color))
     } else {
         match color.to_lowercase().as_str() {
@@ -550,15 +613,16 @@ fn parse_column_format(
 
 /// Build a vector of column formats, one for each column.
 /// Returns None for columns with no matching pattern.
+/// Uses IndexMap to preserve pattern order - first matching pattern wins.
 fn build_column_formats(
     py: Python<'_>,
     columns: &[String],
-    column_formats: &HashMap<String, HashMap<String, PyObject>>,
+    column_formats: &IndexMap<String, HashMap<String, PyObject>>,
 ) -> Result<Vec<Option<Format>>, String> {
     let mut formats = Vec::with_capacity(columns.len());
 
     for col_name in columns {
-        // Find the first matching pattern
+        // Find the first matching pattern (order preserved by IndexMap)
         let mut matched_format: Option<Format> = None;
         for (pattern, fmt_dict) in column_formats {
             if matches_pattern(col_name, pattern) {
@@ -573,7 +637,7 @@ fn build_column_formats(
 }
 
 /// Parse a string value and detect its type
-fn parse_value(value: &str) -> CellValue {
+fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
     let trimmed = value.trim();
 
     if trimmed.is_empty() {
@@ -609,8 +673,8 @@ fn parse_value(value: &str) -> CellValue {
         }
     }
 
-    // Try date
-    for pattern in DATE_PATTERNS {
+    // Try date with locale-aware ordering
+    for pattern in date_order.patterns() {
         if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, pattern) {
             let excel_date = naive_date_to_excel(date);
             return CellValue::Date(excel_date);
@@ -678,6 +742,7 @@ fn write_cell(
 /// * `input_path` - Path to the input CSV file
 /// * `output_path` - Path for the output XLSX file
 /// * `sheet_name` - Name of the worksheet (default: "Sheet1")
+/// * `date_order` - Date parsing order for ambiguous dates (default: Auto)
 ///
 /// # Returns
 /// * `Ok((rows, cols))` - Number of rows and columns written
@@ -686,6 +751,7 @@ pub fn convert_csv_to_xlsx(
     input_path: &str,
     output_path: &str,
     sheet_name: &str,
+    date_order: DateOrder,
 ) -> Result<(u32, u16), String> {
     // Open CSV file
     let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
@@ -718,7 +784,7 @@ pub fn convert_csv_to_xlsx(
         }
 
         for (col_idx, value) in record.iter().enumerate() {
-            let cell_value = parse_value(value);
+            let cell_value = parse_value(value, date_order);
             write_cell(
                 worksheet,
                 row_count,
@@ -749,6 +815,7 @@ pub fn convert_csv_to_xlsx_parallel(
     input_path: &str,
     output_path: &str,
     sheet_name: &str,
+    date_order: DateOrder,
 ) -> Result<(u32, u16), String> {
     // Open CSV file
     let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
@@ -775,7 +842,11 @@ pub fn convert_csv_to_xlsx_parallel(
     // Parse all values in parallel
     let parsed_rows: Vec<Vec<CellValue>> = records
         .par_iter()
-        .map(|row| row.iter().map(|value| parse_value(value)).collect())
+        .map(|row| {
+            row.iter()
+                .map(|value| parse_value(value, date_order))
+                .collect()
+        })
         .collect();
 
     // Create workbook and worksheet
@@ -815,192 +886,6 @@ pub fn convert_csv_to_xlsx_parallel(
 // ============================================================================
 // DataFrame support
 // ============================================================================
-
-/// Write a Python value to the worksheet, detecting type automatically
-#[allow(dead_code)]
-fn write_py_value(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    value: &Bound<'_, PyAny>,
-    date_format: &Format,
-    datetime_format: &Format,
-) -> Result<(), String> {
-    // Check for None first
-    if value.is_none() {
-        worksheet
-            .write_string(row, col, "")
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Check for pandas NA/NaT
-    let type_name = value
-        .get_type()
-        .name()
-        .map_err(|e| e.to_string())?
-        .to_string();
-    if type_name == "NAType" || type_name == "NaTType" {
-        worksheet
-            .write_string(row, col, "")
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try boolean first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = value.downcast::<PyBool>() {
-        worksheet
-            .write_boolean(row, col, b.is_true())
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try datetime (before date, since datetime is subclass of date)
-    // Check by type name since PyDateTime is not available in abi3 mode
-    if type_name == "datetime" || type_name == "Timestamp" {
-        // pandas Timestamp or datetime.datetime
-        let year: i32 = value
-            .getattr("year")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1900);
-        let month: u32 = value
-            .getattr("month")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let day: u32 = value
-            .getattr("day")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let hour: u32 = value
-            .getattr("hour")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-        let minute: u32 = value
-            .getattr("minute")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-        let second: u32 = value
-            .getattr("second")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
-                let dt = chrono::NaiveDateTime::new(date, time);
-                let excel_dt = naive_datetime_to_excel(dt);
-                worksheet
-                    .write_number_with_format(row, col, excel_dt, datetime_format)
-                    .map_err(|e| e.to_string())?;
-                return Ok(());
-            }
-        }
-    }
-
-    // Try date
-    if type_name == "date" {
-        let year: i32 = value
-            .getattr("year")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1900);
-        let month: u32 = value
-            .getattr("month")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let day: u32 = value
-            .getattr("day")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            let excel_date = naive_date_to_excel(date);
-            worksheet
-                .write_number_with_format(row, col, excel_date, date_format)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-    }
-
-    // Try integer
-    if let Ok(i) = value.downcast::<PyInt>() {
-        if let Ok(val) = i.extract::<i64>() {
-            worksheet
-                .write_number(row, col, val as f64)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-    }
-
-    // Try float
-    if let Ok(f) = value.downcast::<PyFloat>() {
-        if let Ok(val) = f.extract::<f64>() {
-            if val.is_nan() || val.is_infinite() {
-                worksheet
-                    .write_string(row, col, "")
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_number(row, col, val)
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
-        }
-    }
-
-    // Try to extract as f64 (covers numpy types)
-    if let Ok(val) = value.extract::<f64>() {
-        if val.is_nan() || val.is_infinite() {
-            worksheet
-                .write_string(row, col, "")
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Try to extract as i64 (covers numpy int types)
-    if let Ok(val) = value.extract::<i64>() {
-        worksheet
-            .write_number(row, col, val as f64)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try to extract as bool
-    if let Ok(val) = value.extract::<bool>() {
-        worksheet
-            .write_boolean(row, col, val)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try string
-    if let Ok(s) = value.downcast::<PyString>() {
-        worksheet
-            .write_string(row, col, s.to_string())
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Fallback: convert to string
-    let s = value.str().map_err(|e| e.to_string())?.to_string();
-    worksheet
-        .write_string(row, col, &s)
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
 
 /// Write a Python value to the worksheet with optional column format
 fn write_py_value_with_format(
@@ -1262,7 +1147,7 @@ fn convert_dataframe_to_xlsx(
     header_format: Option<&HashMap<String, PyObject>>,
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
-    column_formats: Option<&HashMap<String, HashMap<String, PyObject>>>,
+    column_formats: Option<&IndexMap<String, HashMap<String, PyObject>>>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -1415,9 +1300,10 @@ fn convert_dataframe_to_xlsx(
     }
 
     // Add Excel Table if requested (not supported in constant_memory mode)
+    // Tables require at least one data row, so skip if DataFrame is empty
     if let Some(style_name) = table_style {
-        if !constant_memory {
-            let style = parse_table_style(style_name);
+        if !constant_memory && row_count > 0 {
+            let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
             // Apply table name if provided
@@ -1498,6 +1384,10 @@ fn convert_dataframe_to_xlsx(
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
 ///     parallel: Use multi-core parallel processing (default: False).
 ///               Faster for large files (100K+ rows) but uses more memory.
+///     date_order: Date parsing order for ambiguous dates like "01-02-2024" (default: "auto").
+///                 "auto" - ISO first, then European (DMY), then US (MDY)
+///                 "mdy" or "us" - US format: 01-02-2024 = January 2nd
+///                 "dmy" or "eu" - European format: 01-02-2024 = February 1st
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -1508,20 +1398,30 @@ fn convert_dataframe_to_xlsx(
 /// Example:
 ///     >>> import xlsxturbo
 ///     >>> rows, cols = xlsxturbo.csv_to_xlsx("data.csv", "output.xlsx")
+///     >>> # For US date format (MM-DD-YYYY):
+///     >>> rows, cols = xlsxturbo.csv_to_xlsx("data.csv", "out.xlsx", date_order="us")
 ///     >>> # For large files, use parallel processing:
 ///     >>> rows, cols = xlsxturbo.csv_to_xlsx("big.csv", "out.xlsx", parallel=True)
 #[pyfunction]
-#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false))]
+#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false, date_order = "auto"))]
 fn csv_to_xlsx(
     input_path: &str,
     output_path: &str,
     sheet_name: &str,
     parallel: bool,
+    date_order: &str,
 ) -> PyResult<(u32, u16)> {
+    let order = DateOrder::parse(date_order).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu",
+            date_order
+        ))
+    })?;
+
     let result = if parallel {
-        convert_csv_to_xlsx_parallel(input_path, output_path, sheet_name)
+        convert_csv_to_xlsx_parallel(input_path, output_path, sheet_name, order)
     } else {
-        convert_csv_to_xlsx(input_path, output_path, sheet_name)
+        convert_csv_to_xlsx(input_path, output_path, sheet_name, order)
     };
     result.map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -1551,7 +1451,7 @@ fn csv_to_xlsx(
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
-///                     Example: {"mcpt_*": {"bg_color": "#D6EAF8", "num_format": "0.00000"}}
+///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -1612,7 +1512,7 @@ fn df_to_xlsx<'py>(
         None
     };
 
-    // Extract column_formats if provided
+    // Extract column_formats if provided (uses IndexMap to preserve order)
     let extracted_column_formats = if let Some(cf) = column_formats {
         if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
             Some(extract_column_formats(dict)?)
@@ -1677,7 +1577,7 @@ fn version() -> &'static str {
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
-///                     Example: {"mcpt_*": {"bg_color": "#D6EAF8", "num_format": "0.00000"}}
+///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -1742,7 +1642,7 @@ fn dfs_to_xlsx<'py>(
         None
     };
 
-    // Extract global column_formats if provided
+    // Extract global column_formats if provided (uses IndexMap to preserve order)
     let extracted_column_formats = if let Some(cf) = column_formats {
         if let Ok(dict) = cf.downcast::<pyo3::types::PyDict>() {
             Some(extract_column_formats(dict)?)
@@ -1950,9 +1850,11 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Add Excel Table if requested (not supported in constant_memory mode)
+        // Tables require at least one data row, so skip if DataFrame is empty
         if let Some(ref style_name) = effective_table_style {
-            if !constant_memory {
-                let style = parse_table_style(style_name);
+            if !constant_memory && row_count > 0 {
+                let style = parse_table_style(style_name)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let mut table = Table::new().set_style(style);
 
                 // Apply table name if provided
@@ -2060,13 +1962,19 @@ mod tests {
 
     #[test]
     fn test_parse_integer() {
-        assert!(matches!(parse_value("123"), CellValue::Integer(123)));
-        assert!(matches!(parse_value("-456"), CellValue::Integer(-456)));
+        assert!(matches!(
+            parse_value("123", DateOrder::Auto),
+            CellValue::Integer(123)
+        ));
+        assert!(matches!(
+            parse_value("-456", DateOrder::Auto),
+            CellValue::Integer(-456)
+        ));
     }
 
     #[test]
     fn test_parse_float() {
-        if let CellValue::Float(v) = parse_value("3.14") {
+        if let CellValue::Float(v) = parse_value("3.14", DateOrder::Auto) {
             assert!((v - 3.14).abs() < 0.001);
         } else {
             panic!("Expected float");
@@ -2075,40 +1983,67 @@ mod tests {
 
     #[test]
     fn test_parse_boolean() {
-        assert!(matches!(parse_value("true"), CellValue::Boolean(true)));
-        assert!(matches!(parse_value("TRUE"), CellValue::Boolean(true)));
-        assert!(matches!(parse_value("false"), CellValue::Boolean(false)));
-        assert!(matches!(parse_value("False"), CellValue::Boolean(false)));
+        assert!(matches!(
+            parse_value("true", DateOrder::Auto),
+            CellValue::Boolean(true)
+        ));
+        assert!(matches!(
+            parse_value("TRUE", DateOrder::Auto),
+            CellValue::Boolean(true)
+        ));
+        assert!(matches!(
+            parse_value("false", DateOrder::Auto),
+            CellValue::Boolean(false)
+        ));
+        assert!(matches!(
+            parse_value("False", DateOrder::Auto),
+            CellValue::Boolean(false)
+        ));
     }
 
     #[test]
     fn test_parse_empty() {
-        assert!(matches!(parse_value(""), CellValue::Empty));
-        assert!(matches!(parse_value("   "), CellValue::Empty));
-        assert!(matches!(parse_value("NaN"), CellValue::Empty));
+        assert!(matches!(parse_value("", DateOrder::Auto), CellValue::Empty));
+        assert!(matches!(
+            parse_value("   ", DateOrder::Auto),
+            CellValue::Empty
+        ));
+        assert!(matches!(
+            parse_value("NaN", DateOrder::Auto),
+            CellValue::Empty
+        ));
     }
 
     #[test]
     fn test_parse_date() {
-        assert!(matches!(parse_value("2024-01-15"), CellValue::Date(_)));
-        assert!(matches!(parse_value("2024/01/15"), CellValue::Date(_)));
+        assert!(matches!(
+            parse_value("2024-01-15", DateOrder::Auto),
+            CellValue::Date(_)
+        ));
+        assert!(matches!(
+            parse_value("2024/01/15", DateOrder::Auto),
+            CellValue::Date(_)
+        ));
     }
 
     #[test]
     fn test_parse_datetime() {
         assert!(matches!(
-            parse_value("2024-01-15T10:30:00"),
+            parse_value("2024-01-15T10:30:00", DateOrder::Auto),
             CellValue::DateTime(_)
         ));
         assert!(matches!(
-            parse_value("2024-01-15 10:30:00"),
+            parse_value("2024-01-15 10:30:00", DateOrder::Auto),
             CellValue::DateTime(_)
         ));
     }
 
     #[test]
     fn test_parse_string() {
-        assert!(matches!(parse_value("hello"), CellValue::String(_)));
+        assert!(matches!(
+            parse_value("hello", DateOrder::Auto),
+            CellValue::String(_)
+        ));
     }
 
     #[test]
@@ -2119,9 +2054,9 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_prefix() {
-        assert!(matches_pattern("mcpt_weight", "mcpt_*"));
-        assert!(matches_pattern("mcpt_", "mcpt_*"));
-        assert!(!matches_pattern("cc_weight", "mcpt_*"));
+        assert!(matches_pattern("price_usd", "price_*"));
+        assert!(matches_pattern("price_", "price_*"));
+        assert!(!matches_pattern("cost_usd", "price_*"));
     }
 
     #[test]
