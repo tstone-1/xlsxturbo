@@ -189,9 +189,7 @@ class TestHeaderFormat:
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
                 ws = wb.active
-                # Note: table_style may override header_format styling
-                # This is expected Excel behavior - tables have their own header styles
-                pass
+                assert ws["A1"].font.bold == True
                 assert ws["B1"].font.bold == True
                 wb.close()
         finally:
@@ -239,10 +237,9 @@ class TestHeaderFormat:
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
                 ws = wb.active
-                # Note: table_style may override header_format styling
-                # This is expected Excel behavior - tables have their own header styles
-                pass
+                assert ws["A1"].font.bold == True
                 assert ws["A1"].fill.fgColor.rgb == "FF4F81BD"
+                assert ws["A1"].font.color.rgb == "FFFFFFFF"
                 wb.close()
         finally:
             os.unlink(path)
@@ -368,9 +365,8 @@ class TestAllFeaturesCombined:
                 wb = load_workbook(path)
                 ws = wb.active
                 assert "StudentScores" in ws.tables
-                # Note: table_style may override header_format styling
+                # Note: table_style overrides header_format styling
                 # This is expected Excel behavior - tables have their own header styles
-                pass
                 wb.close()
         finally:
             os.unlink(path)
@@ -417,6 +413,233 @@ class TestAllFeaturesCombined:
             os.unlink(path)
 
 
+class TestEdgeCases:
+    """Tests for edge cases and error handling"""
+
+    def test_empty_dataframe(self):
+        """Empty DataFrame writes successfully"""
+        df = pd.DataFrame({"A": [], "B": []})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 1  # Just header
+            assert cols == 2
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_empty_dataframe_with_table_style(self):
+        """Empty DataFrame with table_style writes without creating table"""
+        df = pd.DataFrame({"A": [], "B": []})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path, table_style="Medium2")
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # No table should be created for empty DataFrame
+                assert len(ws.tables) == 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_invalid_table_style_raises_error(self):
+        """Invalid table_style raises ValueError"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            try:
+                xlsxturbo.df_to_xlsx(df, path, table_style="InvalidStyle")
+                assert False, "Expected ValueError for invalid table_style"
+            except ValueError as e:
+                assert "Unknown table_style" in str(e)
+                assert "InvalidStyle" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_hex_color_raises_error(self):
+        """Invalid hex color format raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            try:
+                xlsxturbo.df_to_xlsx(df, path, header_format={"bg_color": "#FF"})
+                assert False, "Expected ValueError for invalid hex color"
+            except ValueError as e:
+                assert "expected 6 characters" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_column_formats_order_preserved(self):
+        """Column format patterns are matched in order (first match wins)"""
+        df = pd.DataFrame({"price_usd": [1.0], "price_eur": [2.0], "other": [3.0]})
+        path = get_temp_path()
+        try:
+            # The more specific pattern should be listed first to take priority
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                column_formats={
+                    "price_usd": {"bg_color": "#FF0000"},  # Specific - should match first
+                    "price_*": {"bg_color": "#0000FF"},  # General - should match price_eur
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # price_usd should be red (specific match)
+                assert ws["A2"].fill.fgColor.rgb == "FFFF0000"
+                # price_eur should be blue (wildcard match)
+                assert ws["B2"].fill.fgColor.rgb == "FF0000FF"
+                # other should have no background
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_empty_dataframe_no_header(self):
+        """Empty DataFrame with header=False"""
+        df = pd.DataFrame({"A": [], "B": []})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path, header=False)
+            assert rows == 0
+            assert cols == 2
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestDateOrder:
+    """Tests for date_order parameter in csv_to_xlsx"""
+
+    def test_date_order_us_parses_mdy(self):
+        """US date order parses 01-02-2024 as January 2"""
+        import csv
+        from datetime import datetime
+
+        # Create CSV with ambiguous date
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["date", "value"])
+                writer.writerow(["01-02-2024", "100"])
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, date_order="us")
+
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                cell_value = ws["A2"].value
+                # openpyxl returns datetime objects for Excel dates
+                assert isinstance(cell_value, datetime), f"Expected datetime, got {type(cell_value)}"
+                # US format: 01-02-2024 = January 2, 2024
+                assert cell_value.month == 1, f"Expected January (1), got month {cell_value.month}"
+                assert cell_value.day == 2, f"Expected day 2, got day {cell_value.day}"
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+    def test_date_order_eu_parses_dmy(self):
+        """European date order parses 01-02-2024 as February 1"""
+        import csv
+        from datetime import datetime
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["date", "value"])
+                writer.writerow(["01-02-2024", "100"])
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, date_order="eu")
+
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                cell_value = ws["A2"].value
+                assert isinstance(cell_value, datetime), f"Expected datetime, got {type(cell_value)}"
+                # EU format: 01-02-2024 = February 1, 2024
+                assert cell_value.month == 2, f"Expected February (2), got month {cell_value.month}"
+                assert cell_value.day == 1, f"Expected day 1, got day {cell_value.day}"
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+    def test_date_order_produces_different_results(self):
+        """US and EU date orders produce different Excel dates for ambiguous input"""
+        import csv
+        from datetime import datetime
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_us = get_temp_path()
+        xlsx_eu = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["date"])
+                writer.writerow(["03-04-2024"])  # Mar 4 (US) vs Apr 3 (EU)
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_us, date_order="us")
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_eu, date_order="eu")
+
+            if HAS_OPENPYXL:
+                wb_us = load_workbook(xlsx_us)
+                wb_eu = load_workbook(xlsx_eu)
+                us_value = wb_us.active["A2"].value
+                eu_value = wb_eu.active["A2"].value
+                wb_us.close()
+                wb_eu.close()
+
+                # Values should be different dates
+                assert us_value != eu_value, "US and EU should produce different dates"
+                # US: March 4, EU: April 3 (30 days difference)
+                diff = abs((us_value - eu_value).days)
+                assert diff == 30, f"Expected 30 day difference, got {diff}"
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_us):
+                os.unlink(xlsx_us)
+            if os.path.exists(xlsx_eu):
+                os.unlink(xlsx_eu)
+
+    def test_invalid_date_order_raises(self):
+        """Invalid date_order raises ValueError"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["a"])
+                writer.writerow(["1"])
+
+            try:
+                xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, date_order="invalid")
+                assert False, "Expected ValueError"
+            except ValueError as e:
+                assert "invalid" in str(e).lower()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -428,6 +651,8 @@ if __name__ == "__main__":
         TestBackwardCompatibility,
         TestPolarsSupport,
         TestAllFeaturesCombined,
+        TestEdgeCases,
+        TestDateOrder,
     ]
 
     failed = 0

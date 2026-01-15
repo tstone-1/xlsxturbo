@@ -1,6 +1,8 @@
 """Type stubs for xlsxturbo"""
 
-from typing import TypedDict
+from typing import Literal, TypedDict
+
+DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
 
 class HeaderFormat(TypedDict, total=False):
     """Header cell formatting options. All fields are optional."""
@@ -10,6 +12,17 @@ class HeaderFormat(TypedDict, total=False):
     bg_color: str    # '#RRGGBB' or named color
     font_size: float
     underline: bool
+
+class ColumnFormat(TypedDict, total=False):
+    """Column cell formatting options. All fields are optional."""
+    bold: bool
+    italic: bool
+    font_color: str  # '#RRGGBB' or named color (white, black, red, blue, etc.)
+    bg_color: str    # '#RRGGBB' or named color
+    font_size: float
+    underline: bool
+    num_format: str  # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
+    border: bool     # Add thin border around cells
 
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional."""
@@ -21,12 +34,14 @@ class SheetOptions(TypedDict, total=False):
     row_heights: dict[int, float] | None
     table_name: str | None
     header_format: HeaderFormat | None
+    column_formats: dict[str, ColumnFormat] | None  # Pattern -> format. Patterns: 'prefix*', '*suffix', '*contains*', exact
 
 def csv_to_xlsx(
     input_path: str,
     output_path: str,
     sheet_name: str = "Sheet1",
     parallel: bool = False,
+    date_order: DateOrder = "auto",
 ) -> tuple[int, int]:
     """
     Convert a CSV file to XLSX format with automatic type detection.
@@ -37,6 +52,10 @@ def csv_to_xlsx(
         sheet_name: Name of the worksheet (default: "Sheet1")
         parallel: Use multi-core parallel processing (default: False).
                   Faster for large files (100K+ rows) but uses more memory.
+        date_order: Date parsing order for ambiguous dates like "01-02-2024".
+            "auto" - ISO first, then European (DMY), then US (MDY)
+            "mdy" or "us" - US format: 01-02-2024 = January 2nd
+            "dmy" or "eu" - European format: 01-02-2024 = February 1st
 
     Returns:
         Tuple of (rows, columns) written to the Excel file
@@ -59,6 +78,7 @@ def df_to_xlsx(
     constant_memory: bool = False,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
+    column_formats: dict[str, ColumnFormat] | None = None,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -77,6 +97,9 @@ def df_to_xlsx(
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
+        column_formats: Dict mapping column name patterns to format options.
+            Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
+            First matching pattern wins (order preserved).
     """
     ...
 
@@ -92,6 +115,7 @@ def dfs_to_xlsx(
     constant_memory: bool = False,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
+    column_formats: dict[str, ColumnFormat] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -108,6 +132,8 @@ def dfs_to_xlsx(
         constant_memory: Use streaming mode (default: False).
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
+        column_formats: Dict mapping column name patterns to format options.
+            Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
     """
     ...
 

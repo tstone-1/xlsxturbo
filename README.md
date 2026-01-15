@@ -196,6 +196,49 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - underline (bool): Underlined text
 ```
 
+### Column Formatting
+
+Apply formatting to data columns using pattern matching:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'product_id': [1, 2, 3],
+    'product_name': ['Widget A', 'Widget B', 'Widget C'],
+    'price_usd': [19.99, 29.99, 39.99],
+    'price_eur': [17.99, 26.99, 35.99],
+    'quantity': [100, 75, 50]
+})
+
+# Format columns by pattern
+xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
+    'price_*': {'num_format': '$#,##0.00', 'bg_color': '#E8F5E9'},  # All price columns
+    'quantity': {'bold': True}  # Exact match
+})
+
+# Wildcard patterns:
+# - 'prefix*' matches columns starting with 'prefix'
+# - '*suffix' matches columns ending with 'suffix'
+# - '*contains*' matches columns containing 'contains'
+# - 'exact' matches column name exactly
+
+# Available format options:
+# - bg_color (str): Background color ('#RRGGBB' or named)
+# - font_color (str): Text color
+# - num_format (str): Excel number format ('0.00', '#,##0', '0.00%', etc.)
+# - bold (bool): Bold text
+# - italic (bool): Italic text
+# - underline (bool): Underlined text
+# - border (bool): Add thin border
+
+# First matching pattern wins (order preserved)
+xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
+    'price_usd': {'bg_color': '#FFEB3B'},  # Specific: yellow for USD
+    'price_*': {'bg_color': '#E3F2FD'}     # General: blue for other prices
+})
+```
 
 ### Multi-Sheet Workbooks
 
@@ -306,23 +349,43 @@ xlsxturbo.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
 
 # For large files (100K+ rows), use parallel processing
 xlsxturbo.csv_to_xlsx("big_data.csv", "output.xlsx", parallel=True)
+
+# Handle ambiguous dates (01-02-2024: is it Jan 2 or Feb 1?)
+xlsxturbo.csv_to_xlsx("us_data.csv", "output.xlsx", date_order="us")   # January 2
+xlsxturbo.csv_to_xlsx("eu_data.csv", "output.xlsx", date_order="eu")   # February 1
+
+# date_order options:
+# - "auto" (default): ISO first, then European (DMY), then US (MDY)
+# - "mdy" or "us": US format (MM-DD-YYYY)
+# - "dmy" or "eu": European format (DD-MM-YYYY)
 ```
 
 ## CLI Usage
 
 ```bash
-xlsxturbo input.csv output.xlsx [--sheet-name "Sheet1"] [-v]
+xlsxturbo input.csv output.xlsx [OPTIONS]
 ```
 
 ### Options
 
-- `-s, --sheet-name`: Name of the Excel sheet (default: "Sheet1")
+- `-s, --sheet-name <NAME>`: Name of the Excel sheet (default: "Sheet1")
+- `-d, --date-order <ORDER>`: Date parsing order for ambiguous dates (default: "auto")
+  - `auto`: ISO first, then European, then US
+  - `mdy` or `us`: US format (01-02-2024 = January 2)
+  - `dmy` or `eu`: European format (01-02-2024 = February 1)
 - `-v, --verbose`: Show progress information
 
-### Example
+### Examples
 
 ```bash
-xlsxturbo sales.csv report.xlsx --sheet-name "Q4 Sales" -v
+# Basic conversion
+xlsxturbo sales.csv report.xlsx
+
+# With US date format
+xlsxturbo sales.csv report.xlsx --date-order us
+
+# With European date format and verbose output
+xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 ```
 
 ## Performance

@@ -4,6 +4,7 @@
 
 use clap::Parser;
 use std::time::Instant;
+use xlsxturbo::DateOrder;
 
 #[derive(Parser, Debug)]
 #[command(name = "fast_xlsx")]
@@ -28,6 +29,13 @@ struct Args {
     #[arg(short, long, default_value = "Sheet1")]
     sheet_name: String,
 
+    /// Date order for ambiguous dates like 01-02-2024
+    /// auto: ISO first, then European (DMY), then US (MDY)
+    /// mdy/us: US format (01-02-2024 = January 2)
+    /// dmy/eu: European format (01-02-2024 = February 1)
+    #[arg(short, long, default_value = "auto")]
+    date_order: String,
+
     /// Show progress information
     #[arg(short, long)]
     verbose: bool,
@@ -36,25 +44,37 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    let date_order = DateOrder::parse(&args.date_order).unwrap_or_else(|| {
+        eprintln!(
+            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu",
+            args.date_order
+        );
+        std::process::exit(1);
+    });
+
     if args.verbose {
         eprintln!("fast_xlsx - CSV to XLSX converter");
         eprintln!("Input:  {}", args.input);
         eprintln!("Output: {}", args.output);
         eprintln!("Sheet:  {}", args.sheet_name);
+        eprintln!("Dates:  {:?}", date_order);
     }
 
     let start = Instant::now();
 
-    match xlsxturbo::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name) {
+    match xlsxturbo::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order) {
         Ok((rows, cols)) => {
             if args.verbose {
                 let duration = start.elapsed();
+                let secs = duration.as_secs_f64();
+                let rows_per_sec = if secs > 0.0 {
+                    format!("{:.0}", rows as f64 / secs)
+                } else {
+                    "instant".to_string()
+                };
                 eprintln!(
-                    "Converted {} rows x {} cols in {:.2}s ({:.0} rows/sec)",
-                    rows,
-                    cols,
-                    duration.as_secs_f64(),
-                    rows as f64 / duration.as_secs_f64()
+                    "Converted {} rows x {} cols in {:.2}s ({} rows/sec)",
+                    rows, cols, secs, rows_per_sec
                 );
             }
             println!("OK {} {}", rows, cols);
