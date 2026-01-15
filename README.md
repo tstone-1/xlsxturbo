@@ -7,6 +7,9 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Direct DataFrame support** for pandas and polars
 - **Excel tables** - filterable tables with 61 built-in styles (banded rows, autofilter)
 - **Conditional formatting** - color scales, data bars, icon sets for visual data analysis
+- **Formula columns** - add calculated columns with Excel formulas
+- **Merged cells** - merge cell ranges for headers and titles
+- **Hyperlinks** - add clickable links to cells
 - **Auto-fit columns** - automatically adjust column widths to fit content
 - **Custom column widths** - set specific widths per column or cap all with _all
 - **Header styling** - bold, colors, font size for header row
@@ -306,6 +309,9 @@ Available per-sheet options:
 - `header_format` (dict): Header cell styling
 - `column_formats` (dict): Column formatting with pattern matching
 - `conditional_formats` (dict): Conditional formatting (color scales, data bars, icons)
+- `formula_columns` (dict): Calculated columns with Excel formulas (column name -> formula template)
+- `merged_ranges` (list): List of (range, text) or (range, text, format) tuples to merge cells
+- `hyperlinks` (list): List of (cell, url) or (cell, url, display_text) tuples to add clickable links
 
 ### Conditional Formatting
 
@@ -366,6 +372,116 @@ Column patterns work with conditional formats:
 conditional_formats={'price_*': {'type': 'data_bar', 'bar_color': '#9B59B6'}}
 ```
 
+### Formula Columns
+
+Add calculated columns to your Excel output. Formulas are written after data columns and use `{row}` as a placeholder for the row number:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'price': [100, 200, 150],
+    'quantity': [5, 3, 8],
+    'tax_rate': [0.1, 0.1, 0.2]
+})
+
+xlsxturbo.df_to_xlsx(df, "sales.xlsx",
+    autofit=True,
+    formula_columns={
+        'Subtotal': '=A{row}*B{row}',      # price * quantity
+        'Tax': '=D{row}*C{row}',            # subtotal * tax_rate
+        'Total': '=D{row}+E{row}'           # subtotal + tax
+    }
+)
+```
+
+Formula columns appear after data columns (A=price, B=quantity, C=tax_rate, D=Subtotal, E=Tax, F=Total).
+
+**Notes:**
+- `{row}` is replaced with the Excel row number (1-based, starting at 2 for data rows when header=True)
+- Formula columns inherit header formatting if specified
+- Column order is preserved (first formula = first new column)
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+
+### Merged Cells
+
+Merge cell ranges to create headers, titles, or grouped labels:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'product': ['Widget A', 'Widget B'],
+    'sales': [1500, 2300],
+    'revenue': [7500, 11500]
+})
+
+# Merge cells for a title above the data
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    header=True,
+    merged_ranges=[
+        # Simple merge with text (auto-centered)
+        ('A1:C1', 'Q4 Sales Report'),
+        # Merge with custom formatting
+        ('A2:C2', 'Regional Data', {
+            'bold': True,
+            'bg_color': '#4F81BD',
+            'font_color': 'white'
+        })
+    ]
+)
+```
+
+**Merged range format:**
+- Tuple of `(range, text)` or `(range, text, format_dict)`
+- Range uses Excel notation: `'A1:D1'`, `'B3:B10'`, etc.
+- Format options same as `header_format`: bold, italic, font_color, bg_color, font_size, underline
+
+**Notes:**
+- Merged cells are applied after data is written, so plan row positions accordingly
+- When using with `header=True`, data starts at row 2 (Excel row 2)
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+
+### Hyperlinks
+
+Add clickable links to cells:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'company': ['Anthropic', 'Google', 'Microsoft'],
+    'product': ['Claude', 'Gemini', 'Copilot'],
+})
+
+# Add hyperlinks to a new column (D) after the data columns (A, B, C with header)
+xlsxturbo.df_to_xlsx(df, "companies.xlsx",
+    autofit=True,
+    hyperlinks=[
+        # Header for the links column
+        ('C1', 'https://example.com', 'Website'),
+        # Links with company names as display text
+        ('C2', 'https://anthropic.com', 'anthropic.com'),
+        ('C3', 'https://google.com', 'google.com'),
+        ('C4', 'https://microsoft.com', 'microsoft.com'),
+    ]
+)
+```
+
+**Hyperlink format:**
+- Tuple of `(cell, url)` or `(cell, url, display_text)`
+- Cell uses Excel notation: `'A1'`, `'B5'`, etc.
+- Display text is optional; if omitted, the URL is shown
+
+**Notes:**
+- Hyperlinks write to the specified cell position (overwrites existing content)
+- To add a "links column", target cells beyond your DataFrame columns (as shown above)
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
 ### Constant Memory Mode (Large Files)
 
 For very large files (millions of rows), use `constant_memory=True` to minimize RAM usage:
@@ -395,6 +511,9 @@ xlsxturbo.dfs_to_xlsx([
 - `row_heights`
 - `autofit`
 - `conditional_formats`
+- `formula_columns`
+- `merged_ranges`
+- `hyperlinks`
 
 Column widths still work in constant memory mode.
 

@@ -60,6 +60,9 @@ class SheetOptions(TypedDict, total=False):
     header_format: HeaderFormat | None
     column_formats: dict[str, ColumnFormat] | None  # Pattern -> format. Patterns: 'prefix*', '*suffix', '*contains*', exact
     conditional_formats: dict[str, ConditionalFormat] | None  # Column name/pattern -> conditional format config
+    formula_columns: dict[str, str] | None  # Column name -> Excel formula template with {row} placeholder
+    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text) or (range, text, format)
+    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url) or (cell, url, display_text)
 
 def csv_to_xlsx(
     input_path: str,
@@ -99,12 +102,15 @@ def df_to_xlsx(
     table_style: str | None = None,
     freeze_panes: bool = False,
     column_widths: dict[int | str, float] | None = None,
-    row_heights: dict[int, float] | None = None,
-    constant_memory: bool = False,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
+    row_heights: dict[int, float] | None = None,
+    constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
     conditional_formats: dict[str, ConditionalFormat] | None = None,
+    formula_columns: dict[str, str] | None = None,
+    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
+    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -129,6 +135,15 @@ def df_to_xlsx(
         conditional_formats: Dict mapping column names to conditional format configs.
             Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
             Example: {'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}
+        formula_columns: Dict mapping new column names to Excel formula templates.
+            Use {row} placeholder for the current row number (1-based Excel row).
+            Example: {'Total': '=A{row}+B{row}', 'Percentage': '=C{row}/D{row}*100'}
+        merged_ranges: List of (range, text) or (range, text, format) tuples to merge cells.
+            Range uses Excel notation (e.g., 'A1:D1'). Format uses HeaderFormat options.
+            Example: [('A1:B1', 'Title'), ('C1:D1', 'Subtitle', {'bold': True})]
+        hyperlinks: List of (cell, url) or (cell, url, display_text) tuples to add clickable links.
+            Cell uses Excel notation (e.g., 'A1'). Display text is optional.
+            Example: [('A2', 'https://example.com'), ('B2', 'https://google.com', 'Google')]
     """
     ...
 
@@ -140,12 +155,15 @@ def dfs_to_xlsx(
     table_style: str | None = None,
     freeze_panes: bool = False,
     column_widths: dict[int | str, float] | None = None,
-    row_heights: dict[int, float] | None = None,
-    constant_memory: bool = False,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
+    row_heights: dict[int, float] | None = None,
+    constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
     conditional_formats: dict[str, ConditionalFormat] | None = None,
+    formula_columns: dict[str, str] | None = None,
+    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
+    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -166,6 +184,12 @@ def dfs_to_xlsx(
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
         conditional_formats: Dict mapping column names to conditional format configs.
             Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
+        formula_columns: Dict mapping new column names to Excel formula templates.
+            Use {row} placeholder for the current row number (1-based Excel row).
+        merged_ranges: List of (range, text) or (range, text, format) tuples to merge cells.
+            Range uses Excel notation (e.g., 'A1:D1'). Format uses HeaderFormat options.
+        hyperlinks: List of (cell, url) or (cell, url, display_text) tuples to add clickable links.
+            Cell uses Excel notation (e.g., 'A1'). Display text is optional.
     """
     ...
 

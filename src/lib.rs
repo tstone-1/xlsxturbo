@@ -106,6 +106,12 @@ enum CellValue {
     String(String),
 }
 
+/// Type alias for merged range tuple: (range_str, text, optional format_dict)
+type MergedRange = (String, String, Option<HashMap<String, Py<PyAny>>>);
+
+/// Type alias for hyperlink tuple: (cell_ref, url, optional display_text)
+type Hyperlink = (String, String, Option<String>);
+
 /// Per-sheet configuration options (all optional, defaults to global settings)
 #[derive(Debug, Default)]
 struct SheetConfig {
@@ -119,6 +125,9 @@ struct SheetConfig {
     row_heights: Option<HashMap<u32, f64>>,
     column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Pattern -> format dict (ordered)
     conditional_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Column/pattern -> conditional format config (ordered)
+    formula_columns: Option<IndexMap<String, String>>, // Column name -> formula template (ordered)
+    merged_ranges: Option<Vec<MergedRange>>,           // (range, text, format)
+    hyperlinks: Option<Vec<Hyperlink>>,                // (cell, url, optional display_text)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -246,6 +255,41 @@ fn extract_sheet_info<'py>(
                     }
                     if !cond_fmts.is_empty() {
                         config.conditional_formats = Some(cond_fmts);
+                    }
+                }
+            }
+        }
+        if let Ok(val) = opts.get_item("formula_columns") {
+            if !val.is_none() {
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let mut formulas: IndexMap<String, String> = IndexMap::new();
+                    for (col_name, formula) in dict.iter() {
+                        let col_str: String = col_name.extract()?;
+                        let formula_str: String = formula.extract()?;
+                        formulas.insert(col_str, formula_str);
+                    }
+                    if !formulas.is_empty() {
+                        config.formula_columns = Some(formulas);
+                    }
+                }
+            }
+        }
+        if let Ok(val) = opts.get_item("merged_ranges") {
+            if !val.is_none() {
+                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
+                    let extracted = extract_merged_ranges(list)?;
+                    if !extracted.is_empty() {
+                        config.merged_ranges = Some(extracted);
+                    }
+                }
+            }
+        }
+        if let Ok(val) = opts.get_item("hyperlinks") {
+            if !val.is_none() {
+                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
+                    let extracted = extract_hyperlinks(list)?;
+                    if !extracted.is_empty() {
+                        config.hyperlinks = Some(extracted);
                     }
                 }
             }
@@ -451,6 +495,260 @@ fn extract_conditional_formats(
         }
     }
     Ok(cond_fmts)
+}
+
+/// Extract formula_columns from Python dict (column name -> formula template)
+/// Uses IndexMap to preserve column order
+fn extract_formula_columns(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<IndexMap<String, String>> {
+    let mut formulas: IndexMap<String, String> = IndexMap::new();
+    for (col_name, formula) in py_dict.iter() {
+        let col_str: String = col_name.extract()?;
+        let formula_str: String = formula.extract()?;
+        formulas.insert(col_str, formula_str);
+    }
+    Ok(formulas)
+}
+
+/// Apply formula columns to worksheet
+/// Formula templates can use {row} which is replaced with the actual row number (1-based)
+fn apply_formula_columns(
+    worksheet: &mut Worksheet,
+    formula_columns: &IndexMap<String, String>,
+    start_col: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+    header_format: Option<&Format>,
+) -> Result<u16, String> {
+    let mut col_offset = 0u16;
+
+    for (col_name, formula_template) in formula_columns {
+        let col_idx = start_col + col_offset;
+
+        // Write header for formula column
+        if let Some(fmt) = header_format {
+            worksheet
+                .write_string_with_format(0, col_idx, col_name, fmt)
+                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+        } else {
+            worksheet
+                .write_string(0, col_idx, col_name)
+                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+        }
+
+        // Write formula for each data row
+        for row in data_start_row..=data_end_row {
+            // Replace {row} with actual row number (Excel is 1-based)
+            let excel_row = row + 1; // Convert 0-based to 1-based
+            let formula = formula_template.replace("{row}", &excel_row.to_string());
+
+            worksheet
+                .write_formula(row, col_idx, formula.as_str())
+                .map_err(|e| format!("Failed to write formula at row {}: {}", row, e))?;
+        }
+
+        col_offset += 1;
+    }
+
+    Ok(col_offset)
+}
+
+/// Parse a cell reference like "A1" into (row, col) - 0-based
+fn parse_cell_ref(cell_ref: &str) -> Result<(u32, u16), String> {
+    let cell_ref = cell_ref.trim().to_uppercase();
+    if cell_ref.is_empty() {
+        return Err("Empty cell reference".to_string());
+    }
+
+    // Find where letters end and numbers begin
+    let col_end = cell_ref
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    if col_end == 0 {
+        return Err(format!(
+            "Invalid cell reference '{}': no column letters",
+            cell_ref
+        ));
+    }
+
+    let col_str = &cell_ref[..col_end];
+    let row_str = &cell_ref[col_end..];
+
+    if row_str.is_empty() {
+        return Err(format!(
+            "Invalid cell reference '{}': no row number",
+            cell_ref
+        ));
+    }
+
+    // Convert column letters to 0-based index (A=0, B=1, ..., Z=25, AA=26, etc.)
+    let col: u16 = col_str
+        .chars()
+        .fold(0u16, |acc, c| acc * 26 + (c as u16 - 'A' as u16 + 1))
+        .saturating_sub(1);
+
+    // Parse row number (Excel rows are 1-based, so must be >= 1)
+    let row_1based: u32 = row_str
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid row number in cell reference '{}'", cell_ref))?;
+
+    if row_1based == 0 {
+        return Err(format!(
+            "Invalid cell reference '{}': row number must be >= 1 (Excel rows are 1-based)",
+            cell_ref
+        ));
+    }
+
+    // Convert to 0-based index
+    let row = row_1based - 1;
+
+    Ok((row, col))
+}
+
+/// Parse a cell range like "A1:D1" into (first_row, first_col, last_row, last_col) - 0-based
+fn parse_cell_range(range_str: &str) -> Result<(u32, u16, u32, u16), String> {
+    let parts: Vec<&str> = range_str.split(':').collect();
+    if parts.len() != 2 {
+        return Err(format!(
+            "Invalid cell range '{}': expected format 'A1:B2'",
+            range_str
+        ));
+    }
+
+    let (first_row, first_col) = parse_cell_ref(parts[0])?;
+    let (last_row, last_col) = parse_cell_ref(parts[1])?;
+
+    Ok((first_row, first_col, last_row, last_col))
+}
+
+/// Extract merged_ranges from Python list of tuples
+/// Each tuple: (range_str, text) or (range_str, text, format_dict)
+fn extract_merged_ranges(py_list: &Bound<'_, pyo3::types::PyList>) -> PyResult<Vec<MergedRange>> {
+    let mut ranges = Vec::new();
+
+    for item in py_list.iter() {
+        let tuple_len = item.len()?;
+        if tuple_len < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "merged_ranges tuple must have at least 2 elements: (range, text)",
+            ));
+        }
+
+        let range_str: String = item.get_item(0)?.extract()?;
+        let text: String = item.get_item(1)?.extract()?;
+
+        let format_dict = if tuple_len >= 3 {
+            let fmt_item = item.get_item(2)?;
+            if !fmt_item.is_none() {
+                if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
+                    let mut fmt_map: HashMap<String, Py<PyAny>> = HashMap::new();
+                    for (k, v) in dict.iter() {
+                        let key: String = k.extract()?;
+                        fmt_map.insert(key, v.unbind());
+                    }
+                    Some(fmt_map)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        ranges.push((range_str, text, format_dict));
+    }
+
+    Ok(ranges)
+}
+
+/// Apply merged ranges to worksheet
+fn apply_merged_ranges(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    merged_ranges: &[MergedRange],
+) -> Result<(), String> {
+    for (range_str, text, format_dict) in merged_ranges {
+        let (first_row, first_col, last_row, last_col) = parse_cell_range(range_str)?;
+
+        // Build format if provided
+        let format = if let Some(fmt_dict) = format_dict {
+            let parsed = parse_header_format(py, fmt_dict)?;
+            Some(parsed)
+        } else {
+            None
+        };
+
+        // Apply merge with or without format
+        if let Some(ref fmt) = format {
+            worksheet
+                .merge_range(first_row, first_col, last_row, last_col, text, fmt)
+                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
+        } else {
+            // Create default center-aligned format for merged cells
+            let default_fmt = Format::new().set_align(rust_xlsxwriter::FormatAlign::Center);
+            worksheet
+                .merge_range(first_row, first_col, last_row, last_col, text, &default_fmt)
+                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract hyperlinks from Python list of tuples
+/// Each tuple: (cell_ref, url) or (cell_ref, url, display_text)
+fn extract_hyperlinks(py_list: &Bound<'_, pyo3::types::PyList>) -> PyResult<Vec<Hyperlink>> {
+    let mut links = Vec::new();
+
+    for item in py_list.iter() {
+        let tuple_len = item.len()?;
+        if tuple_len < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "hyperlinks tuple must have at least 2 elements: (cell_ref, url)",
+            ));
+        }
+
+        let cell_ref: String = item.get_item(0)?.extract()?;
+        let url: String = item.get_item(1)?.extract()?;
+
+        let display_text = if tuple_len >= 3 {
+            let text_item = item.get_item(2)?;
+            if !text_item.is_none() {
+                Some(text_item.extract()?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        links.push((cell_ref, url, display_text));
+    }
+
+    Ok(links)
+}
+
+/// Apply hyperlinks to worksheet
+fn apply_hyperlinks(worksheet: &mut Worksheet, hyperlinks: &[Hyperlink]) -> Result<(), String> {
+    for (cell_ref, url, display_text) in hyperlinks {
+        let (row, col) = parse_cell_ref(cell_ref)?;
+
+        if let Some(text) = display_text {
+            worksheet
+                .write_url_with_text(row, col, url.as_str(), text.as_str())
+                .map_err(|e| format!("Failed to write hyperlink at '{}': {}", cell_ref, e))?;
+        } else {
+            worksheet
+                .write_url(row, col, url.as_str())
+                .map_err(|e| format!("Failed to write hyperlink at '{}': {}", cell_ref, e))?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse icon type string to ConditionalFormatIconType
@@ -1426,6 +1724,9 @@ fn convert_dataframe_to_xlsx(
     constant_memory: bool,
     column_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
     conditional_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    formula_columns: Option<&IndexMap<String, String>>,
+    merged_ranges: Option<&[MergedRange]>,
+    hyperlinks: Option<&[Hyperlink]>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -1604,6 +1905,27 @@ fn convert_dataframe_to_xlsx(
         }
     }
 
+    // Apply formula columns (append calculated columns after data)
+    // Formula columns are added after the original data columns
+    let mut total_col_count = col_count;
+    if let Some(formulas) = formula_columns {
+        if !formulas.is_empty() && row_count > 0 {
+            let data_row_start = if include_header { 1u32 } else { 0u32 };
+            let data_row_end = row_idx.saturating_sub(1);
+            if data_row_end >= data_row_start {
+                let formula_cols_added = apply_formula_columns(
+                    worksheet,
+                    formulas,
+                    col_count, // Start after original data columns
+                    data_row_start,
+                    data_row_end,
+                    header_fmt.as_ref(),
+                )?;
+                total_col_count += formula_cols_added;
+            }
+        }
+    }
+
     // Apply conditional formats (not supported in constant_memory mode)
     if let Some(cond_fmts) = conditional_formats {
         if !constant_memory && row_count > 0 {
@@ -1654,12 +1976,26 @@ fn convert_dataframe_to_xlsx(
         }
     }
 
+    // Apply merged ranges (not supported in constant_memory mode)
+    if let Some(ranges) = merged_ranges {
+        if !constant_memory && !ranges.is_empty() {
+            apply_merged_ranges(py, worksheet, ranges)?;
+        }
+    }
+
+    // Apply hyperlinks (not supported in constant_memory mode)
+    if let Some(links) = hyperlinks {
+        if !constant_memory && !links.is_empty() {
+            apply_hyperlinks(worksheet, links)?;
+        }
+    }
+
     // Save workbook
     workbook
         .save(output_path)
         .map_err(|e| format!("Failed to save workbook: {}", e))?;
 
-    Ok((row_idx, col_count))
+    Ok((row_idx, total_col_count))
 }
 
 // ============================================================================
@@ -1777,7 +2113,7 @@ fn csv_to_xlsx(
 ///     ...     'status': {'type': 'icon_set', 'icon_type': '3_traffic_lights'}
 ///     ... })
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
     py: Python<'py>,
@@ -1795,6 +2131,9 @@ fn df_to_xlsx<'py>(
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
     conditional_formats: Option<&Bound<'py, PyAny>>,
+    formula_columns: Option<&Bound<'py, PyAny>>,
+    merged_ranges: Option<&Bound<'py, PyAny>>,
+    hyperlinks: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     // Extract column_widths if provided
     let extracted_column_widths = if let Some(cw) = column_widths {
@@ -1840,6 +2179,39 @@ fn df_to_xlsx<'py>(
         None
     };
 
+    // Extract formula_columns if provided (column name -> formula template)
+    let extracted_formula_columns = if let Some(fc) = formula_columns {
+        if let Ok(dict) = fc.cast::<pyo3::types::PyDict>() {
+            Some(extract_formula_columns(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract merged_ranges if provided (list of tuples)
+    let extracted_merged_ranges = if let Some(mr) = merged_ranges {
+        if let Ok(list) = mr.cast::<pyo3::types::PyList>() {
+            Some(extract_merged_ranges(list)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract hyperlinks if provided (list of tuples)
+    let extracted_hyperlinks = if let Some(hl) = hyperlinks {
+        if let Ok(list) = hl.cast::<pyo3::types::PyList>() {
+            Some(extract_hyperlinks(list)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     convert_dataframe_to_xlsx(
         py,
         df,
@@ -1856,6 +2228,9 @@ fn df_to_xlsx<'py>(
         constant_memory,
         extracted_column_formats.as_ref(),
         extracted_conditional_formats.as_ref(),
+        extracted_formula_columns.as_ref(),
+        extracted_merged_ranges.as_deref(),
+        extracted_hyperlinks.as_deref(),
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -1922,7 +2297,7 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
@@ -1939,6 +2314,9 @@ fn dfs_to_xlsx<'py>(
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
     conditional_formats: Option<&Bound<'py, PyAny>>,
+    formula_columns: Option<&Bound<'py, PyAny>>,
+    merged_ranges: Option<&Bound<'py, PyAny>>,
+    hyperlinks: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -1980,6 +2358,39 @@ fn dfs_to_xlsx<'py>(
     let extracted_conditional_formats = if let Some(cf) = conditional_formats {
         if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
             Some(extract_conditional_formats(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global formula_columns if provided
+    let extracted_formula_columns = if let Some(fc) = formula_columns {
+        if let Ok(dict) = fc.cast::<pyo3::types::PyDict>() {
+            Some(extract_formula_columns(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global merged_ranges if provided
+    let extracted_merged_ranges = if let Some(mr) = merged_ranges {
+        if let Ok(list) = mr.cast::<pyo3::types::PyList>() {
+            Some(extract_merged_ranges(list)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global hyperlinks if provided
+    let extracted_hyperlinks = if let Some(hl) = hyperlinks {
+        if let Ok(list) = hl.cast::<pyo3::types::PyList>() {
+            Some(extract_hyperlinks(list)?)
         } else {
             None
         }
@@ -2215,6 +2626,32 @@ fn dfs_to_xlsx<'py>(
             }
         }
 
+        // Apply formula columns (append calculated columns after data)
+        // Use per-sheet formula_columns or fall back to global
+        let effective_formula_columns = sheet_config
+            .formula_columns
+            .as_ref()
+            .or(extracted_formula_columns.as_ref());
+        let mut total_col_count = col_count;
+        if let Some(formulas) = effective_formula_columns {
+            if !formulas.is_empty() && row_count > 0 {
+                let data_row_start = if effective_header { 1u32 } else { 0u32 };
+                let data_row_end = row_idx.saturating_sub(1);
+                if data_row_end >= data_row_start {
+                    let formula_cols_added = apply_formula_columns(
+                        worksheet,
+                        formulas,
+                        col_count, // Start after original data columns
+                        data_row_start,
+                        data_row_end,
+                        effective_header_fmt.as_ref(),
+                    )
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                    total_col_count += formula_cols_added;
+                }
+            }
+        }
+
         // Apply conditional formats (not supported in constant_memory mode)
         // Use per-sheet conditional_formats or fall back to global
         let effective_conditional_formats = sheet_config
@@ -2276,7 +2713,33 @@ fn dfs_to_xlsx<'py>(
             }
         }
 
-        stats.push((row_idx, col_count));
+        // Apply merged ranges (not supported in constant_memory mode)
+        // Use per-sheet merged_ranges or fall back to global
+        let effective_merged_ranges = sheet_config
+            .merged_ranges
+            .as_ref()
+            .or(extracted_merged_ranges.as_ref());
+        if let Some(ranges) = effective_merged_ranges {
+            if !constant_memory && !ranges.is_empty() {
+                apply_merged_ranges(py, worksheet, ranges)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+        }
+
+        // Apply hyperlinks (not supported in constant_memory mode)
+        // Use per-sheet hyperlinks or fall back to global
+        let effective_hyperlinks = sheet_config
+            .hyperlinks
+            .as_ref()
+            .or(extracted_hyperlinks.as_ref());
+        if let Some(links) = effective_hyperlinks {
+            if !constant_memory && !links.is_empty() {
+                apply_hyperlinks(worksheet, links)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+        }
+
+        stats.push((row_idx, total_col_count));
     }
 
     // Save workbook
