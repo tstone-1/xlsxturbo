@@ -5,13 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-01-15
+
+### Added
+- **Date order parameter** - `date_order` for `csv_to_xlsx()` to handle ambiguous dates
+  - `"auto"` (default): ISO first, then European (DMY), then US (MDY)
+  - `"mdy"` or `"us"`: US format where 01-02-2024 = January 2nd
+  - `"dmy"` or `"eu"`: European format where 01-02-2024 = February 1st
+  - Also available in CLI: `--date-order us`
+- **BUILD.md** - Developer guide for building, testing, and releasing
+
+### Fixed
+- **Pattern matching order** - `column_formats` patterns now match in definition order (first match wins). Previously, HashMap iteration order was non-deterministic.
+- **Empty DataFrame with table_style** - No longer crashes; tables are skipped when DataFrame has no data rows
+- **Hex color validation** - Colors like `#FF` now raise descriptive error instead of silently misparsing
+- **Invalid table_style validation** - Unknown styles now raise error instead of silently defaulting to Medium9
+- **CLI division by zero** - Instant conversions now show "instant rows/sec" instead of "inf"
+
+### Changed
+- Uses `indexmap` crate to preserve pattern insertion order
+
 ## [0.7.0] - 2025-12-28
 
 ### Added
 - **Column formatting with wildcards** - `column_formats` parameter for styling columns by pattern
   - Wildcard patterns: `prefix*`, `*suffix`, `*contains*`, or exact match
   - Format options: `bg_color`, `font_color`, `num_format`, `bold`, `italic`, `underline`, `border`
-  - Example: `column_formats={'mcpt_*': {'bg_color': '#D6EAF8', 'num_format': '0.00000', 'border': True}}`
+  - Example: `column_formats={'price_*': {'bg_color': '#D6EAF8', 'num_format': '$#,##0.00', 'border': True}}`
   - Available in both `df_to_xlsx()` and `dfs_to_xlsx()`
   - Per-sheet column formats via options dict in `dfs_to_xlsx()`
 
@@ -121,6 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.8.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
