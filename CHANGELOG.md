@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-01-15
+
+### Added
+- **Conditional formatting** - Visual formatting based on cell values
+  - `2_color_scale`: Gradient from min_color to max_color
+  - `3_color_scale`: Three-color gradient with min/mid/max colors
+  - `data_bar`: In-cell bar chart with customizable color, direction, solid fill
+  - `icon_set`: Traffic lights, arrows, flags (3/4/5 icons), with reverse and icons_only options
+  - Supports column name patterns: `'price_*': {'type': 'data_bar', ...}`
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+  - Example: `conditional_formats={'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}`
+
 ## [0.8.0] - 2026-01-15
 
 ### Added
@@ -143,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.9.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
