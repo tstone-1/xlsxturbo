@@ -16,7 +16,11 @@ use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rayon::prelude::*;
-use rust_xlsxwriter::{Format, Table, TableStyle, Workbook, Worksheet, XlsxError};
+use rust_xlsxwriter::{
+    ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatDataBar,
+    ConditionalFormatDataBarDirection, ConditionalFormatIconSet, ConditionalFormatIconType, Format,
+    Table, TableStyle, Workbook, Worksheet, XlsxError,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -114,6 +118,7 @@ struct SheetConfig {
     header_format: Option<HashMap<String, Py<PyAny>>>,
     row_heights: Option<HashMap<u32, f64>>,
     column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Pattern -> format dict (ordered)
+    conditional_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Column/pattern -> conditional format config (ordered)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -220,6 +225,27 @@ fn extract_sheet_info<'py>(
                     }
                     if !col_fmts.is_empty() {
                         config.column_formats = Some(col_fmts);
+                    }
+                }
+            }
+        }
+        if let Ok(val) = opts.get_item("conditional_formats") {
+            if !val.is_none() {
+                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
+                    let mut cond_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
+                        IndexMap::new();
+                    for (col_name, fmt_dict) in outer_dict.iter() {
+                        let col_str: String = col_name.extract()?;
+                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
+                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
+                            for (k, v) in inner_dict.iter() {
+                                fmt.insert(k.extract()?, v.unbind());
+                            }
+                            cond_fmts.insert(col_str, fmt);
+                        }
+                    }
+                    if !cond_fmts.is_empty() {
+                        config.conditional_formats = Some(cond_fmts);
                     }
                 }
             }
@@ -406,6 +432,256 @@ fn extract_column_formats(
         }
     }
     Ok(col_fmts)
+}
+
+/// Extract conditional_formats from Python dict (column/pattern -> config dict)
+/// Uses IndexMap to preserve insertion order for pattern matching (first match wins)
+fn extract_conditional_formats(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<IndexMap<String, HashMap<String, Py<PyAny>>>> {
+    let mut cond_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
+    for (col_name, fmt_dict) in py_dict.iter() {
+        let col_str: String = col_name.extract()?;
+        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
+            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
+            for (k, v) in inner_dict.iter() {
+                fmt.insert(k.extract()?, v.unbind());
+            }
+            cond_fmts.insert(col_str, fmt);
+        }
+    }
+    Ok(cond_fmts)
+}
+
+/// Parse icon type string to ConditionalFormatIconType
+fn parse_icon_type(icon_type: &str) -> Result<ConditionalFormatIconType, String> {
+    match icon_type.to_lowercase().as_str() {
+        "3_arrows" | "3arrows" => Ok(ConditionalFormatIconType::ThreeArrows),
+        "3_arrows_gray" | "3arrowsgray" => Ok(ConditionalFormatIconType::ThreeArrowsGray),
+        "3_flags" | "3flags" => Ok(ConditionalFormatIconType::ThreeFlags),
+        "3_traffic_lights" | "3trafficlights" | "traffic_lights" => {
+            Ok(ConditionalFormatIconType::ThreeTrafficLights)
+        }
+        "3_traffic_lights_rimmed" | "3trafficlightsrimmed" => {
+            Ok(ConditionalFormatIconType::ThreeTrafficLightsWithRim)
+        }
+        "3_signs" | "3signs" => Ok(ConditionalFormatIconType::ThreeSigns),
+        "3_symbols" | "3symbols" => Ok(ConditionalFormatIconType::ThreeSymbolsCircled),
+        "3_symbols_uncircled" | "3symbolsuncircled" => {
+            Ok(ConditionalFormatIconType::ThreeSymbols)
+        }
+        "4_arrows" | "4arrows" => Ok(ConditionalFormatIconType::FourArrows),
+        "4_arrows_gray" | "4arrowsgray" => Ok(ConditionalFormatIconType::FourArrowsGray),
+        "4_rating" | "4rating" => Ok(ConditionalFormatIconType::FourHistograms),
+        "4_traffic_lights" | "4trafficlights" => {
+            Ok(ConditionalFormatIconType::FourTrafficLights)
+        }
+        "5_arrows" | "5arrows" => Ok(ConditionalFormatIconType::FiveArrows),
+        "5_arrows_gray" | "5arrowsgray" => Ok(ConditionalFormatIconType::FiveArrowsGray),
+        "5_rating" | "5rating" => Ok(ConditionalFormatIconType::FiveHistograms),
+        "5_quarters" | "5quarters" => Ok(ConditionalFormatIconType::FiveQuadrants),
+        _ => Err(format!(
+            "Unknown icon_type '{}'. Valid types: 3_arrows, 3_arrows_gray, 3_flags, 3_traffic_lights, 3_traffic_lights_rimmed, 3_signs, 3_symbols, 3_symbols_uncircled, 4_arrows, 4_arrows_gray, 4_rating, 4_traffic_lights, 5_arrows, 5_arrows_gray, 5_quarters, 5_rating",
+            icon_type
+        )),
+    }
+}
+
+/// Apply conditional formats to a worksheet
+/// Supports: 2_color_scale, 3_color_scale, data_bar, icon_set
+/// Uses IndexMap to preserve pattern order (first match wins for overlapping patterns)
+fn apply_conditional_formats(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    columns: &[String],
+    data_start_row: u32,
+    data_end_row: u32,
+    cond_formats: &IndexMap<String, HashMap<String, Py<PyAny>>>,
+) -> Result<(), String> {
+    for (col_pattern, config) in cond_formats {
+        // Find column index by name (supports exact match or pattern)
+        let col_indices: Vec<u16> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| matches_pattern(name, col_pattern))
+            .map(|(idx, _)| idx as u16)
+            .collect();
+
+        if col_indices.is_empty() {
+            continue; // Skip if no matching columns
+        }
+
+        // Get the format type
+        let format_type: String = config
+            .get("type")
+            .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
+            .bind(py)
+            .extract()
+            .map_err(|e| {
+                format!(
+                    "conditional_formats['{}']: invalid 'type': {}",
+                    col_pattern, e
+                )
+            })?;
+
+        for col_idx in col_indices {
+            match format_type.to_lowercase().as_str() {
+                "2_color_scale" | "2colorscale" | "two_color_scale" => {
+                    let mut cf = ConditionalFormat2ColorScale::new();
+
+                    // Parse min_color
+                    if let Some(min_color_obj) = config.get("min_color") {
+                        if let Ok(color_str) = min_color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_minimum_color(color);
+                        }
+                    }
+
+                    // Parse max_color
+                    if let Some(max_color_obj) = config.get("max_color") {
+                        if let Ok(color_str) = max_color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_maximum_color(color);
+                        }
+                    }
+
+                    worksheet
+                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
+                        .map_err(|e| format!("Failed to add 2_color_scale: {}", e))?;
+                }
+
+                "3_color_scale" | "3colorscale" | "three_color_scale" => {
+                    let mut cf = ConditionalFormat3ColorScale::new();
+
+                    // Parse min_color
+                    if let Some(min_color_obj) = config.get("min_color") {
+                        if let Ok(color_str) = min_color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_minimum_color(color);
+                        }
+                    }
+
+                    // Parse mid_color
+                    if let Some(mid_color_obj) = config.get("mid_color") {
+                        if let Ok(color_str) = mid_color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_midpoint_color(color);
+                        }
+                    }
+
+                    // Parse max_color
+                    if let Some(max_color_obj) = config.get("max_color") {
+                        if let Ok(color_str) = max_color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_maximum_color(color);
+                        }
+                    }
+
+                    worksheet
+                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
+                        .map_err(|e| format!("Failed to add 3_color_scale: {}", e))?;
+                }
+
+                "data_bar" | "databar" => {
+                    let mut cf = ConditionalFormatDataBar::new();
+
+                    // Parse bar_color (fill color)
+                    if let Some(color_obj) = config.get("bar_color") {
+                        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_fill_color(color);
+                        }
+                    }
+
+                    // Parse border_color
+                    if let Some(color_obj) = config.get("border_color") {
+                        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
+                            let color = parse_color(&color_str)?;
+                            cf = cf.set_border_color(color);
+                        }
+                    }
+
+                    // Parse solid (vs gradient)
+                    if let Some(solid_obj) = config.get("solid") {
+                        if let Ok(solid) = solid_obj.bind(py).extract::<bool>() {
+                            if solid {
+                                cf = cf.set_solid_fill(true);
+                            }
+                        }
+                    }
+
+                    // Parse direction
+                    if let Some(dir_obj) = config.get("direction") {
+                        if let Ok(dir_str) = dir_obj.bind(py).extract::<String>() {
+                            let direction = match dir_str.to_lowercase().as_str() {
+                                "left_to_right" | "ltr" => {
+                                    ConditionalFormatDataBarDirection::LeftToRight
+                                }
+                                "right_to_left" | "rtl" => {
+                                    ConditionalFormatDataBarDirection::RightToLeft
+                                }
+                                "context" | "" => ConditionalFormatDataBarDirection::Context,
+                                _ => {
+                                    return Err(format!(
+                                        "Unknown direction '{}'. Valid values: left_to_right, right_to_left, context",
+                                        dir_str
+                                    ));
+                                }
+                            };
+                            cf = cf.set_direction(direction);
+                        }
+                    }
+
+                    worksheet
+                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
+                        .map_err(|e| format!("Failed to add data_bar: {}", e))?;
+                }
+
+                "icon_set" | "iconset" => {
+                    let mut cf = ConditionalFormatIconSet::new();
+
+                    // Parse icon_type
+                    if let Some(icon_obj) = config.get("icon_type") {
+                        if let Ok(icon_str) = icon_obj.bind(py).extract::<String>() {
+                            let icon_type = parse_icon_type(&icon_str)?;
+                            cf = cf.set_icon_type(icon_type);
+                        }
+                    }
+
+                    // Parse reverse
+                    if let Some(rev_obj) = config.get("reverse") {
+                        if let Ok(reverse) = rev_obj.bind(py).extract::<bool>() {
+                            if reverse {
+                                cf = cf.reverse_icons(true);
+                            }
+                        }
+                    }
+
+                    // Parse icons_only (hide numbers, show only icons)
+                    if let Some(icons_only_obj) = config.get("icons_only") {
+                        if let Ok(icons_only) = icons_only_obj.bind(py).extract::<bool>() {
+                            if icons_only {
+                                cf = cf.show_icons_only(true);
+                            }
+                        }
+                    }
+
+                    worksheet
+                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
+                        .map_err(|e| format!("Failed to add icon_set: {}", e))?;
+                }
+
+                _ => {
+                    return Err(format!(
+                        "Unknown conditional format type '{}'. Valid types: 2_color_scale, 3_color_scale, data_bar, icon_set",
+                        format_type
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Sanitize table name for Excel (alphanumeric + underscore, must start with letter/underscore)
@@ -1149,6 +1425,7 @@ fn convert_dataframe_to_xlsx(
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
     column_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    conditional_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
 ) -> Result<(u32, u16), String> {
     // Create workbook and worksheet
     let mut workbook = Workbook::new();
@@ -1327,6 +1604,24 @@ fn convert_dataframe_to_xlsx(
         }
     }
 
+    // Apply conditional formats (not supported in constant_memory mode)
+    if let Some(cond_fmts) = conditional_formats {
+        if !constant_memory && row_count > 0 {
+            let data_row_start = if include_header { 1 } else { 0 };
+            let data_row_end = row_idx.saturating_sub(1);
+            if data_row_end >= data_row_start {
+                apply_conditional_formats(
+                    py,
+                    worksheet,
+                    &columns,
+                    data_row_start,
+                    data_row_end,
+                    cond_fmts,
+                )?;
+            }
+        }
+    }
+
     // Freeze panes (freeze header row) - not supported in constant_memory mode
     if freeze_panes && include_header && !constant_memory {
         worksheet
@@ -1475,8 +1770,14 @@ fn csv_to_xlsx(
 ///     >>> xlsxturbo.df_to_xlsx(df, "custom.xlsx", column_widths={0: 25, 1: 10}, row_heights={0: 20})
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
+///     >>> # With conditional formatting (color scales, data bars, icons):
+///     >>> xlsxturbo.df_to_xlsx(df, "heatmap.xlsx", conditional_formats={
+///     ...     'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'},
+///     ...     'progress': {'type': 'data_bar', 'bar_color': '#638EC6'},
+///     ...     'status': {'type': 'icon_set', 'icon_type': '3_traffic_lights'}
+///     ... })
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
     py: Python<'py>,
@@ -1493,6 +1794,7 @@ fn df_to_xlsx<'py>(
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
+    conditional_formats: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     // Extract column_widths if provided
     let extracted_column_widths = if let Some(cw) = column_widths {
@@ -1527,6 +1829,17 @@ fn df_to_xlsx<'py>(
         None
     };
 
+    // Extract conditional_formats if provided
+    let extracted_conditional_formats = if let Some(cf) = conditional_formats {
+        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
+            Some(extract_conditional_formats(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     convert_dataframe_to_xlsx(
         py,
         df,
@@ -1542,6 +1855,7 @@ fn df_to_xlsx<'py>(
         row_heights.as_ref(),
         constant_memory,
         extracted_column_formats.as_ref(),
+        extracted_conditional_formats.as_ref(),
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -1563,7 +1877,8 @@ fn version() -> &'static str {
 ///             - (DataFrame, sheet_name) - uses global defaults
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
-///             column_widths, row_heights, table_name, header_format, column_formats
+///             column_widths, row_heights, table_name, header_format, column_formats,
+///             conditional_formats
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -1582,6 +1897,9 @@ fn version() -> &'static str {
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
+///     conditional_formats: Dict mapping column names to conditional format configs (default: None)
+///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
+///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -1604,7 +1922,7 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
@@ -1620,6 +1938,7 @@ fn dfs_to_xlsx<'py>(
     row_heights: Option<HashMap<u32, f64>>,
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
+    conditional_formats: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -1650,6 +1969,17 @@ fn dfs_to_xlsx<'py>(
     let extracted_column_formats = if let Some(cf) = column_formats {
         if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
             Some(extract_column_formats(dict)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Extract global conditional_formats if provided
+    let extracted_conditional_formats = if let Some(cf) = conditional_formats {
+        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
+            Some(extract_conditional_formats(dict)?)
         } else {
             None
         }
@@ -1881,6 +2211,30 @@ fn dfs_to_xlsx<'py>(
                                 e
                             ))
                         })?;
+                }
+            }
+        }
+
+        // Apply conditional formats (not supported in constant_memory mode)
+        // Use per-sheet conditional_formats or fall back to global
+        let effective_conditional_formats = sheet_config
+            .conditional_formats
+            .as_ref()
+            .or(extracted_conditional_formats.as_ref());
+        if let Some(cond_fmts) = effective_conditional_formats {
+            if !constant_memory && row_count > 0 {
+                let data_row_start = if effective_header { 1 } else { 0 };
+                let data_row_end = row_idx.saturating_sub(1);
+                if data_row_end >= data_row_start {
+                    apply_conditional_formats(
+                        py,
+                        worksheet,
+                        &columns,
+                        data_row_start,
+                        data_row_end,
+                        cond_fmts,
+                    )
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 }
             }
         }
