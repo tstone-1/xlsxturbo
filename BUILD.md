@@ -99,7 +99,20 @@ git commit -m "chore: bump version to X.Y.Z"
 git push origin main
 ```
 
-### 4. Verify CI Passes
+### 4. Check Dependabot PRs
+
+Before releasing, review open Dependabot PRs:
+
+1. Go to: https://github.com/tstone-1/xlsxturbo/pulls
+2. Check for open Dependabot PRs (dependency updates)
+3. For each PR, decide:
+   - **Merge** if CI passes and update is safe
+   - **Close** if update causes issues or is not needed yet
+   - **Defer** to next release (document why)
+
+Don't release with unreviewed dependency PRs piling up.
+
+### 5. Verify CI Passes
 
 **IMPORTANT:** Before creating a release tag, verify GitHub Actions succeed.
 
@@ -111,14 +124,14 @@ git push origin main
 
 Do NOT proceed if CI is failing.
 
-### 5. Create Release Tag
+### 6. Create Release Tag
 
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-### 6. Verify Release Workflow
+### 7. Verify Release Workflow
 
 After pushing the tag:
 
@@ -131,7 +144,7 @@ After pushing the tag:
    - **sdist**
    - **Publish to PyPI**
 
-### 7. Verify PyPI Publication
+### 8. Verify PyPI Publication
 
 1. Go to: https://pypi.org/project/xlsxturbo/
 2. Verify new version appears
