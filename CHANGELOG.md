@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports column name patterns: `'price_*': {'type': 'data_bar', ...}`
   - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
   - Example: `conditional_formats={'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}`
+- **Formula columns** - Add calculated columns with Excel formulas
+  - Use `{row}` placeholder for row numbers (1-based)
+  - Columns appear after data columns
+  - Order preserved (first formula = first new column)
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+  - Example: `formula_columns={'Total': '=A{row}+B{row}', 'Percentage': '=C{row}/D{row}*100'}`
+- **Merged cells** - Merge cell ranges for headers, titles, and grouped labels
+  - Uses Excel notation for ranges (e.g., 'A1:D1')
+  - Optional formatting with HeaderFormat options (bold, colors, etc.)
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+  - Example: `merged_ranges=[('A1:C1', 'Title'), ('A2:C2', 'Subtitle', {'bold': True})]`
+- **Hyperlinks** - Add clickable links to cells
+  - Uses Excel notation for cell reference (e.g., 'A1', 'B5')
+  - Optional display text (defaults to URL if not provided)
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+  - Example: `hyperlinks=[('A2', 'https://example.com'), ('B2', 'https://google.com', 'Google')]`
 
 ## [0.8.0] - 2026-01-15
 
