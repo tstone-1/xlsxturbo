@@ -31,7 +31,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
   - Datetimes (ISO 8601) → Excel datetimes
   - `NaN`/`Inf` → Empty cells (graceful handling)
   - Everything else → Text
-- **~25x faster** than pandas + openpyxl
+- **~6x faster** than pandas + openpyxl (see [benchmarks](#performance))
 - **Memory efficient** - streams data with 1MB buffer
 - Available as both **Python library** and **CLI tool**
 
@@ -774,15 +774,16 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 ## Performance
 
-Benchmarked on 525,684 rows x 98 columns:
+*Reference benchmark on 100,000 rows x 50 columns with mixed data types. Your results will vary by system - run the benchmark yourself (see [Benchmarking](#benchmarking)).*
 
-| Method | Time | Speedup |
-|--------|------|---------|
-| **xlsxturbo** | 28.5s | **26.7x** |
-| PyExcelerate | 107s | 7.1x |
-| pandas + xlsxwriter | 374s | 2.0x |
-| pandas + openpyxl | 762s | 1.0x |
-| polars.write_excel | 1039s | 0.7x |
+| Library | Time (s) | Rows/sec | vs xlsxturbo |
+|---------|----------|----------|--------------|
+| **xlsxturbo** | **6.65** | **15,033** | **1.0x** |
+| polars | 25.07 | 3,988 | 3.8x |
+| pandas + xlsxwriter | 35.60 | 2,809 | 5.4x |
+| pandas + openpyxl | 38.85 | 2,574 | 5.8x |
+
+*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads)*
 
 ## Type Detection Examples
 
@@ -818,14 +819,24 @@ maturin build --release
 
 ## Benchmarking
 
-Run the included benchmark script:
+Run the included benchmark scripts:
 
 ```bash
-# Default: 100K rows x 50 columns
-python benchmark.py
+# Compare xlsxturbo vs other libraries (100K rows default)
+python benchmarks/benchmark.py
+
+# Full benchmark: small, medium, large datasets
+python benchmarks/benchmark.py --full
 
 # Custom size
-python benchmark.py --rows 500000 --cols 100
+python benchmarks/benchmark.py --rows 500000 --cols 100
+
+# Output formats for CI/documentation
+python benchmarks/benchmark.py --markdown
+python benchmarks/benchmark.py --json
+
+# Test parallel vs single-threaded CSV conversion
+python benchmarks/benchmark_parallel.py
 ```
 
 ## License
