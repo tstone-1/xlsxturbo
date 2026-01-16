@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-01-16
+
+### Added
+- **Comments/Notes** - Add cell annotations with optional author
+  - Simple text: `comments={'A1': 'Note text'}`
+  - With author: `comments={'A1': {'text': 'Note', 'author': 'John'}}`
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+- **Data Validation** - Add dropdowns and constraints to columns
+  - List (dropdown): `validations={'Status': {'type': 'list', 'values': ['Open', 'Closed']}}`
+  - Whole number: `validations={'Score': {'type': 'whole_number', 'min': 0, 'max': 100}}`
+  - Decimal: `validations={'Price': {'type': 'decimal', 'min': 0.0, 'max': 999.99}}`
+  - Text length: `validations={'Code': {'type': 'text_length', 'min': 3, 'max': 10}}`
+  - Supports input/error messages: `input_title`, `input_message`, `error_title`, `error_message`
+  - Supports column patterns (like `column_formats`)
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+- **Rich Text** - Multiple formats within a single cell
+  - Format segments: `rich_text={'A1': [('Bold', {'bold': True}), ' normal text']}`
+  - Supports: `bold`, `italic`, `font_color`, `bg_color`, `font_size`, `underline`
+  - Mix formatted and plain text segments
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+- **Images** - Embed PNG, JPEG, GIF, BMP images in cells
+  - Simple path: `images={'B5': 'logo.png'}`
+  - With options: `images={'B5': {'path': 'logo.png', 'scale_width': 0.5, 'scale_height': 0.5}}`
+  - Options: `path`, `scale_width`, `scale_height`, `alt_text`
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+
+### Notes
+- All new features are disabled in `constant_memory` mode (they require random access)
+- Data validation list values are limited to 255 total characters (Excel limitation)
+
 ## [0.9.0] - 2026-01-15
 
 ### Added
@@ -171,6 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.10.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.7.0
