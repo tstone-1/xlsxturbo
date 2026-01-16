@@ -3,6 +3,7 @@ Tests for xlsxturbo features (v0.6.0+):
 - Global column width cap, table names, header styling (v0.6.0)
 - Column formatting with wildcards (v0.7.0)
 - Date order for CSV parsing, edge cases (v0.8.0)
+- Comments, validations, rich_text, images (v0.10.0)
 """
 
 import xlsxturbo
@@ -640,6 +641,363 @@ class TestDateOrder:
                 os.unlink(xlsx_path)
 
 
+class TestComments:
+    """Tests for comments/notes feature (v0.10.0)"""
+
+    def test_simple_comment(self):
+        """Simple string comment"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, comments={"A1": "This is a header note"})
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # openpyxl stores comments in ws.comments
+                assert ws["A1"].comment is not None
+                assert "header note" in ws["A1"].comment.text
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_comment_with_author(self):
+        """Comment with author"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, comments={"A2": {"text": "Data note", "author": "John"}}
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                comment = ws["A2"].comment
+                assert comment is not None
+                assert "Data note" in comment.text
+                assert comment.author == "John"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_multiple_comments(self):
+        """Multiple comments on different cells"""
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, comments={"A1": "Column A", "B1": "Column B", "A2": "First value"}
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestValidations:
+    """Tests for data validation feature (v0.10.0)"""
+
+    def test_list_validation(self):
+        """Dropdown list validation"""
+        df = pd.DataFrame({"Status": ["Open", "Closed"], "Value": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                validations={"Status": {"type": "list", "values": ["Open", "Closed", "Pending"]}},
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Check that data validation exists
+                assert len(ws.data_validations.dataValidation) > 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_number_validation(self):
+        """Whole number range validation"""
+        df = pd.DataFrame({"Score": [85, 90]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_validation_with_messages(self):
+        """Validation with input and error messages"""
+        df = pd.DataFrame({"Value": [50]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                validations={
+                    "Value": {
+                        "type": "decimal",
+                        "min": 0,
+                        "max": 100,
+                        "input_title": "Enter Value",
+                        "input_message": "Must be between 0 and 100",
+                        "error_title": "Invalid",
+                        "error_message": "Value out of range",
+                    }
+                },
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_validation_pattern_matching(self):
+        """Validation with column pattern"""
+        df = pd.DataFrame({"score_a": [80], "score_b": [90], "name": ["Test"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, validations={"score_*": {"type": "whole_number", "min": 0, "max": 100}}
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestRichText:
+    """Tests for rich text feature (v0.10.0)"""
+
+    def test_rich_text_bold(self):
+        """Rich text with bold formatting"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, rich_text={"A1": [("Bold", {"bold": True}), " normal"]}
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # openpyxl may have issues reading rich text, just verify file exists
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_rich_text_mixed_formats(self):
+        """Rich text with multiple format segments"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                rich_text={
+                    "B2": [
+                        ("Red text", {"font_color": "red"}),
+                        " and ",
+                        ("blue text", {"font_color": "blue", "italic": True}),
+                    ]
+                },
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_rich_text_plain_segments(self):
+        """Rich text with plain string segments"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, rich_text={"A3": ["Plain text ", ("bold", {"bold": True}), " more plain"]}
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestImages:
+    """Tests for images feature (v0.10.0)"""
+
+    def test_image_simple_path(self):
+        """Image with simple path"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        # Create a small test image (1x1 white pixel PNG)
+        import base64
+
+        # Smallest valid PNG (1x1 white pixel)
+        png_data = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        img_path = get_temp_path().replace(".xlsx", ".png")
+        try:
+            with open(img_path, "wb") as f:
+                f.write(png_data)
+
+            xlsxturbo.df_to_xlsx(df, path, images={"D1": img_path})
+            assert os.path.exists(path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+            if os.path.exists(img_path):
+                os.unlink(img_path)
+
+    def test_image_with_options(self):
+        """Image with scaling options"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        import base64
+
+        png_data = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        img_path = get_temp_path().replace(".xlsx", ".png")
+        try:
+            with open(img_path, "wb") as f:
+                f.write(png_data)
+
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                images={"B5": {"path": img_path, "scale_width": 2.0, "scale_height": 2.0}},
+            )
+            assert os.path.exists(path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+            if os.path.exists(img_path):
+                os.unlink(img_path)
+
+
+class TestV10AllFeatures:
+    """Tests combining v0.10.0 features"""
+
+    def test_all_new_features_together(self):
+        """All v0.10.0 features work together"""
+        df = pd.DataFrame({"Name": ["Alice", "Bob"], "Score": [85, 92]})
+        path = get_temp_path()
+        import base64
+
+        png_data = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        img_path = get_temp_path().replace(".xlsx", ".png")
+        try:
+            with open(img_path, "wb") as f:
+                f.write(png_data)
+
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                comments={"A1": "Names column", "B1": {"text": "Scores", "author": "Test"}},
+                validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
+                rich_text={"D1": [("Legend:", {"bold": True}), " student scores"]},
+                images={"E1": img_path},
+            )
+            assert os.path.exists(path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+            if os.path.exists(img_path):
+                os.unlink(img_path)
+
+    def test_new_features_with_dfs_to_xlsx(self):
+        """New features work with dfs_to_xlsx"""
+        df1 = pd.DataFrame({"A": [1, 2]})
+        df2 = pd.DataFrame({"B": [3, 4]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (df1, "Sheet1", {"comments": {"A1": "First sheet header"}}),
+                    (df2, "Sheet2", {"validations": {"B": {"type": "whole_number", "min": 0, "max": 10}}}),
+                ],
+                path,
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestErrorPaths:
+    """Tests for error handling (v0.10.0)"""
+
+    def test_nonexistent_image_file_raises_error(self):
+        """Non-existent image file raises clear error"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, images={"B1": "/nonexistent/path/to/image.png"})
+            assert False, "Should have raised an error"
+        except ValueError as e:
+            assert "Failed to load image" in str(e) or "image" in str(e).lower()
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_validation_list_exceeds_255_chars_raises_error(self):
+        """Validation list exceeding 255 chars raises clear error"""
+        df = pd.DataFrame({"Status": ["A"]})
+        path = get_temp_path()
+        # Create values that exceed 255 chars total
+        long_values = ["A" * 100, "B" * 100, "C" * 100]  # 300+ chars
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, validations={"Status": {"type": "list", "values": long_values}}
+            )
+            assert False, "Should have raised an error"
+        except ValueError as e:
+            assert "255" in str(e) and "character" in str(e).lower()
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_validation_config_raises_error(self):
+        """Invalid validation config (not a dict) raises clear error"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, validations={"A": "not_a_dict"})
+            assert False, "Should have raised an error"
+        except TypeError as e:
+            assert "expected dict" in str(e).lower()
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_rich_text_segment_raises_error(self):
+        """Invalid rich_text segment (not string or tuple) raises clear error"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, rich_text={"A1": [123]})  # int is invalid
+            assert False, "Should have raised an error"
+        except TypeError as e:
+            assert "segment" in str(e).lower() and ("string" in str(e).lower() or "tuple" in str(e).lower())
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_rich_text_not_list_raises_error(self):
+        """Invalid rich_text value (not a list) raises clear error"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, rich_text={"A1": "not_a_list"})
+            assert False, "Should have raised an error"
+        except TypeError as e:
+            assert "expected list" in str(e).lower()
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -653,6 +1011,12 @@ if __name__ == "__main__":
         TestAllFeaturesCombined,
         TestEdgeCases,
         TestDateOrder,
+        TestComments,
+        TestValidations,
+        TestRichText,
+        TestImages,
+        TestV10AllFeatures,
+        TestErrorPaths,
     ]
 
     failed = 0

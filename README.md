@@ -10,6 +10,10 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Formula columns** - add calculated columns with Excel formulas
 - **Merged cells** - merge cell ranges for headers and titles
 - **Hyperlinks** - add clickable links to cells
+- **Comments/Notes** - add cell annotations with optional author
+- **Data validation** - dropdowns, number ranges, text length constraints
+- **Rich text** - multiple formats within a single cell
+- **Images** - embed PNG, JPEG, GIF, BMP in cells
 - **Auto-fit columns** - automatically adjust column widths to fit content
 - **Custom column widths** - set specific widths per column or cap all with _all
 - **Header styling** - bold, colors, font size for header row
@@ -312,6 +316,10 @@ Available per-sheet options:
 - `formula_columns` (dict): Calculated columns with Excel formulas (column name -> formula template)
 - `merged_ranges` (list): List of (range, text) or (range, text, format) tuples to merge cells
 - `hyperlinks` (list): List of (cell, url) or (cell, url, display_text) tuples to add clickable links
+- `comments` (dict): Cell comments/notes (cell_ref -> text or {text, author})
+- `validations` (dict): Data validation rules (column name/pattern -> validation config)
+- `rich_text` (dict): Rich text with multiple formats (cell_ref -> list of segments)
+- `images` (dict): Embedded images (cell_ref -> path or {path, scale_width, scale_height, alt_text})
 
 ### Conditional Formatting
 
@@ -482,6 +490,193 @@ xlsxturbo.df_to_xlsx(df, "companies.xlsx",
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
+### Comments/Notes
+
+Add cell annotations (hover to view):
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'product': ['Widget A', 'Widget B'],
+    'price': [19.99, 29.99]
+})
+
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    comments={
+        # Simple text comment
+        'A1': 'This column contains product names',
+        # Comment with author
+        'B1': {'text': 'Prices in USD', 'author': 'Finance Team'}
+    }
+)
+```
+
+**Comment format:**
+- Simple: `{'A1': 'Note text'}`
+- With author: `{'A1': {'text': 'Note text', 'author': 'Name'}}`
+
+**Notes:**
+- Comments appear as small red triangles in the cell corner
+- Hover over the cell to see the comment
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
+### Data Validation
+
+Add dropdowns and input constraints:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'status': ['Open', 'Closed'],
+    'score': [85, 92],
+    'price': [19.99, 29.99],
+    'code': ['ABC', 'XYZ']
+})
+
+xlsxturbo.df_to_xlsx(df, "validated.xlsx",
+    validations={
+        # Dropdown list
+        'status': {
+            'type': 'list',
+            'values': ['Open', 'Closed', 'Pending', 'Review']
+        },
+        # Whole number range (0-100)
+        'score': {
+            'type': 'whole_number',
+            'min': 0,
+            'max': 100,
+            'error_title': 'Invalid Score',
+            'error_message': 'Score must be between 0 and 100'
+        },
+        # Decimal range
+        'price': {
+            'type': 'decimal',
+            'min': 0.0,
+            'max': 999.99
+        },
+        # Text length constraint
+        'code': {
+            'type': 'text_length',
+            'min': 3,
+            'max': 10
+        }
+    }
+)
+```
+
+**Validation types:**
+
+| Type | Aliases | Description | Options |
+|------|---------|-------------|---------|
+| `list` | - | Dropdown menu | `values` (list of strings, max 255 chars total) |
+| `whole_number` | `whole`, `integer` | Integer range | `min`, `max` |
+| `decimal` | `number` | Decimal range | `min`, `max` |
+| `text_length` | `textlength`, `length` | Character count | `min`, `max` |
+
+**Optional message options:**
+- `input_title`, `input_message`: Prompt shown when cell is selected
+- `error_title`, `error_message`: Message shown when invalid data is entered
+
+**Notes:**
+- Validations apply to the data rows of the specified column
+- Column patterns work: `'score_*': {...}` matches all columns starting with `score_`
+- If only `min` or only `max` is specified, the other defaults to the type's extreme value
+- List validation values are limited to 255 total characters (Excel limitation)
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
+### Rich Text
+
+Multiple formats within a single cell:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'A': [1, 2, 3]})
+
+xlsxturbo.df_to_xlsx(df, "rich.xlsx",
+    rich_text={
+        'D1': [
+            ('Important: ', {'bold': True, 'font_color': 'red'}),
+            'Please review ',
+            ('all', {'italic': True}),
+            ' values'
+        ],
+        'D2': [
+            ('Status: ', {'bold': True}),
+            ('OK', {'font_color': 'green', 'bold': True})
+        ]
+    }
+)
+```
+
+**Segment format:**
+- Formatted: `('text', {'bold': True, 'font_color': 'blue'})`
+- Plain: `'plain text'` (no formatting)
+
+**Available format options:**
+- `bold` (bool)
+- `italic` (bool)
+- `font_color` (str): '#RRGGBB' or named color
+- `bg_color` (str): Background color
+- `font_size` (float)
+- `underline` (bool)
+
+**Notes:**
+- Rich text writes to the specified cell position (overwrites existing content)
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
+### Images
+
+Embed images in cells:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'Product': ['Widget A', 'Widget B'], 'Price': [19.99, 29.99]})
+
+xlsxturbo.df_to_xlsx(df, "catalog.xlsx",
+    autofit=True,
+    images={
+        # Simple path
+        'C2': 'images/widget_a.png',
+        # With options
+        'C3': {
+            'path': 'images/widget_b.png',
+            'scale_width': 0.5,
+            'scale_height': 0.5,
+            'alt_text': 'Widget B photo'
+        }
+    }
+)
+```
+
+**Image format:**
+- Simple: `{'C2': 'path/to/image.png'}`
+- With options: `{'C2': {'path': '...', 'scale_width': 0.5, ...}}`
+
+**Available options:**
+- `path` (str, required): Path to image file
+- `scale_width` (float): Width scale factor (1.0 = original)
+- `scale_height` (float): Height scale factor (1.0 = original)
+- `alt_text` (str): Alternative text for accessibility
+
+**Supported formats:** PNG, JPEG, GIF, BMP
+
+**Notes:**
+- Images are positioned at the specified cell (overlays any existing content)
+- Image file must exist; non-existent files will raise an error
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
 ### Constant Memory Mode (Large Files)
 
 For very large files (millions of rows), use `constant_memory=True` to minimize RAM usage:
@@ -509,6 +704,13 @@ xlsxturbo.dfs_to_xlsx([
 - `table_style` (Excel tables)
 - `freeze_panes`
 - `row_heights`
+- `conditional_formats`
+- `merged_ranges`
+- `hyperlinks`
+- `comments`
+- `validations`
+- `rich_text`
+- `images`
 - `autofit`
 - `conditional_formats`
 - `formula_columns`

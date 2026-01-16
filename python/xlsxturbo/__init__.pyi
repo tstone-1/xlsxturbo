@@ -3,6 +3,7 @@
 from typing import Literal, TypedDict
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
+ValidationType = Literal["list", "whole_number", "decimal", "text_length"]
 
 class HeaderFormat(TypedDict, total=False):
     """Header cell formatting options. All fields are optional."""
@@ -48,6 +49,51 @@ class ConditionalFormat(TypedDict, total=False):
     reverse: bool    # Reverse icon order
     icons_only: bool # Show only icons, hide values
 
+class CommentOptions(TypedDict, total=False):
+    """Options for cell comments/notes.
+
+    Note: 'text' is required at runtime but TypedDict doesn't enforce this.
+    """
+    text: str    # The comment text (required at runtime)
+    author: str  # Author name for the comment
+
+class ValidationOptions(TypedDict, total=False):
+    """Data validation options for a column. 'type' is required.
+
+    Supported types:
+    - 'list': Dropdown with specified values
+    - 'whole_number': Integer between min and max
+    - 'decimal': Decimal number between min and max
+    - 'text_length': Text length between min and max
+    """
+    type: ValidationType  # Required: validation type
+    values: list[str]  # For 'list' type: dropdown options
+    min: int | float   # For number/text_length: minimum value
+    max: int | float   # For number/text_length: maximum value
+    input_title: str   # Title for input prompt
+    input_message: str # Message for input prompt
+    error_title: str   # Title for error message
+    error_message: str # Message for error message
+
+class RichTextFormat(TypedDict, total=False):
+    """Format options for a rich text segment."""
+    bold: bool
+    italic: bool
+    font_color: str  # '#RRGGBB' or named color
+    bg_color: str    # '#RRGGBB' or named color
+    font_size: float
+    underline: bool
+
+class ImageOptions(TypedDict, total=False):
+    """Options for embedding images.
+
+    Note: 'path' is required at runtime but TypedDict doesn't enforce this.
+    """
+    path: str            # Path to image file - PNG, JPEG, GIF, BMP (required at runtime)
+    scale_width: float   # Scale factor for width (1.0 = original)
+    scale_height: float  # Scale factor for height (1.0 = original)
+    alt_text: str        # Alternative text for accessibility
+
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional."""
     header: bool
@@ -63,6 +109,10 @@ class SheetOptions(TypedDict, total=False):
     formula_columns: dict[str, str] | None  # Column name -> Excel formula template with {row} placeholder
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text) or (range, text, format)
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url) or (cell, url, display_text)
+    comments: dict[str, str | CommentOptions] | None  # Cell ref -> comment text or options
+    validations: dict[str, ValidationOptions] | None  # Column name/pattern -> validation options
+    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> list of (text, format) or plain text
+    images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
 
 def csv_to_xlsx(
     input_path: str,
@@ -111,6 +161,10 @@ def df_to_xlsx(
     formula_columns: dict[str, str] | None = None,
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
+    comments: dict[str, str | CommentOptions] | None = None,
+    validations: dict[str, ValidationOptions] | None = None,
+    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
+    images: dict[str, str | ImageOptions] | None = None,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -144,6 +198,15 @@ def df_to_xlsx(
         hyperlinks: List of (cell, url) or (cell, url, display_text) tuples to add clickable links.
             Cell uses Excel notation (e.g., 'A1'). Display text is optional.
             Example: [('A2', 'https://example.com'), ('B2', 'https://google.com', 'Google')]
+        comments: Dict mapping cell refs to comment text or CommentOptions.
+            Example: {'A1': 'Simple note'} or {'A1': {'text': 'Note', 'author': 'John'}}
+        validations: Dict mapping column name/pattern to data validation config.
+            Types: 'list' (dropdown), 'whole_number', 'decimal', 'text_length'.
+            Example: {'Status': {'type': 'list', 'values': ['Open', 'Closed']}}
+        rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
+            Example: {'A1': [('Bold', {'bold': True}), ' normal text']}
+        images: Dict mapping cell refs to image path or ImageOptions.
+            Example: {'B5': 'logo.png'} or {'B5': {'path': 'logo.png', 'scale_width': 0.5}}
     """
     ...
 
@@ -164,6 +227,10 @@ def dfs_to_xlsx(
     formula_columns: dict[str, str] | None = None,
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
+    comments: dict[str, str | CommentOptions] | None = None,
+    validations: dict[str, ValidationOptions] | None = None,
+    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
+    images: dict[str, str | ImageOptions] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -190,6 +257,10 @@ def dfs_to_xlsx(
             Range uses Excel notation (e.g., 'A1:D1'). Format uses HeaderFormat options.
         hyperlinks: List of (cell, url) or (cell, url, display_text) tuples to add clickable links.
             Cell uses Excel notation (e.g., 'A1'). Display text is optional.
+        comments: Dict mapping cell refs to comment text or CommentOptions.
+        validations: Dict mapping column name/pattern to data validation config.
+        rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
+        images: Dict mapping cell refs to image path or ImageOptions.
     """
     ...
 
