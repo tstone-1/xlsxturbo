@@ -29,29 +29,21 @@ Features that close the gap with XlsxWriter/openpyxl for common use cases.
 
 Power user features for richer Excel output.
 
-- [ ] **Data validation** - Dropdowns, input constraints
-  - rust_xlsxwriter: supported
-  - Enables: dropdown lists, numeric ranges, custom error messages
+- [x] **Data validation** - Dropdowns, input constraints (v0.10.0)
+  - Types: list (dropdown), whole_number, decimal, text_length
   - API: `validations={'Status': {'type': 'list', 'values': ['Open', 'Closed']}}`
 
-- [ ] **Images** - Embed PNG/JPEG/GIF/BMP images
-  - rust_xlsxwriter: supported
-  - Enables: logos, charts generated externally, screenshots
-  - API: `images={'A1': 'logo.png'}` or `images=[('B5', 'chart.png', options)]`
+- [x] **Images** - Embed PNG/JPEG/GIF/BMP images (v0.10.0)
+  - Options: scale_width, scale_height, alt_text
+  - API: `images={'B5': 'logo.png'}` or `images={'B5': {'path': 'logo.png', 'scale_width': 0.5}}`
 
-- [ ] **Comments/notes** - Add cell comments
-  - rust_xlsxwriter: supported
-  - Enables: documentation, review notes, explanations
-  - API: `comments={'A1': 'This is the header'}` or in column_formats
+- [x] **Comments/notes** - Add cell comments (v0.10.0)
+  - Simple text or with author
+  - API: `comments={'A1': 'Note'}` or `comments={'A1': {'text': 'Note', 'author': 'John'}}`
 
-- [ ] **Column type hints** - Override auto-detection for specific columns
-  - Enables: force text for ZIP codes, force numbers for string-encoded IDs
-  - API: `column_types={'zip_code': 'text', 'amount': 'number'}`
-
-- [ ] **Rich text** - Multiple formats within a single cell
-  - rust_xlsxwriter: supported
-  - Enables: bold + italic in same cell, colored substrings
-  - API: `rich_text={'A1': [('Bold part', {'bold': True}), (' normal')]}`
+- [x] **Rich text** - Multiple formats within a single cell (v0.10.0)
+  - Supports: bold, italic, font_color, bg_color, font_size, underline
+  - API: `rich_text={'A1': [('Bold part', {'bold': True}), ' normal']}`
 
 ## Lower Priority
 
@@ -81,6 +73,10 @@ Niche features for specific use cases.
 
 ## Completed
 
+- [x] Data validation via `validations` parameter (v0.10.0)
+- [x] Images via `images` parameter (v0.10.0)
+- [x] Comments/notes via `comments` parameter (v0.10.0)
+- [x] Rich text via `rich_text` parameter (v0.10.0)
 - [x] Hyperlinks via `hyperlinks` parameter (v0.9.0)
 - [x] Merged cells via `merged_ranges` parameter (v0.9.0)
 - [x] Formula columns via `formula_columns` parameter (v0.9.0)
