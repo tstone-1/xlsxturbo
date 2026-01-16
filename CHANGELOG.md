@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-01-16
+
+### Changed
+- **Benchmark suite reorganization** - Moved benchmarks to `benchmarks/` directory
+  - New `benchmarks/benchmark.py` - comprehensive comparison vs polars, pandas+openpyxl, pandas+xlsxwriter
+  - Moved `benchmark_parallel.py` to `benchmarks/`
+  - Removed obsolete `benchmark.py` (referenced old Rust binary)
+- **README Performance section** - Updated with reproducible benchmark methodology
+  - Changed performance claim from "~25x faster" to "~6x faster" (accurate for typical workloads)
+  - Added disclaimer that results vary by system
+  - Linked to Benchmarking section for running your own tests
+
 ## [0.10.0] - 2026-01-16
 
 ### Added
@@ -201,6 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.10.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.1
 [0.10.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.8.0
