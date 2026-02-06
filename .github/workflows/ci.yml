@@ -39,13 +39,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m venv .venv
+          source .venv/bin/activate
           pip install maturin pandas polars openpyxl
 
       - name: Build and install xlsxturbo
-        run: maturin develop --release
+        run: |
+          source .venv/bin/activate
+          maturin develop --release
 
       - name: Run Python integration tests
-        run: python tests/test_features.py
+        run: |
+          source .venv/bin/activate
+          python tests/test_features.py
 
   lint:
     runs-on: ubuntu-latest
