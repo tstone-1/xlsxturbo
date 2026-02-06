@@ -3,7 +3,7 @@
 from typing import Literal, TypedDict
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
-ValidationType = Literal["list", "whole_number", "decimal", "text_length"]
+ValidationType = Literal["list", "whole_number", "whole", "integer", "decimal", "number", "text_length", "textlength", "length"]
 
 class HeaderFormat(TypedDict, total=False):
     """Header cell formatting options. All fields are optional."""

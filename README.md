@@ -712,10 +712,7 @@ xlsxturbo.dfs_to_xlsx([
 - `rich_text`
 - `images`
 - `autofit`
-- `conditional_formats`
 - `formula_columns`
-- `merged_ranges`
-- `hyperlinks`
 
 Column widths still work in constant memory mode.
 
