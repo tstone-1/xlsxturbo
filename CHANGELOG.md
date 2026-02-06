@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-02-06
+
+### Fixed
+- **Wildcard pattern panic** - `matches_pattern("*")` no longer panics on lone `*` pattern
+- **Silent datetime defaults** - Datetime/date attribute extraction now propagates errors instead of silently defaulting to 1900
+- **Index overflow safety** - Row count and column count use checked casts (`u32::try_from`, `u16::try_from`) instead of `as` casts
+- **PyPI URL in release workflow** - Fixed leftover `fast_xlsx` reference to `xlsxturbo`
+- **Validation type aliases** - Added `whole`, `integer`, `number`, `textlength`, `length` aliases to type stubs
+- **CHANGELOG accuracy** - `constant_memory` entry now lists all 12 disabled features
+
+### Changed
+- **Module split** - Split monolithic `lib.rs` into `convert.rs`, `parse.rs`, `features.rs`, `types.rs`
+- **Deduplicated option extraction** - New `ExtractedOptions` struct reduces `convert_dataframe_to_xlsx` from 22 to 12 parameters
+- **Merged format parsers** - `parse_header_format` and `parse_column_format` share a single `parse_format_dict` implementation
+- **Dependencies** - Updated `pyo3` 0.27 -> 0.28, `rust_xlsxwriter` 0.92 -> 0.93
+- **CI** - Added Python integration test job (83 tests with pandas, polars, openpyxl)
+- **PEP 561** - Added `py.typed` marker file for type checker support
+
+### Tests
+- Added `TestConditionalFormatting` (5 tests), `TestConstantMemoryMode` (3 tests), `TestRowHeights` (3 tests)
+- Upgraded ~10 shallow tests with openpyxl content verification (column widths, table names, header formats, validations, comments)
+- Total: 83 Python integration tests, 12 Rust unit tests
+
 ## [0.10.1] - 2026-01-16
 
 ### Changed
@@ -152,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `constant_memory` parameter - minimize RAM usage for very large files
   - Uses rust_xlsxwriter's streaming mode to flush rows to disk
   - Ideal for files with millions of rows
-  - Note: Disables `table_style`, `freeze_panes`, `row_heights`, and `autofit`
+  - Note: Disables `table_style`, `freeze_panes`, `row_heights`, `autofit`, `conditional_formats`, `formula_columns`, `merged_ranges`, `hyperlinks`, `comments`, `validations`, `rich_text`, and `images`
   - Column widths still work in constant memory mode
   - Example: `xlsxturbo.df_to_xlsx(df, "big.xlsx", constant_memory=True)`
 - `column_widths` parameter - set custom column widths by index
@@ -213,6 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.10.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.2
 [0.10.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.1
 [0.10.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.9.0

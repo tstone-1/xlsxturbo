@@ -115,7 +115,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     environment:
       name: pypi
-      url: https://pypi.org/p/fast_xlsx
+      url: https://pypi.org/p/xlsxturbo
     permissions:
       id-token: write  # Required for trusted publishing
     steps:

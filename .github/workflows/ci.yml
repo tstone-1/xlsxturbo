@@ -24,6 +24,29 @@ jobs:
       - name: Build
         run: cargo build --release
 
+  python-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install maturin pandas polars openpyxl
+
+      - name: Build and install xlsxturbo
+        run: maturin develop --release
+
+      - name: Run Python integration tests
+        run: python tests/test_features.py
+
   lint:
     runs-on: ubuntu-latest
     steps:

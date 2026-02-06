@@ -10,2521 +10,126 @@
 //!
 //! Supports pandas DataFrames, polars DataFrames, and CSV files.
 
-use chrono::Timelike;
-use csv::ReaderBuilder;
-use indexmap::IndexMap;
-use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
-use rayon::prelude::*;
-use rust_xlsxwriter::{
-    ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatDataBar,
-    ConditionalFormatDataBarDirection, ConditionalFormatIconSet, ConditionalFormatIconType,
-    DataValidation, DataValidationErrorStyle, Format, Image, Note, Table, TableStyle, Workbook,
-    Worksheet, XlsxError,
+mod convert;
+mod features;
+mod parse;
+mod types;
+
+// Re-export public API for the CLI binary (main.rs)
+pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel};
+pub use types::DateOrder;
+
+use convert::{convert_dataframe_to_xlsx, write_py_value_with_format};
+use features::{
+    apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
+    apply_conditional_formats, apply_formula_columns, apply_hyperlinks, apply_images,
+    apply_merged_ranges, apply_rich_text, apply_validations, extract_column_formats,
+    extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
+    extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
+    extract_rich_text, extract_sheet_info, extract_validations,
 };
+use parse::{build_column_formats, parse_header_format, parse_table_style, sanitize_table_name};
+use types::ExtractedOptions;
+
+use pyo3::prelude::*;
+use rust_xlsxwriter::{Format, Table, Workbook};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 
-/// Date formats by locale/order preference
-/// ISO formats (YYYY-MM-DD) are always tried first as they're unambiguous
-const DATE_PATTERNS_ISO: &[&str] = &[
-    "%Y-%m-%d", // 2024-01-15
-    "%Y/%m/%d", // 2024/01/15
-];
-
-/// European date formats (day first): DD-MM-YYYY
-const DATE_PATTERNS_DMY: &[&str] = &[
-    "%d-%m-%Y", // 15-01-2024
-    "%d/%m/%Y", // 15/01/2024
-];
-
-/// US date formats (month first): MM-DD-YYYY
-const DATE_PATTERNS_MDY: &[&str] = &[
-    "%m-%d-%Y", // 01-15-2024
-    "%m/%d/%Y", // 01/15/2024
-];
-
-/// Date order preference for ambiguous dates like 01-02-2024
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum DateOrder {
-    /// Year-Month-Day first, then Day-Month-Year, then Month-Day-Year (default)
-    #[default]
-    Auto,
-    /// US format: Month-Day-Year (01-02-2024 = January 2)
-    MDY,
-    /// European format: Day-Month-Year (01-02-2024 = February 1)
-    DMY,
+/// Helper: cast a PyAny to PyDict or raise TypeError with a clear message.
+fn require_dict<'py>(
+    value: &Bound<'py, PyAny>,
+    param_name: &str,
+) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    value.cast::<pyo3::types::PyDict>().cloned().map_err(|_| {
+        let type_name = value
+            .get_type()
+            .name()
+            .map_or_else(|_| "unknown".to_string(), |n| n.to_string());
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "expected dict for '{}', got {}",
+            param_name, type_name
+        ))
+    })
 }
 
-impl DateOrder {
-    /// Parse from string, returns None for invalid input
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "auto" => Some(DateOrder::Auto),
-            "mdy" | "us" => Some(DateOrder::MDY),
-            "dmy" | "eu" | "european" => Some(DateOrder::DMY),
-            _ => None,
-        }
-    }
-
-    /// Get date patterns in order of preference
-    fn patterns(&self) -> Vec<&'static str> {
-        let mut patterns = Vec::with_capacity(6);
-        // ISO formats are always first (unambiguous)
-        patterns.extend_from_slice(DATE_PATTERNS_ISO);
-        match self {
-            DateOrder::Auto | DateOrder::DMY => {
-                patterns.extend_from_slice(DATE_PATTERNS_DMY);
-                patterns.extend_from_slice(DATE_PATTERNS_MDY);
-            }
-            DateOrder::MDY => {
-                patterns.extend_from_slice(DATE_PATTERNS_MDY);
-                patterns.extend_from_slice(DATE_PATTERNS_DMY);
-            }
-        }
-        patterns
-    }
+/// Helper: cast a PyAny to PyList or raise TypeError with a clear message.
+fn require_list<'py>(
+    value: &Bound<'py, PyAny>,
+    param_name: &str,
+) -> PyResult<Bound<'py, pyo3::types::PyList>> {
+    value.cast::<pyo3::types::PyList>().cloned().map_err(|_| {
+        let type_name = value
+            .get_type()
+            .name()
+            .map_or_else(|_| "unknown".to_string(), |n| n.to_string());
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "expected list for '{}', got {}",
+            param_name, type_name
+        ))
+    })
 }
 
-/// Datetime formats we recognize
-const DATETIME_PATTERNS: &[&str] = &[
-    "%Y-%m-%dT%H:%M:%S",    // ISO 8601
-    "%Y-%m-%d %H:%M:%S",    // Common format
-    "%Y-%m-%dT%H:%M:%S%.f", // ISO 8601 with fractional seconds
-    "%Y-%m-%d %H:%M:%S%.f", // With fractional seconds
-];
-
-/// Represents the detected type of a cell value
-#[derive(Debug, Clone)]
-enum CellValue {
-    Empty,
-    Integer(i64),
-    Float(f64),
-    Boolean(bool),
-    Date(f64),     // Excel serial date
-    DateTime(f64), // Excel serial datetime
-    String(String),
-}
-
-/// Type alias for merged range tuple: (range_str, text, optional format_dict)
-type MergedRange = (String, String, Option<HashMap<String, Py<PyAny>>>);
-
-/// Type alias for hyperlink tuple: (cell_ref, url, optional display_text)
-type Hyperlink = (String, String, Option<String>);
-
-/// Type alias for comment: either simple text or dict with 'text' and optionally 'author'
-type Comment = (String, Option<String>); // (text, author)
-
-/// Type alias for validation: column name/pattern -> validation config
-type ValidationConfig = HashMap<String, Py<PyAny>>;
-
-/// Type alias for rich text segment: (text, optional format_dict) or just text
-type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
-
-/// Type alias for image config: cell_ref -> image path or config dict
-type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
-
-/// Per-sheet configuration options (all optional, defaults to global settings)
-#[derive(Debug, Default)]
-struct SheetConfig {
-    header: Option<bool>,
-    autofit: Option<bool>,
-    table_style: Option<Option<String>>, // None = use default, Some(None) = explicitly no style
-    freeze_panes: Option<bool>,
-    column_widths: Option<HashMap<String, f64>>, // Keys: "0", "1", "_all" for global cap
-    table_name: Option<String>,
-    header_format: Option<HashMap<String, Py<PyAny>>>,
-    row_heights: Option<HashMap<u32, f64>>,
-    column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Pattern -> format dict (ordered)
-    conditional_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Column/pattern -> conditional format config (ordered)
-    formula_columns: Option<IndexMap<String, String>>, // Column name -> formula template (ordered)
-    merged_ranges: Option<Vec<MergedRange>>,           // (range, text, format)
-    hyperlinks: Option<Vec<Hyperlink>>,                // (cell, url, optional display_text)
-    comments: Option<HashMap<String, Comment>>,        // cell_ref -> (text, author)
-    validations: Option<IndexMap<String, ValidationConfig>>, // column name/pattern -> validation config
-    rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
-    images: Option<HashMap<String, ImageConfig>>,            // cell_ref -> (path, options)
-}
-
-/// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
-/// 2-tuple: (df, sheet_name)
-/// 3-tuple: (df, sheet_name, options_dict)
-fn extract_sheet_info<'py>(
-    sheet_tuple: &Bound<'py, PyAny>,
-) -> PyResult<(Bound<'py, PyAny>, String, SheetConfig)> {
-    let len: usize = sheet_tuple.len()?;
-
-    if len < 2 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "Sheet tuple must have at least 2 elements: (df, sheet_name)",
-        ));
-    }
-
-    let df = sheet_tuple.get_item(0)?;
-    let sheet_name: String = sheet_tuple.get_item(1)?.extract()?;
-
-    let config = if len >= 3 {
-        let opts = sheet_tuple.get_item(2)?;
-        let mut config = SheetConfig::default();
-
-        // Extract optional fields from the dict
-        if let Ok(val) = opts.get_item("header") {
-            if !val.is_none() {
-                config.header = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("autofit") {
-            if !val.is_none() {
-                config.autofit = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("table_style") {
-            // Handle both None and string values
-            if val.is_none() {
-                config.table_style = Some(None); // Explicitly no style
-            } else {
-                config.table_style = Some(Some(val.extract()?));
-            }
-        }
-        if let Ok(val) = opts.get_item("freeze_panes") {
-            if !val.is_none() {
-                config.freeze_panes = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("column_widths") {
-            if !val.is_none() {
-                // Support both integer keys {0: 20} and string keys {"_all": 50}
-                let mut widths: HashMap<String, f64> = HashMap::new();
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    for (k, v) in dict.iter() {
-                        let key_str = if let Ok(i) = k.extract::<i64>() {
-                            i.to_string()
-                        } else {
-                            k.extract::<String>()?
-                        };
-                        widths.insert(key_str, v.extract()?);
-                    }
-                }
-                if !widths.is_empty() {
-                    config.column_widths = Some(widths);
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("row_heights") {
-            if !val.is_none() {
-                config.row_heights = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("table_name") {
-            if !val.is_none() {
-                config.table_name = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("header_format") {
-            if !val.is_none() {
-                let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    for (k, v) in dict.iter() {
-                        fmt.insert(k.extract()?, v.unbind());
-                    }
-                }
-                if !fmt.is_empty() {
-                    config.header_format = Some(fmt);
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("column_formats") {
-            if !val.is_none() {
-                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
-                        IndexMap::new();
-                    for (pattern, fmt_dict) in outer_dict.iter() {
-                        let pattern_str: String = pattern.extract()?;
-                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in inner_dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            col_fmts.insert(pattern_str, fmt);
-                        }
-                    }
-                    if !col_fmts.is_empty() {
-                        config.column_formats = Some(col_fmts);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("conditional_formats") {
-            if !val.is_none() {
-                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut cond_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
-                        IndexMap::new();
-                    for (col_name, fmt_dict) in outer_dict.iter() {
-                        let col_str: String = col_name.extract()?;
-                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in inner_dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            cond_fmts.insert(col_str, fmt);
-                        }
-                    }
-                    if !cond_fmts.is_empty() {
-                        config.conditional_formats = Some(cond_fmts);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("formula_columns") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut formulas: IndexMap<String, String> = IndexMap::new();
-                    for (col_name, formula) in dict.iter() {
-                        let col_str: String = col_name.extract()?;
-                        let formula_str: String = formula.extract()?;
-                        formulas.insert(col_str, formula_str);
-                    }
-                    if !formulas.is_empty() {
-                        config.formula_columns = Some(formulas);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("merged_ranges") {
-            if !val.is_none() {
-                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
-                    let extracted = extract_merged_ranges(list)?;
-                    if !extracted.is_empty() {
-                        config.merged_ranges = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("hyperlinks") {
-            if !val.is_none() {
-                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
-                    let extracted = extract_hyperlinks(list)?;
-                    if !extracted.is_empty() {
-                        config.hyperlinks = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("comments") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_comments(dict)?;
-                    if !extracted.is_empty() {
-                        config.comments = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("validations") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_validations(dict)?;
-                    if !extracted.is_empty() {
-                        config.validations = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("rich_text") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_rich_text(dict)?;
-                    if !extracted.is_empty() {
-                        config.rich_text = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("images") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_images(dict)?;
-                    if !extracted.is_empty() {
-                        config.images = Some(extracted);
-                    }
-                }
-            }
-        }
-
-        config
-    } else {
-        SheetConfig::default()
-    };
-
-    Ok((df, sheet_name, config))
-}
-
-/// Parse a table style string to TableStyle enum.
-/// Supports: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
-fn parse_table_style(style: &str) -> Result<TableStyle, String> {
-    match style {
-        "None" => Ok(TableStyle::None),
-        "Light1" => Ok(TableStyle::Light1),
-        "Light2" => Ok(TableStyle::Light2),
-        "Light3" => Ok(TableStyle::Light3),
-        "Light4" => Ok(TableStyle::Light4),
-        "Light5" => Ok(TableStyle::Light5),
-        "Light6" => Ok(TableStyle::Light6),
-        "Light7" => Ok(TableStyle::Light7),
-        "Light8" => Ok(TableStyle::Light8),
-        "Light9" => Ok(TableStyle::Light9),
-        "Light10" => Ok(TableStyle::Light10),
-        "Light11" => Ok(TableStyle::Light11),
-        "Light12" => Ok(TableStyle::Light12),
-        "Light13" => Ok(TableStyle::Light13),
-        "Light14" => Ok(TableStyle::Light14),
-        "Light15" => Ok(TableStyle::Light15),
-        "Light16" => Ok(TableStyle::Light16),
-        "Light17" => Ok(TableStyle::Light17),
-        "Light18" => Ok(TableStyle::Light18),
-        "Light19" => Ok(TableStyle::Light19),
-        "Light20" => Ok(TableStyle::Light20),
-        "Light21" => Ok(TableStyle::Light21),
-        "Medium1" => Ok(TableStyle::Medium1),
-        "Medium2" => Ok(TableStyle::Medium2),
-        "Medium3" => Ok(TableStyle::Medium3),
-        "Medium4" => Ok(TableStyle::Medium4),
-        "Medium5" => Ok(TableStyle::Medium5),
-        "Medium6" => Ok(TableStyle::Medium6),
-        "Medium7" => Ok(TableStyle::Medium7),
-        "Medium8" => Ok(TableStyle::Medium8),
-        "Medium9" => Ok(TableStyle::Medium9),
-        "Medium10" => Ok(TableStyle::Medium10),
-        "Medium11" => Ok(TableStyle::Medium11),
-        "Medium12" => Ok(TableStyle::Medium12),
-        "Medium13" => Ok(TableStyle::Medium13),
-        "Medium14" => Ok(TableStyle::Medium14),
-        "Medium15" => Ok(TableStyle::Medium15),
-        "Medium16" => Ok(TableStyle::Medium16),
-        "Medium17" => Ok(TableStyle::Medium17),
-        "Medium18" => Ok(TableStyle::Medium18),
-        "Medium19" => Ok(TableStyle::Medium19),
-        "Medium20" => Ok(TableStyle::Medium20),
-        "Medium21" => Ok(TableStyle::Medium21),
-        "Medium22" => Ok(TableStyle::Medium22),
-        "Medium23" => Ok(TableStyle::Medium23),
-        "Medium24" => Ok(TableStyle::Medium24),
-        "Medium25" => Ok(TableStyle::Medium25),
-        "Medium26" => Ok(TableStyle::Medium26),
-        "Medium27" => Ok(TableStyle::Medium27),
-        "Medium28" => Ok(TableStyle::Medium28),
-        "Dark1" => Ok(TableStyle::Dark1),
-        "Dark2" => Ok(TableStyle::Dark2),
-        "Dark3" => Ok(TableStyle::Dark3),
-        "Dark4" => Ok(TableStyle::Dark4),
-        "Dark5" => Ok(TableStyle::Dark5),
-        "Dark6" => Ok(TableStyle::Dark6),
-        "Dark7" => Ok(TableStyle::Dark7),
-        "Dark8" => Ok(TableStyle::Dark8),
-        "Dark9" => Ok(TableStyle::Dark9),
-        "Dark10" => Ok(TableStyle::Dark10),
-        "Dark11" => Ok(TableStyle::Dark11),
-        _ => Err(format!(
-            "Unknown table_style '{}'. Valid styles: Light1-Light21, Medium1-Medium28, Dark1-Dark11, None",
-            style
-        )),
-    }
-}
-
-/// Apply column widths to worksheet, supporting '_all' global cap
-fn apply_column_widths(
-    worksheet: &mut Worksheet,
-    col_count: u16,
-    widths: &HashMap<String, f64>,
-) -> Result<(), String> {
-    let global_width = widths.get("_all").copied();
-
-    for col_idx in 0..col_count {
-        let col_key = col_idx.to_string();
-        // Specific column overrides '_all'
-        if let Some(width) = widths.get(&col_key) {
-            worksheet
-                .set_column_width(col_idx, *width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
-        } else if let Some(width) = global_width {
-            worksheet
-                .set_column_width(col_idx, width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
-        }
-    }
-    Ok(())
-}
-
-/// Apply column widths with autofit cap: autofit first, then cap columns at '_all' width
-fn apply_column_widths_with_autofit_cap(
-    worksheet: &mut Worksheet,
-    col_count: u16,
-    widths: &HashMap<String, f64>,
-    constant_memory: bool,
-) -> Result<(), String> {
-    // First autofit
-    if !constant_memory {
-        worksheet.autofit();
-    }
-
-    // Then apply specific widths and cap at '_all' if specified
-    let global_cap = widths.get("_all").copied();
-
-    for col_idx in 0..col_count {
-        let col_key = col_idx.to_string();
-        if let Some(width) = widths.get(&col_key) {
-            // Specific width overrides autofit completely
-            worksheet
-                .set_column_width(col_idx, *width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
-        } else if let Some(cap) = global_cap {
-            // '_all' acts as a cap - only set if current width exceeds cap
-            // Since we can't read current width, just set the cap
-            worksheet
-                .set_column_width(col_idx, cap)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
-        }
-    }
-    Ok(())
-}
-
-/// Extract column_widths from Python dict, supporting both integer and string keys
-fn extract_column_widths(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, f64>> {
-    let mut widths: HashMap<String, f64> = HashMap::new();
-    for (k, v) in py_dict.iter() {
-        let key_str = if let Ok(i) = k.extract::<i64>() {
-            i.to_string()
-        } else {
-            k.extract::<String>()?
-        };
-        widths.insert(key_str, v.extract()?);
-    }
-    Ok(widths)
-}
-
-/// Extract header_format from Python dict
-fn extract_header_format(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Py<PyAny>>> {
-    let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-    for (k, v) in py_dict.iter() {
-        fmt.insert(k.extract()?, v.unbind());
-    }
-    Ok(fmt)
-}
-
-/// Extract column_formats from Python dict (pattern -> format dict)
-/// Uses IndexMap to preserve insertion order from Python dict
-fn extract_column_formats(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<IndexMap<String, HashMap<String, Py<PyAny>>>> {
-    let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
-    for (pattern, fmt_dict) in py_dict.iter() {
-        let pattern_str: String = pattern.extract()?;
-        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                fmt.insert(k.extract()?, v.unbind());
-            }
-            col_fmts.insert(pattern_str, fmt);
-        }
-    }
-    Ok(col_fmts)
-}
-
-/// Extract conditional_formats from Python dict (column/pattern -> config dict)
-/// Uses IndexMap to preserve insertion order for pattern matching (first match wins)
-fn extract_conditional_formats(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<IndexMap<String, HashMap<String, Py<PyAny>>>> {
-    let mut cond_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
-    for (col_name, fmt_dict) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
-        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                fmt.insert(k.extract()?, v.unbind());
-            }
-            cond_fmts.insert(col_str, fmt);
-        }
-    }
-    Ok(cond_fmts)
-}
-
-/// Extract formula_columns from Python dict (column name -> formula template)
-/// Uses IndexMap to preserve column order
-fn extract_formula_columns(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<IndexMap<String, String>> {
-    let mut formulas: IndexMap<String, String> = IndexMap::new();
-    for (col_name, formula) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
-        let formula_str: String = formula.extract()?;
-        formulas.insert(col_str, formula_str);
-    }
-    Ok(formulas)
-}
-
-/// Apply formula columns to worksheet
-/// Formula templates can use {row} which is replaced with the actual row number (1-based)
-fn apply_formula_columns(
-    worksheet: &mut Worksheet,
-    formula_columns: &IndexMap<String, String>,
-    start_col: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-    header_format: Option<&Format>,
-) -> Result<u16, String> {
-    let mut col_offset = 0u16;
-
-    for (col_name, formula_template) in formula_columns {
-        let col_idx = start_col + col_offset;
-
-        // Write header for formula column
-        if let Some(fmt) = header_format {
-            worksheet
-                .write_string_with_format(0, col_idx, col_name, fmt)
-                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
-        } else {
-            worksheet
-                .write_string(0, col_idx, col_name)
-                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
-        }
-
-        // Write formula for each data row
-        for row in data_start_row..=data_end_row {
-            // Replace {row} with actual row number (Excel is 1-based)
-            let excel_row = row + 1; // Convert 0-based to 1-based
-            let formula = formula_template.replace("{row}", &excel_row.to_string());
-
-            worksheet
-                .write_formula(row, col_idx, formula.as_str())
-                .map_err(|e| format!("Failed to write formula at row {}: {}", row, e))?;
-        }
-
-        col_offset += 1;
-    }
-
-    Ok(col_offset)
-}
-
-/// Parse a cell reference like "A1" into (row, col) - 0-based
-fn parse_cell_ref(cell_ref: &str) -> Result<(u32, u16), String> {
-    let cell_ref = cell_ref.trim().to_uppercase();
-    if cell_ref.is_empty() {
-        return Err("Empty cell reference".to_string());
-    }
-
-    // Find where letters end and numbers begin
-    let col_end = cell_ref
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .count();
-    if col_end == 0 {
-        return Err(format!(
-            "Invalid cell reference '{}': no column letters",
-            cell_ref
-        ));
-    }
-
-    let col_str = &cell_ref[..col_end];
-    let row_str = &cell_ref[col_end..];
-
-    if row_str.is_empty() {
-        return Err(format!(
-            "Invalid cell reference '{}': no row number",
-            cell_ref
-        ));
-    }
-
-    // Convert column letters to 0-based index (A=0, B=1, ..., Z=25, AA=26, etc.)
-    let col: u16 = col_str
-        .chars()
-        .fold(0u16, |acc, c| acc * 26 + (c as u16 - 'A' as u16 + 1))
-        .saturating_sub(1);
-
-    // Parse row number (Excel rows are 1-based, so must be >= 1)
-    let row_1based: u32 = row_str
-        .parse::<u32>()
-        .map_err(|_| format!("Invalid row number in cell reference '{}'", cell_ref))?;
-
-    if row_1based == 0 {
-        return Err(format!(
-            "Invalid cell reference '{}': row number must be >= 1 (Excel rows are 1-based)",
-            cell_ref
-        ));
-    }
-
-    // Convert to 0-based index
-    let row = row_1based - 1;
-
-    Ok((row, col))
-}
-
-/// Parse a cell range like "A1:D1" into (first_row, first_col, last_row, last_col) - 0-based
-fn parse_cell_range(range_str: &str) -> Result<(u32, u16, u32, u16), String> {
-    let parts: Vec<&str> = range_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err(format!(
-            "Invalid cell range '{}': expected format 'A1:B2'",
-            range_str
-        ));
-    }
-
-    let (first_row, first_col) = parse_cell_ref(parts[0])?;
-    let (last_row, last_col) = parse_cell_ref(parts[1])?;
-
-    Ok((first_row, first_col, last_row, last_col))
-}
-
-/// Extract merged_ranges from Python list of tuples
-/// Each tuple: (range_str, text) or (range_str, text, format_dict)
-fn extract_merged_ranges(py_list: &Bound<'_, pyo3::types::PyList>) -> PyResult<Vec<MergedRange>> {
-    let mut ranges = Vec::new();
-
-    for item in py_list.iter() {
-        let tuple_len = item.len()?;
-        if tuple_len < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "merged_ranges tuple must have at least 2 elements: (range, text)",
-            ));
-        }
-
-        let range_str: String = item.get_item(0)?.extract()?;
-        let text: String = item.get_item(1)?.extract()?;
-
-        let format_dict = if tuple_len >= 3 {
-            let fmt_item = item.get_item(2)?;
-            if !fmt_item.is_none() {
-                if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                    let mut fmt_map: HashMap<String, Py<PyAny>> = HashMap::new();
-                    for (k, v) in dict.iter() {
-                        let key: String = k.extract()?;
-                        fmt_map.insert(key, v.unbind());
-                    }
-                    Some(fmt_map)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        ranges.push((range_str, text, format_dict));
-    }
-
-    Ok(ranges)
-}
-
-/// Apply merged ranges to worksheet
-fn apply_merged_ranges(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    merged_ranges: &[MergedRange],
-) -> Result<(), String> {
-    for (range_str, text, format_dict) in merged_ranges {
-        let (first_row, first_col, last_row, last_col) = parse_cell_range(range_str)?;
-
-        // Build format if provided
-        let format = if let Some(fmt_dict) = format_dict {
-            let parsed = parse_header_format(py, fmt_dict)?;
-            Some(parsed)
-        } else {
-            None
-        };
-
-        // Apply merge with or without format
-        if let Some(ref fmt) = format {
-            worksheet
-                .merge_range(first_row, first_col, last_row, last_col, text, fmt)
-                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
-        } else {
-            // Create default center-aligned format for merged cells
-            let default_fmt = Format::new().set_align(rust_xlsxwriter::FormatAlign::Center);
-            worksheet
-                .merge_range(first_row, first_col, last_row, last_col, text, &default_fmt)
-                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Extract hyperlinks from Python list of tuples
-/// Each tuple: (cell_ref, url) or (cell_ref, url, display_text)
-fn extract_hyperlinks(py_list: &Bound<'_, pyo3::types::PyList>) -> PyResult<Vec<Hyperlink>> {
-    let mut links = Vec::new();
-
-    for item in py_list.iter() {
-        let tuple_len = item.len()?;
-        if tuple_len < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "hyperlinks tuple must have at least 2 elements: (cell_ref, url)",
-            ));
-        }
-
-        let cell_ref: String = item.get_item(0)?.extract()?;
-        let url: String = item.get_item(1)?.extract()?;
-
-        let display_text = if tuple_len >= 3 {
-            let text_item = item.get_item(2)?;
-            if !text_item.is_none() {
-                Some(text_item.extract()?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        links.push((cell_ref, url, display_text));
-    }
-
-    Ok(links)
-}
-
-/// Apply hyperlinks to worksheet
-fn apply_hyperlinks(worksheet: &mut Worksheet, hyperlinks: &[Hyperlink]) -> Result<(), String> {
-    for (cell_ref, url, display_text) in hyperlinks {
-        let (row, col) = parse_cell_ref(cell_ref)?;
-
-        if let Some(text) = display_text {
-            worksheet
-                .write_url_with_text(row, col, url.as_str(), text.as_str())
-                .map_err(|e| format!("Failed to write hyperlink at '{}': {}", cell_ref, e))?;
-        } else {
-            worksheet
-                .write_url(row, col, url.as_str())
-                .map_err(|e| format!("Failed to write hyperlink at '{}': {}", cell_ref, e))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Extract comments from Python dict
-/// Supports: {'A1': 'text'} or {'A1': {'text': 'note', 'author': 'John'}}
-fn extract_comments(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Comment>> {
-    let mut comments: HashMap<String, Comment> = HashMap::new();
-
-    for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
-
-        // Check if value is a dict or simple string
-        if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
-            // Dict format: {'text': '...', 'author': '...'}
-            let text: String = inner_dict
-                .get_item("text")?
-                .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
-                        "Comment at '{}' missing 'text' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
-            let author: Option<String> = if let Ok(Some(a)) = inner_dict.get_item("author") {
-                if !a.is_none() {
-                    Some(a.extract()?)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            comments.insert(cell_str, (text, author));
-        } else {
-            // Simple string format
-            let text: String = value.extract()?;
-            comments.insert(cell_str, (text, None));
-        }
-    }
-
-    Ok(comments)
-}
-
-/// Apply comments/notes to worksheet
-fn apply_comments(
-    worksheet: &mut Worksheet,
-    comments: &HashMap<String, Comment>,
-) -> Result<(), String> {
-    for (cell_ref, (text, author)) in comments {
-        let (row, col) = parse_cell_ref(cell_ref)?;
-
-        let mut note = Note::new(text);
-        if let Some(auth) = author {
-            note = note.set_author(auth);
-        }
-
-        worksheet
-            .insert_note(row, col, &note)
-            .map_err(|e| format!("Failed to insert note at '{}': {}", cell_ref, e))?;
-    }
-
-    Ok(())
-}
-
-/// Extract validations from Python dict (column name/pattern -> validation config)
-fn extract_validations(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<IndexMap<String, ValidationConfig>> {
-    let mut validations: IndexMap<String, ValidationConfig> = IndexMap::new();
-    for (col_name, config) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
-        if let Ok(inner_dict) = config.cast::<pyo3::types::PyDict>() {
-            let mut cfg: ValidationConfig = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                cfg.insert(k.extract()?, v.unbind());
-            }
-            validations.insert(col_str, cfg);
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "validations['{}']: expected dict, got {}",
-                col_str,
-                config.get_type().name()?
-            )));
-        }
-    }
-    Ok(validations)
-}
-
-/// Apply data validations to worksheet
-fn apply_validations(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    columns: &[String],
-    data_start_row: u32,
-    data_end_row: u32,
-    validations: &IndexMap<String, ValidationConfig>,
-) -> Result<(), String> {
-    for (col_pattern, config) in validations {
-        // Find matching columns
-        let col_indices: Vec<u16> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, name)| matches_pattern(name, col_pattern))
-            .map(|(idx, _)| idx as u16)
-            .collect();
-
-        if col_indices.is_empty() {
-            continue;
-        }
-
-        // Get validation type
-        let val_type: String = config
-            .get("type")
-            .ok_or_else(|| format!("validations['{}']: missing 'type' key", col_pattern))?
-            .bind(py)
-            .extract()
-            .map_err(|e| format!("validations['{}']: invalid 'type': {}", col_pattern, e))?;
-
-        for col_idx in col_indices {
-            let validation = match val_type.to_lowercase().as_str() {
-                "list" => {
-                    // List validation: dropdown with values
-                    let values: Vec<String> = config
-                        .get("values")
-                        .ok_or_else(|| {
-                            format!(
-                                "validations['{}']: list type requires 'values'",
-                                col_pattern
-                            )
-                        })?
-                        .bind(py)
-                        .extract()
-                        .map_err(|e| {
-                            format!("validations['{}']: invalid 'values': {}", col_pattern, e)
-                        })?;
-
-                    // Check Excel's 255 character limit for list validation
-                    let total_chars: usize = values.iter().map(|s| s.len()).sum::<usize>()
-                        + values.len().saturating_sub(1); // commas between items
-                    if total_chars > 255 {
-                        return Err(format!(
-                            "validations['{}']: list values exceed Excel's 255 character limit ({} chars). \
-                             Use fewer or shorter values.",
-                            col_pattern, total_chars
-                        ));
-                    }
-
-                    let values_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
-                    DataValidation::new()
-                        .allow_list_strings(&values_refs)
-                        .map_err(|e| format!("Failed to create list validation: {}", e))?
-                }
-                "whole_number" | "whole" | "integer" => {
-                    // Whole number validation with between rule
-                    let min: i32 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(i32::MIN);
-                    let max: i32 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(i32::MAX);
-                    DataValidation::new()
-                        .allow_whole_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
-                }
-                "decimal" | "number" => {
-                    // Decimal validation with between rule
-                    let min: f64 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(f64::MIN);
-                    let max: f64 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(f64::MAX);
-                    DataValidation::new().allow_decimal_number(
-                        rust_xlsxwriter::DataValidationRule::Between(min, max),
-                    )
-                }
-                "text_length" | "textlength" | "length" => {
-                    // Text length validation with between rule
-                    let min: u32 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(0);
-                    let max: u32 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(u32::MAX);
-                    DataValidation::new()
-                        .allow_text_length(rust_xlsxwriter::DataValidationRule::Between(min, max))
-                }
-                _ => {
-                    return Err(format!(
-                        "Unknown validation type '{}'. Valid types: list, whole_number, decimal, text_length",
-                        val_type
-                    ));
-                }
-            };
-
-            // Add optional input message
-            let validation = if let Some(msg_obj) = config.get("input_message") {
-                if let Ok(msg) = msg_obj.bind(py).extract::<String>() {
-                    let title = config
-                        .get("input_title")
-                        .and_then(|t| t.bind(py).extract::<String>().ok())
-                        .unwrap_or_default();
-                    validation
-                        .set_input_title(&title)
-                        .map_err(|e| format!("Failed to set input title: {}", e))?
-                        .set_input_message(&msg)
-                        .map_err(|e| format!("Failed to set input message: {}", e))?
-                } else {
-                    validation
-                }
-            } else {
-                validation
-            };
-
-            // Add optional error message
-            let validation = if let Some(msg_obj) = config.get("error_message") {
-                if let Ok(msg) = msg_obj.bind(py).extract::<String>() {
-                    let title = config
-                        .get("error_title")
-                        .and_then(|t| t.bind(py).extract::<String>().ok())
-                        .unwrap_or_default();
-                    validation
-                        .set_error_title(&title)
-                        .map_err(|e| format!("Failed to set error title: {}", e))?
-                        .set_error_message(&msg)
-                        .map_err(|e| format!("Failed to set error message: {}", e))?
-                        .set_error_style(DataValidationErrorStyle::Stop)
-                } else {
-                    validation
-                }
-            } else {
-                validation
-            };
-
-            worksheet
-                .add_data_validation(data_start_row, col_idx, data_end_row, col_idx, &validation)
-                .map_err(|e| format!("Failed to add validation: {}", e))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Extract rich_text from Python dict (cell_ref -> list of segments)
-fn extract_rich_text(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Vec<RichTextSegment>>> {
-    let mut rich_text: HashMap<String, Vec<RichTextSegment>> = HashMap::new();
-
-    for (cell_ref, segments_list) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
-        let mut segments: Vec<RichTextSegment> = Vec::new();
-
-        if let Ok(list) = segments_list.cast::<pyo3::types::PyList>() {
-            for (idx, item) in list.iter().enumerate() {
-                // Check if item is a tuple (text, format_dict) or just a string
-                if let Ok(tuple) = item.cast::<pyo3::types::PyTuple>() {
-                    let text: String = tuple.get_item(0)?.extract()?;
-                    let format_dict = if tuple.len() >= 2 {
-                        let fmt_item = tuple.get_item(1)?;
-                        if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            Some(fmt)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    segments.push((text, format_dict));
-                } else if let Ok(text) = item.extract::<String>() {
-                    // Plain string segment
-                    segments.push((text, None));
-                } else {
-                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                        "rich_text['{}']: segment {} must be a string or tuple (text, format_dict), got {}",
-                        cell_str,
-                        idx,
-                        item.get_type().name()?
-                    )));
-                }
-            }
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "rich_text['{}']: expected list of segments, got {}",
-                cell_str,
-                segments_list.get_type().name()?
-            )));
-        }
-
-        if !segments.is_empty() {
-            rich_text.insert(cell_str, segments);
-        }
-    }
-
-    Ok(rich_text)
-}
-
-/// Apply rich text to worksheet
-fn apply_rich_text(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    rich_text: &HashMap<String, Vec<RichTextSegment>>,
-) -> Result<(), String> {
-    for (cell_ref, segments) in rich_text {
-        let (row, col) = parse_cell_ref(cell_ref)?;
-
-        // Build formats and strings separately
-        let mut formats: Vec<Format> = Vec::new();
-        let mut texts: Vec<String> = Vec::new();
-
-        for (text, format_dict) in segments {
-            if let Some(fmt_dict) = format_dict {
-                let format = parse_column_format(py, fmt_dict)?;
-                formats.push(format);
-            } else {
-                formats.push(Format::new());
-            }
-            texts.push(text.clone());
-        }
-
-        // Create the segments as tuples of (&Format, &str)
-        let rich_segments: Vec<(&Format, &str)> = formats
-            .iter()
-            .zip(texts.iter())
-            .map(|(f, t)| (f, t.as_str()))
-            .collect();
-
-        if !rich_segments.is_empty() {
-            worksheet
-                .write_rich_string(row, col, &rich_segments)
-                .map_err(|e| format!("Failed to write rich text at '{}': {}", cell_ref, e))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Extract images from Python dict (cell_ref -> path or config dict)
-fn extract_images(
-    py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, ImageConfig>> {
-    let mut images: HashMap<String, ImageConfig> = HashMap::new();
-
-    for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
-
-        // Check if value is a dict or simple string (path)
-        if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
-            // Dict format: {'path': '...', 'scale_width': 0.5, ...}
-            let path: String = inner_dict
-                .get_item("path")?
-                .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
-                        "Image at '{}' missing 'path' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
-            let mut options: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                let key: String = k.extract()?;
-                if key != "path" {
-                    options.insert(key, v.unbind());
-                }
-            }
-            images.insert(cell_str, (path, Some(options)));
-        } else {
-            // Simple string format (just path)
-            let path: String = value.extract()?;
-            images.insert(cell_str, (path, None));
-        }
-    }
-
-    Ok(images)
-}
-
-/// Apply images to worksheet
-fn apply_images(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    images: &HashMap<String, ImageConfig>,
-) -> Result<(), String> {
-    for (cell_ref, (path, options)) in images {
-        let (row, col) = parse_cell_ref(cell_ref)?;
-
-        let mut image =
-            Image::new(path).map_err(|e| format!("Failed to load image '{}': {}", path, e))?;
-
-        // Apply options if provided
-        if let Some(opts) = options {
-            if let Some(scale_obj) = opts.get("scale_width") {
-                if let Ok(scale) = scale_obj.bind(py).extract::<f64>() {
-                    image = image.set_scale_width(scale);
-                }
-            }
-            if let Some(scale_obj) = opts.get("scale_height") {
-                if let Ok(scale) = scale_obj.bind(py).extract::<f64>() {
-                    image = image.set_scale_height(scale);
-                }
-            }
-            if let Some(alt_obj) = opts.get("alt_text") {
-                if let Ok(alt) = alt_obj.bind(py).extract::<String>() {
-                    image = image.set_alt_text(&alt);
-                }
-            }
-        }
-
-        worksheet
-            .insert_image(row, col, &image)
-            .map_err(|e| format!("Failed to insert image at '{}': {}", cell_ref, e))?;
-    }
-
-    Ok(())
-}
-
-/// Parse icon type string to ConditionalFormatIconType
-fn parse_icon_type(icon_type: &str) -> Result<ConditionalFormatIconType, String> {
-    match icon_type.to_lowercase().as_str() {
-        "3_arrows" | "3arrows" => Ok(ConditionalFormatIconType::ThreeArrows),
-        "3_arrows_gray" | "3arrowsgray" => Ok(ConditionalFormatIconType::ThreeArrowsGray),
-        "3_flags" | "3flags" => Ok(ConditionalFormatIconType::ThreeFlags),
-        "3_traffic_lights" | "3trafficlights" | "traffic_lights" => {
-            Ok(ConditionalFormatIconType::ThreeTrafficLights)
-        }
-        "3_traffic_lights_rimmed" | "3trafficlightsrimmed" => {
-            Ok(ConditionalFormatIconType::ThreeTrafficLightsWithRim)
-        }
-        "3_signs" | "3signs" => Ok(ConditionalFormatIconType::ThreeSigns),
-        "3_symbols" | "3symbols" => Ok(ConditionalFormatIconType::ThreeSymbolsCircled),
-        "3_symbols_uncircled" | "3symbolsuncircled" => {
-            Ok(ConditionalFormatIconType::ThreeSymbols)
-        }
-        "4_arrows" | "4arrows" => Ok(ConditionalFormatIconType::FourArrows),
-        "4_arrows_gray" | "4arrowsgray" => Ok(ConditionalFormatIconType::FourArrowsGray),
-        "4_rating" | "4rating" => Ok(ConditionalFormatIconType::FourHistograms),
-        "4_traffic_lights" | "4trafficlights" => {
-            Ok(ConditionalFormatIconType::FourTrafficLights)
-        }
-        "5_arrows" | "5arrows" => Ok(ConditionalFormatIconType::FiveArrows),
-        "5_arrows_gray" | "5arrowsgray" => Ok(ConditionalFormatIconType::FiveArrowsGray),
-        "5_rating" | "5rating" => Ok(ConditionalFormatIconType::FiveHistograms),
-        "5_quarters" | "5quarters" => Ok(ConditionalFormatIconType::FiveQuadrants),
-        _ => Err(format!(
-            "Unknown icon_type '{}'. Valid types: 3_arrows, 3_arrows_gray, 3_flags, 3_traffic_lights, 3_traffic_lights_rimmed, 3_signs, 3_symbols, 3_symbols_uncircled, 4_arrows, 4_arrows_gray, 4_rating, 4_traffic_lights, 5_arrows, 5_arrows_gray, 5_quarters, 5_rating",
-            icon_type
-        )),
-    }
-}
-
-/// Apply conditional formats to a worksheet
-/// Supports: 2_color_scale, 3_color_scale, data_bar, icon_set
-/// Uses IndexMap to preserve pattern order (first match wins for overlapping patterns)
-fn apply_conditional_formats(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    columns: &[String],
-    data_start_row: u32,
-    data_end_row: u32,
-    cond_formats: &IndexMap<String, HashMap<String, Py<PyAny>>>,
-) -> Result<(), String> {
-    for (col_pattern, config) in cond_formats {
-        // Find column index by name (supports exact match or pattern)
-        let col_indices: Vec<u16> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, name)| matches_pattern(name, col_pattern))
-            .map(|(idx, _)| idx as u16)
-            .collect();
-
-        if col_indices.is_empty() {
-            continue; // Skip if no matching columns
-        }
-
-        // Get the format type
-        let format_type: String = config
-            .get("type")
-            .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
-            .bind(py)
-            .extract()
-            .map_err(|e| {
-                format!(
-                    "conditional_formats['{}']: invalid 'type': {}",
-                    col_pattern, e
-                )
-            })?;
-
-        for col_idx in col_indices {
-            match format_type.to_lowercase().as_str() {
-                "2_color_scale" | "2colorscale" | "two_color_scale" => {
-                    let mut cf = ConditionalFormat2ColorScale::new();
-
-                    // Parse min_color
-                    if let Some(min_color_obj) = config.get("min_color") {
-                        if let Ok(color_str) = min_color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_minimum_color(color);
-                        }
-                    }
-
-                    // Parse max_color
-                    if let Some(max_color_obj) = config.get("max_color") {
-                        if let Ok(color_str) = max_color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_maximum_color(color);
-                        }
-                    }
-
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add 2_color_scale: {}", e))?;
-                }
-
-                "3_color_scale" | "3colorscale" | "three_color_scale" => {
-                    let mut cf = ConditionalFormat3ColorScale::new();
-
-                    // Parse min_color
-                    if let Some(min_color_obj) = config.get("min_color") {
-                        if let Ok(color_str) = min_color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_minimum_color(color);
-                        }
-                    }
-
-                    // Parse mid_color
-                    if let Some(mid_color_obj) = config.get("mid_color") {
-                        if let Ok(color_str) = mid_color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_midpoint_color(color);
-                        }
-                    }
-
-                    // Parse max_color
-                    if let Some(max_color_obj) = config.get("max_color") {
-                        if let Ok(color_str) = max_color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_maximum_color(color);
-                        }
-                    }
-
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add 3_color_scale: {}", e))?;
-                }
-
-                "data_bar" | "databar" => {
-                    let mut cf = ConditionalFormatDataBar::new();
-
-                    // Parse bar_color (fill color)
-                    if let Some(color_obj) = config.get("bar_color") {
-                        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_fill_color(color);
-                        }
-                    }
-
-                    // Parse border_color
-                    if let Some(color_obj) = config.get("border_color") {
-                        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
-                            let color = parse_color(&color_str)?;
-                            cf = cf.set_border_color(color);
-                        }
-                    }
-
-                    // Parse solid (vs gradient)
-                    if let Some(solid_obj) = config.get("solid") {
-                        if let Ok(solid) = solid_obj.bind(py).extract::<bool>() {
-                            if solid {
-                                cf = cf.set_solid_fill(true);
-                            }
-                        }
-                    }
-
-                    // Parse direction
-                    if let Some(dir_obj) = config.get("direction") {
-                        if let Ok(dir_str) = dir_obj.bind(py).extract::<String>() {
-                            let direction = match dir_str.to_lowercase().as_str() {
-                                "left_to_right" | "ltr" => {
-                                    ConditionalFormatDataBarDirection::LeftToRight
-                                }
-                                "right_to_left" | "rtl" => {
-                                    ConditionalFormatDataBarDirection::RightToLeft
-                                }
-                                "context" | "" => ConditionalFormatDataBarDirection::Context,
-                                _ => {
-                                    return Err(format!(
-                                        "Unknown direction '{}'. Valid values: left_to_right, right_to_left, context",
-                                        dir_str
-                                    ));
-                                }
-                            };
-                            cf = cf.set_direction(direction);
-                        }
-                    }
-
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add data_bar: {}", e))?;
-                }
-
-                "icon_set" | "iconset" => {
-                    let mut cf = ConditionalFormatIconSet::new();
-
-                    // Parse icon_type
-                    if let Some(icon_obj) = config.get("icon_type") {
-                        if let Ok(icon_str) = icon_obj.bind(py).extract::<String>() {
-                            let icon_type = parse_icon_type(&icon_str)?;
-                            cf = cf.set_icon_type(icon_type);
-                        }
-                    }
-
-                    // Parse reverse
-                    if let Some(rev_obj) = config.get("reverse") {
-                        if let Ok(reverse) = rev_obj.bind(py).extract::<bool>() {
-                            if reverse {
-                                cf = cf.reverse_icons(true);
-                            }
-                        }
-                    }
-
-                    // Parse icons_only (hide numbers, show only icons)
-                    if let Some(icons_only_obj) = config.get("icons_only") {
-                        if let Ok(icons_only) = icons_only_obj.bind(py).extract::<bool>() {
-                            if icons_only {
-                                cf = cf.show_icons_only(true);
-                            }
-                        }
-                    }
-
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add icon_set: {}", e))?;
-                }
-
-                _ => {
-                    return Err(format!(
-                        "Unknown conditional format type '{}'. Valid types: 2_color_scale, 3_color_scale, data_bar, icon_set",
-                        format_type
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Sanitize table name for Excel (alphanumeric + underscore, must start with letter/underscore)
-fn sanitize_table_name(name: &str) -> String {
-    let mut sanitized: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-
-    // Must start with letter or underscore
-    if sanitized.chars().next().is_none_or(|c| c.is_ascii_digit()) {
-        sanitized = format!("_{}", sanitized);
-    }
-
-    // Max 255 chars
-    sanitized.truncate(255);
-    sanitized
-}
-
-/// Parse color string (hex #RRGGBB or named color) to u32
-fn parse_color(color_str: &str) -> Result<u32, String> {
-    let color = color_str.trim();
-    if let Some(hex) = color.strip_prefix('#') {
-        if hex.len() != 6 {
-            return Err(format!(
-                "Invalid hex color '{}': expected 6 characters after #, got {}",
-                color,
-                hex.len()
-            ));
-        }
-        u32::from_str_radix(hex, 16).map_err(|_| format!("Invalid hex color: {}", color))
-    } else {
-        match color.to_lowercase().as_str() {
-            "white" => Ok(0xFFFFFF),
-            "black" => Ok(0x000000),
-            "red" => Ok(0xFF0000),
-            "green" => Ok(0x00FF00),
-            "blue" => Ok(0x0000FF),
-            "yellow" => Ok(0xFFFF00),
-            "cyan" => Ok(0x00FFFF),
-            "magenta" => Ok(0xFF00FF),
-            "gray" | "grey" => Ok(0x808080),
-            "silver" => Ok(0xC0C0C0),
-            "orange" => Ok(0xFFA500),
-            "purple" => Ok(0x800080),
-            "navy" => Ok(0x000080),
-            "teal" => Ok(0x008080),
-            "maroon" => Ok(0x800000),
-            _ => Err(format!("Unknown color: {}", color)),
-        }
-    }
-}
-
-/// Parse header format dictionary into rust_xlsxwriter Format
-fn parse_header_format(
-    py: Python<'_>,
-    fmt_dict: &HashMap<String, Py<PyAny>>,
-) -> Result<Format, String> {
-    let mut format = Format::new();
-
-    if let Some(bold_obj) = fmt_dict.get("bold") {
-        let bold: bool = bold_obj.bind(py).extract().unwrap_or(false);
-        if bold {
-            format = format.set_bold();
-        }
-    }
-
-    if let Some(italic_obj) = fmt_dict.get("italic") {
-        let italic: bool = italic_obj.bind(py).extract().unwrap_or(false);
-        if italic {
-            format = format.set_italic();
-        }
-    }
-
-    if let Some(bg_obj) = fmt_dict.get("bg_color") {
-        if let Ok(color_str) = bg_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_background_color(color);
-        }
-    }
-
-    if let Some(font_obj) = fmt_dict.get("font_color") {
-        if let Ok(color_str) = font_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_font_color(color);
-        }
-    }
-
-    if let Some(size_obj) = fmt_dict.get("font_size") {
-        if let Ok(size) = size_obj.bind(py).extract::<f64>() {
-            format = format.set_font_size(size);
-        }
-    }
-
-    if let Some(underline_obj) = fmt_dict.get("underline") {
-        let underline: bool = underline_obj.bind(py).extract().unwrap_or(false);
-        if underline {
-            format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
-        }
-    }
-
-    Ok(format)
-}
-
-/// Check if a column name matches a wildcard pattern.
-/// Supports: "prefix*", "*suffix", "*contains*", or exact match
-fn matches_pattern(column_name: &str, pattern: &str) -> bool {
-    let starts_with_star = pattern.starts_with('*');
-    let ends_with_star = pattern.ends_with('*');
-
-    match (starts_with_star, ends_with_star) {
-        (true, true) => {
-            // *contains* - match substring
-            let inner = &pattern[1..pattern.len() - 1];
-            column_name.contains(inner)
-        }
-        (true, false) => {
-            // *suffix - match ending
-            let suffix = &pattern[1..];
-            column_name.ends_with(suffix)
-        }
-        (false, true) => {
-            // prefix* - match beginning
-            let prefix = &pattern[..pattern.len() - 1];
-            column_name.starts_with(prefix)
-        }
-        (false, false) => {
-            // Exact match
-            column_name == pattern
-        }
-    }
-}
-
-/// Parse column format dictionary into rust_xlsxwriter Format
-/// Similar to parse_header_format but also supports num_format
-fn parse_column_format(
-    py: Python<'_>,
-    fmt_dict: &HashMap<String, Py<PyAny>>,
-) -> Result<Format, String> {
-    let mut format = Format::new();
-
-    if let Some(bold_obj) = fmt_dict.get("bold") {
-        let bold: bool = bold_obj.bind(py).extract().unwrap_or(false);
-        if bold {
-            format = format.set_bold();
-        }
-    }
-
-    if let Some(italic_obj) = fmt_dict.get("italic") {
-        let italic: bool = italic_obj.bind(py).extract().unwrap_or(false);
-        if italic {
-            format = format.set_italic();
-        }
-    }
-
-    if let Some(bg_obj) = fmt_dict.get("bg_color") {
-        if let Ok(color_str) = bg_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_background_color(color);
-        }
-    }
-
-    if let Some(font_obj) = fmt_dict.get("font_color") {
-        if let Ok(color_str) = font_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_font_color(color);
-        }
-    }
-
-    if let Some(size_obj) = fmt_dict.get("font_size") {
-        if let Ok(size) = size_obj.bind(py).extract::<f64>() {
-            format = format.set_font_size(size);
-        }
-    }
-
-    if let Some(underline_obj) = fmt_dict.get("underline") {
-        let underline: bool = underline_obj.bind(py).extract().unwrap_or(false);
-        if underline {
-            format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
-        }
-    }
-
-    // Support num_format for number formatting (e.g., "0.00000", "#,##0")
-    if let Some(num_fmt_obj) = fmt_dict.get("num_format") {
-        if let Ok(num_fmt_str) = num_fmt_obj.bind(py).extract::<String>() {
-            format = format.set_num_format(&num_fmt_str);
-        }
-    }
-
-    // Support border (adds thin border around cell)
-    if let Some(border_obj) = fmt_dict.get("border") {
-        let border: bool = border_obj.bind(py).extract().unwrap_or(false);
-        if border {
-            format = format.set_border(rust_xlsxwriter::FormatBorder::Thin);
-        }
-    }
-
-    Ok(format)
-}
-
-/// Build a vector of column formats, one for each column.
-/// Returns None for columns with no matching pattern.
-/// Uses IndexMap to preserve pattern order - first matching pattern wins.
-fn build_column_formats(
-    py: Python<'_>,
-    columns: &[String],
-    column_formats: &IndexMap<String, HashMap<String, Py<PyAny>>>,
-) -> Result<Vec<Option<Format>>, String> {
-    let mut formats = Vec::with_capacity(columns.len());
-
-    for col_name in columns {
-        // Find the first matching pattern (order preserved by IndexMap)
-        let mut matched_format: Option<Format> = None;
-        for (pattern, fmt_dict) in column_formats {
-            if matches_pattern(col_name, pattern) {
-                matched_format = Some(parse_column_format(py, fmt_dict)?);
-                break;
-            }
-        }
-        formats.push(matched_format);
-    }
-
-    Ok(formats)
-}
-
-/// Parse a string value and detect its type
-fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
-    let trimmed = value.trim();
-
-    if trimmed.is_empty() {
-        return CellValue::Empty;
-    }
-
-    // Try integer
-    if let Ok(int_val) = trimmed.parse::<i64>() {
-        return CellValue::Integer(int_val);
-    }
-
-    // Try float
-    if let Ok(float_val) = trimmed.parse::<f64>() {
-        if float_val.is_nan() || float_val.is_infinite() {
-            return CellValue::Empty;
-        }
-        return CellValue::Float(float_val);
-    }
-
-    // Try boolean
-    if trimmed.eq_ignore_ascii_case("true") {
-        return CellValue::Boolean(true);
-    }
-    if trimmed.eq_ignore_ascii_case("false") {
-        return CellValue::Boolean(false);
-    }
-
-    // Try datetime (before date, as datetime patterns are more specific)
-    for pattern in DATETIME_PATTERNS {
-        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, pattern) {
-            let excel_date = naive_datetime_to_excel(dt);
-            return CellValue::DateTime(excel_date);
-        }
-    }
-
-    // Try date with locale-aware ordering
-    for pattern in date_order.patterns() {
-        if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, pattern) {
-            let excel_date = naive_date_to_excel(date);
-            return CellValue::Date(excel_date);
-        }
-    }
-
-    // Default to string
-    CellValue::String(trimmed.to_string())
-}
-
-/// Convert NaiveDate to Excel serial date number
-fn naive_date_to_excel(date: chrono::NaiveDate) -> f64 {
-    // Excel epoch is December 30, 1899 (accounting for the 1900 leap year bug)
-    let excel_epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 30).unwrap();
-    let duration = date.signed_duration_since(excel_epoch);
-    duration.num_days() as f64
-}
-
-/// Convert NaiveDateTime to Excel serial datetime number
-fn naive_datetime_to_excel(dt: chrono::NaiveDateTime) -> f64 {
-    let date_part = naive_date_to_excel(dt.date());
-    let time = dt.time();
-    let time_fraction = (time.num_seconds_from_midnight() as f64) / 86400.0;
-    date_part + time_fraction
-}
-
-/// Write a cell value to the worksheet with appropriate formatting
-fn write_cell(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    value: CellValue,
-    date_format: &Format,
-    datetime_format: &Format,
-) -> Result<(), XlsxError> {
-    match value {
-        CellValue::Empty => {
-            worksheet.write_string(row, col, "")?;
-        }
-        CellValue::Integer(v) => {
-            worksheet.write_number(row, col, v as f64)?;
-        }
-        CellValue::Float(v) => {
-            worksheet.write_number(row, col, v)?;
-        }
-        CellValue::Boolean(v) => {
-            worksheet.write_boolean(row, col, v)?;
-        }
-        CellValue::Date(v) => {
-            worksheet.write_number_with_format(row, col, v, date_format)?;
-        }
-        CellValue::DateTime(v) => {
-            worksheet.write_number_with_format(row, col, v, datetime_format)?;
-        }
-        CellValue::String(v) => {
-            worksheet.write_string(row, col, &v)?;
-        }
-    }
-    Ok(())
-}
-
-/// Convert a CSV file to XLSX format with automatic type detection.
-///
-/// # Arguments
-/// * `input_path` - Path to the input CSV file
-/// * `output_path` - Path for the output XLSX file
-/// * `sheet_name` - Name of the worksheet (default: "Sheet1")
-/// * `date_order` - Date parsing order for ambiguous dates (default: Auto)
-///
-/// # Returns
-/// * `Ok((rows, cols))` - Number of rows and columns written
-/// * `Err(message)` - Error description if conversion fails
-pub fn convert_csv_to_xlsx(
-    input_path: &str,
-    output_path: &str,
-    sheet_name: &str,
-    date_order: DateOrder,
-) -> Result<(u32, u16), String> {
-    // Open CSV file
-    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
-    let reader = BufReader::with_capacity(1024 * 1024, file);
-    let mut csv_reader = ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_reader(reader);
-
-    // Create workbook and worksheet
-    let mut workbook = Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
-
-    // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
-
-    let mut row_count: u32 = 0;
-    let mut col_count: u16 = 0;
-
-    // Process records
-    for result in csv_reader.records() {
-        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_count, e))?;
-        let num_cols = record.len() as u16;
-        if num_cols > col_count {
-            col_count = num_cols;
-        }
-
-        for (col_idx, value) in record.iter().enumerate() {
-            let cell_value = parse_value(value, date_order);
-            write_cell(
-                worksheet,
-                row_count,
-                col_idx as u16,
-                cell_value,
-                &date_format,
-                &datetime_format,
-            )
-            .map_err(|e| format!("Write error at ({}, {}): {}", row_count, col_idx, e))?;
-        }
-
-        row_count += 1;
-    }
-
-    // Save workbook
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
-
-    Ok((row_count, col_count))
-}
-
-/// Convert a CSV file to XLSX format using parallel processing.
-///
-/// This version reads all records into memory, parses them in parallel,
-/// then writes sequentially. Best for large files with complex type detection.
-pub fn convert_csv_to_xlsx_parallel(
-    input_path: &str,
-    output_path: &str,
-    sheet_name: &str,
-    date_order: DateOrder,
-) -> Result<(u32, u16), String> {
-    // Open CSV file
-    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
-    let reader = BufReader::with_capacity(1024 * 1024, file);
-    let mut csv_reader = ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_reader(reader);
-
-    // Read all records into memory
-    let records: Vec<Vec<String>> = csv_reader
-        .records()
-        .enumerate()
-        .map(|(row_idx, result)| {
-            result
-                .map(|record| record.iter().map(|s| s.to_string()).collect())
-                .map_err(|e| format!("CSV parse error at row {}: {}", row_idx, e))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let row_count = records.len() as u32;
-    let col_count = records.iter().map(|r| r.len()).max().unwrap_or(0) as u16;
-
-    // Parse all values in parallel
-    let parsed_rows: Vec<Vec<CellValue>> = records
-        .par_iter()
-        .map(|row| {
-            row.iter()
-                .map(|value| parse_value(value, date_order))
-                .collect()
-        })
-        .collect();
-
-    // Create workbook and worksheet
-    let mut workbook = Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
-
-    // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
-
-    // Write parsed values sequentially
-    for (row_idx, row) in parsed_rows.into_iter().enumerate() {
-        for (col_idx, cell_value) in row.into_iter().enumerate() {
-            write_cell(
-                worksheet,
-                row_idx as u32,
-                col_idx as u16,
-                cell_value,
-                &date_format,
-                &datetime_format,
-            )
-            .map_err(|e| format!("Write error at ({}, {}): {}", row_idx, col_idx, e))?;
-        }
-    }
-
-    // Save workbook
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
-
-    Ok((row_count, col_count))
-}
-
-// ============================================================================
-// DataFrame support
-// ============================================================================
-
-/// Write a Python value to the worksheet with optional column format
-fn write_py_value_with_format(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    value: &Bound<'_, PyAny>,
-    date_format: &Format,
-    datetime_format: &Format,
-    column_format: Option<&Format>,
-) -> Result<(), String> {
-    // Check for None first
-    if value.is_none() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, "", fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, "")
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Check for pandas NA/NaT
-    let type_name = value
-        .get_type()
-        .name()
-        .map_err(|e| e.to_string())?
-        .to_string();
-    if type_name == "NAType" || type_name == "NaTType" {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, "", fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, "")
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Try boolean first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = value.cast::<PyBool>() {
-        worksheet
-            .write_boolean(row, col, b.is_true())
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try datetime (before date, since datetime is subclass of date)
-    if type_name == "datetime" || type_name == "Timestamp" {
-        let year: i32 = value
-            .getattr("year")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1900);
-        let month: u32 = value
-            .getattr("month")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let day: u32 = value
-            .getattr("day")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let hour: u32 = value
-            .getattr("hour")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-        let minute: u32 = value
-            .getattr("minute")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-        let second: u32 = value
-            .getattr("second")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0);
-
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
-                let dt = chrono::NaiveDateTime::new(date, time);
-                let excel_dt = naive_datetime_to_excel(dt);
-                // For datetime, use column format if provided, otherwise datetime_format
-                let fmt = column_format.unwrap_or(datetime_format);
-                worksheet
-                    .write_number_with_format(row, col, excel_dt, fmt)
-                    .map_err(|e| e.to_string())?;
-                return Ok(());
-            }
-        }
-    }
-
-    // Try date
-    if type_name == "date" {
-        let year: i32 = value
-            .getattr("year")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1900);
-        let month: u32 = value
-            .getattr("month")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-        let day: u32 = value
-            .getattr("day")
-            .ok()
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(1);
-
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            let excel_date = naive_date_to_excel(date);
-            // For date, use column format if provided, otherwise date_format
-            let fmt = column_format.unwrap_or(date_format);
-            worksheet
-                .write_number_with_format(row, col, excel_date, fmt)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-    }
-
-    // Try integer
-    if let Ok(i) = value.cast::<PyInt>() {
-        if let Ok(val) = i.extract::<i64>() {
-            if let Some(fmt) = column_format {
-                worksheet
-                    .write_number_with_format(row, col, val as f64, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_number(row, col, val as f64)
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
-        }
-    }
-
-    // Try float
-    if let Ok(f) = value.cast::<PyFloat>() {
-        if let Ok(val) = f.extract::<f64>() {
-            if val.is_nan() || val.is_infinite() {
-                if let Some(fmt) = column_format {
-                    worksheet
-                        .write_string_with_format(row, col, "", fmt)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    worksheet
-                        .write_string(row, col, "")
-                        .map_err(|e| e.to_string())?;
-                }
-            } else if let Some(fmt) = column_format {
-                worksheet
-                    .write_number_with_format(row, col, val, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_number(row, col, val)
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
-        }
-    }
-
-    // Try to extract as f64 (covers numpy types)
-    if let Ok(val) = value.extract::<f64>() {
-        if val.is_nan() || val.is_infinite() {
-            if let Some(fmt) = column_format {
-                worksheet
-                    .write_string_with_format(row, col, "", fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(row, col, "")
-                    .map_err(|e| e.to_string())?;
-            }
-        } else if let Some(fmt) = column_format {
-            worksheet
-                .write_number_with_format(row, col, val, fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Try to extract as i64 (covers numpy int types)
-    if let Ok(val) = value.extract::<i64>() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_number_with_format(row, col, val as f64, fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val as f64)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Try to extract as bool
-    if let Ok(val) = value.extract::<bool>() {
-        worksheet
-            .write_boolean(row, col, val)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Try string
-    if let Ok(s) = value.cast::<PyString>() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, s.to_string(), fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, s.to_string())
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Fallback: convert to string
-    let s = value.str().map_err(|e| e.to_string())?.to_string();
-    if let Some(fmt) = column_format {
-        worksheet
-            .write_string_with_format(row, col, &s, fmt)
-            .map_err(|e| e.to_string())?;
-    } else {
-        worksheet
-            .write_string(row, col, &s)
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
-}
-
-/// Convert a DataFrame (pandas or polars) to XLSX format
+/// Extract and validate all optional write parameters from Python into typed Rust structs.
 #[allow(clippy::too_many_arguments)]
-fn convert_dataframe_to_xlsx(
-    py: Python<'_>,
-    df: &Bound<'_, PyAny>,
-    output_path: &str,
-    sheet_name: &str,
-    include_header: bool,
-    autofit: bool,
-    table_style: Option<&str>,
-    freeze_panes: bool,
-    column_widths: Option<&HashMap<String, f64>>,
-    table_name: Option<&str>,
-    header_format: Option<&HashMap<String, Py<PyAny>>>,
-    row_heights: Option<&HashMap<u32, f64>>,
-    constant_memory: bool,
-    column_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
-    conditional_formats: Option<&IndexMap<String, HashMap<String, Py<PyAny>>>>,
-    formula_columns: Option<&IndexMap<String, String>>,
-    merged_ranges: Option<&[MergedRange]>,
-    hyperlinks: Option<&[Hyperlink]>,
-    comments: Option<&HashMap<String, Comment>>,
-    validations: Option<&IndexMap<String, ValidationConfig>>,
-    rich_text: Option<&HashMap<String, Vec<RichTextSegment>>>,
-    images: Option<&HashMap<String, ImageConfig>>,
-) -> Result<(u32, u16), String> {
-    // Create workbook and worksheet
-    let mut workbook = Workbook::new();
-    let worksheet = if constant_memory {
-        workbook.add_worksheet_with_constant_memory()
-    } else {
-        workbook.add_worksheet()
-    };
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
-
-    // Create formats
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
-
-    // Parse header format if provided
-    let header_fmt = if let Some(fmt_dict) = header_format {
-        Some(parse_header_format(py, fmt_dict)?)
-    } else {
-        None
-    };
-
-    let mut row_idx: u32 = 0;
-
-    // Get column names - check polars first since it also has .columns
-    let columns: Vec<String> =
-        if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
-            // polars DataFrame (has schema but no iloc)
-            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
-            cols.extract().map_err(|e: pyo3::PyErr| e.to_string())?
-        } else if df.hasattr("columns").unwrap_or(false) {
-            // pandas DataFrame
-            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
-            let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
-            col_list.extract().map_err(|e: pyo3::PyErr| e.to_string())?
-        } else {
-            return Err("Unsupported DataFrame type".to_string());
-        };
-
-    let col_count = columns.len() as u16;
-
-    // Build column formats if provided
-    let col_formats: Vec<Option<Format>> = if let Some(cf) = column_formats {
-        build_column_formats(py, &columns, cf)?
-    } else {
-        vec![None; columns.len()]
-    };
-
-    // Write header if requested (and not using table, since table handles headers)
-    if include_header && table_style.is_none() {
-        for (col_idx, col_name) in columns.iter().enumerate() {
-            if let Some(ref fmt) = header_fmt {
-                worksheet
-                    .write_string_with_format(row_idx, col_idx as u16, col_name, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(row_idx, col_idx as u16, col_name)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-        row_idx += 1;
-    }
-
-    // If using table with header, write header in row 0
-    let data_start_row = if table_style.is_some() && include_header {
-        for (col_idx, col_name) in columns.iter().enumerate() {
-            if let Some(ref fmt) = header_fmt {
-                worksheet
-                    .write_string_with_format(0, col_idx as u16, col_name, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(0, col_idx as u16, col_name)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-        row_idx = 1;
-        0u32
-    } else {
-        row_idx.saturating_sub(1)
-    };
-
-    // Get row count
-    let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
-        let shape = df
-            .getattr("shape")
-            .map_err(|e: pyo3::PyErr| e.to_string())?;
-        let shape_tuple: (usize, usize) =
-            shape.extract().map_err(|e: pyo3::PyErr| e.to_string())?;
-        shape_tuple.0
-    } else {
-        df.call_method0("__len__")
-            .map_err(|e: pyo3::PyErr| e.to_string())?
-            .extract()
-            .map_err(|e: pyo3::PyErr| e.to_string())?
-    };
-
-    // Check if it's a polars DataFrame
-    let is_polars = df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false);
-
-    if is_polars {
-        // Polars: iterate using rows()
-        let rows = df.call_method0("iter_rows").map_err(|e| e.to_string())?;
-        let iter = rows.try_iter().map_err(|e| e.to_string())?;
-        for row_result in iter {
-            let row = row_result.map_err(|e| e.to_string())?;
-            let row_iter = row.try_iter().map_err(|e| e.to_string())?;
-            let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e: PyErr| e.to_string())?;
-
-            for (col_idx, value) in row_tuple.iter().enumerate() {
-                write_py_value_with_format(
-                    worksheet,
-                    row_idx,
-                    col_idx as u16,
-                    value,
-                    &date_format,
-                    &datetime_format,
-                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
-                )?;
-            }
-            row_idx += 1;
-        }
-    } else {
-        // Pandas: use .values for faster access
-        let values = df.getattr("values").map_err(|e| e.to_string())?;
-
-        for i in 0..row_count {
-            let row = values
-                .get_item(i)
-                .map_err(|e| format!("Failed to get row {}: {}", i, e))?;
-
-            for col_idx in 0..columns.len() {
-                let value = row
-                    .get_item(col_idx)
-                    .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
-
-                write_py_value_with_format(
-                    worksheet,
-                    row_idx,
-                    col_idx as u16,
-                    &value,
-                    &date_format,
-                    &datetime_format,
-                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
-                )?;
-            }
-            row_idx += 1;
-        }
-    }
-
-    // Add Excel Table if requested (not supported in constant_memory mode)
-    // Tables require at least one data row, so skip if DataFrame is empty
-    if let Some(style_name) = table_style {
-        if !constant_memory && row_count > 0 {
-            let style = parse_table_style(style_name)?;
-            let mut table = Table::new().set_style(style);
-
-            // Apply table name if provided
-            if let Some(name) = table_name {
-                let sanitized = sanitize_table_name(name);
-                table = table.set_name(&sanitized);
-            }
-
-            let last_row = row_idx.saturating_sub(1);
-            let last_col = col_count.saturating_sub(1);
-
-            if last_row >= data_start_row {
-                worksheet
-                    .add_table(data_start_row, 0, last_row, last_col, &table)
-                    .map_err(|e| format!("Failed to add table: {}", e))?;
-            }
-        }
-    }
-
-    // Apply formula columns (append calculated columns after data)
-    // Formula columns are added after the original data columns
-    let mut total_col_count = col_count;
-    if let Some(formulas) = formula_columns {
-        if !formulas.is_empty() && row_count > 0 {
-            let data_row_start = if include_header { 1u32 } else { 0u32 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                let formula_cols_added = apply_formula_columns(
-                    worksheet,
-                    formulas,
-                    col_count, // Start after original data columns
-                    data_row_start,
-                    data_row_end,
-                    header_fmt.as_ref(),
-                )?;
-                total_col_count += formula_cols_added;
-            }
-        }
-    }
-
-    // Apply conditional formats (not supported in constant_memory mode)
-    if let Some(cond_fmts) = conditional_formats {
-        if !constant_memory && row_count > 0 {
-            let data_row_start = if include_header { 1 } else { 0 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                apply_conditional_formats(
-                    py,
-                    worksheet,
-                    &columns,
-                    data_row_start,
-                    data_row_end,
-                    cond_fmts,
-                )?;
-            }
-        }
-    }
-
-    // Freeze panes (freeze header row) - not supported in constant_memory mode
-    if freeze_panes && include_header && !constant_memory {
-        worksheet
-            .set_freeze_panes(1, 0)
-            .map_err(|e| format!("Failed to freeze panes: {}", e))?;
-    }
-
-    // Apply custom column widths and/or autofit
-    if let Some(widths) = column_widths {
-        if autofit && widths.contains_key("_all") && !constant_memory {
-            // Autofit first, then apply cap from '_all' and specific widths
-            apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)?;
-        } else {
-            // Just apply the specified widths
-            apply_column_widths(worksheet, col_count, widths)?;
-        }
-    } else if autofit && !constant_memory {
-        // Just autofit, no width constraints
-        worksheet.autofit();
-    }
-
-    // Apply custom row heights if specified (not supported in constant_memory mode)
-    if let Some(heights) = row_heights {
-        if !constant_memory {
-            for (&row_idx_h, &height) in heights.iter() {
-                worksheet
-                    .set_row_height(row_idx_h, height)
-                    .map_err(|e| format!("Failed to set row height: {}", e))?;
-            }
-        }
-    }
-
-    // Apply merged ranges (not supported in constant_memory mode)
-    if let Some(ranges) = merged_ranges {
-        if !constant_memory && !ranges.is_empty() {
-            apply_merged_ranges(py, worksheet, ranges)?;
-        }
-    }
-
-    // Apply hyperlinks (not supported in constant_memory mode)
-    if let Some(links) = hyperlinks {
-        if !constant_memory && !links.is_empty() {
-            apply_hyperlinks(worksheet, links)?;
-        }
-    }
-
-    // Apply comments/notes (not supported in constant_memory mode)
-    if let Some(cmts) = comments {
-        if !constant_memory && !cmts.is_empty() {
-            apply_comments(worksheet, cmts)?;
-        }
-    }
-
-    // Apply data validations (not supported in constant_memory mode)
-    if let Some(vals) = validations {
-        if !constant_memory && row_count > 0 {
-            let data_row_start = if include_header { 1 } else { 0 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                apply_validations(py, worksheet, &columns, data_row_start, data_row_end, vals)?;
-            }
-        }
-    }
-
-    // Apply rich text (not supported in constant_memory mode)
-    if let Some(rt) = rich_text {
-        if !constant_memory && !rt.is_empty() {
-            apply_rich_text(py, worksheet, rt)?;
-        }
-    }
-
-    // Apply images (not supported in constant_memory mode)
-    if let Some(imgs) = images {
-        if !constant_memory && !imgs.is_empty() {
-            apply_images(py, worksheet, imgs)?;
-        }
-    }
-
-    // Save workbook
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
-
-    Ok((row_idx, total_col_count))
+fn extract_options(
+    column_widths: Option<&Bound<'_, PyAny>>,
+    header_format: Option<&Bound<'_, PyAny>>,
+    column_formats: Option<&Bound<'_, PyAny>>,
+    conditional_formats: Option<&Bound<'_, PyAny>>,
+    formula_columns: Option<&Bound<'_, PyAny>>,
+    merged_ranges: Option<&Bound<'_, PyAny>>,
+    hyperlinks: Option<&Bound<'_, PyAny>>,
+    comments: Option<&Bound<'_, PyAny>>,
+    validations: Option<&Bound<'_, PyAny>>,
+    rich_text: Option<&Bound<'_, PyAny>>,
+    images: Option<&Bound<'_, PyAny>>,
+) -> PyResult<ExtractedOptions> {
+    Ok(ExtractedOptions {
+        column_widths: column_widths
+            .map(|v| require_dict(v, "column_widths").and_then(|d| extract_column_widths(&d)))
+            .transpose()?,
+        header_format: header_format
+            .map(|v| require_dict(v, "header_format").and_then(|d| extract_header_format(&d)))
+            .transpose()?,
+        column_formats: column_formats
+            .map(|v| require_dict(v, "column_formats").and_then(|d| extract_column_formats(&d)))
+            .transpose()?,
+        conditional_formats: conditional_formats
+            .map(|v| {
+                require_dict(v, "conditional_formats").and_then(|d| extract_conditional_formats(&d))
+            })
+            .transpose()?,
+        formula_columns: formula_columns
+            .map(|v| require_dict(v, "formula_columns").and_then(|d| extract_formula_columns(&d)))
+            .transpose()?,
+        merged_ranges: merged_ranges
+            .map(|v| require_list(v, "merged_ranges").and_then(|l| extract_merged_ranges(&l)))
+            .transpose()?,
+        hyperlinks: hyperlinks
+            .map(|v| require_list(v, "hyperlinks").and_then(|l| extract_hyperlinks(&l)))
+            .transpose()?,
+        comments: comments
+            .map(|v| require_dict(v, "comments").and_then(|d| extract_comments(&d)))
+            .transpose()?,
+        validations: validations
+            .map(|v| require_dict(v, "validations").and_then(|d| extract_validations(&d)))
+            .transpose()?,
+        rich_text: rich_text
+            .map(|v| require_dict(v, "rich_text").and_then(|d| extract_rich_text(&d)))
+            .transpose()?,
+        images: images
+            .map(|v| require_dict(v, "images").and_then(|d| extract_images(&d)))
+            .transpose()?,
+    })
 }
-
-// ============================================================================
-// Python bindings
-// ============================================================================
 
 /// Convert a CSV file to XLSX format with automatic type detection.
 ///
-/// This function reads a CSV file and writes it to an Excel XLSX file,
-/// automatically detecting and converting data types:
-/// - Numbers (integers and floats) become Excel numbers
-/// - "true"/"false" become Excel booleans
-/// - Dates (YYYY-MM-DD, etc.) become Excel dates with formatting
+/// Reads a CSV file and converts it to an Excel XLSX file, automatically
+/// detecting data types:
+/// - Integers and floats become Excel numbers
+/// - "true"/"false" (case-insensitive) become Excel booleans
+/// - Dates (YYYY-MM-DD, DD-MM-YYYY, MM-DD-YYYY) become Excel dates
 /// - Datetimes (ISO 8601) become Excel datetimes
 /// - NaN/Inf values become empty cells
 /// - Everything else becomes text
@@ -2655,126 +260,19 @@ fn df_to_xlsx<'py>(
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
-    // Extract column_widths if provided
-    let extracted_column_widths = if let Some(cw) = column_widths {
-        if let Ok(dict) = cw.cast::<pyo3::types::PyDict>() {
-            Some(extract_column_widths(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract header_format if provided
-    let extracted_header_format = if let Some(hf) = header_format {
-        if let Ok(dict) = hf.cast::<pyo3::types::PyDict>() {
-            Some(extract_header_format(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract column_formats if provided (uses IndexMap to preserve order)
-    let extracted_column_formats = if let Some(cf) = column_formats {
-        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
-            Some(extract_column_formats(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract conditional_formats if provided
-    let extracted_conditional_formats = if let Some(cf) = conditional_formats {
-        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
-            Some(extract_conditional_formats(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract formula_columns if provided (column name -> formula template)
-    let extracted_formula_columns = if let Some(fc) = formula_columns {
-        if let Ok(dict) = fc.cast::<pyo3::types::PyDict>() {
-            Some(extract_formula_columns(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract merged_ranges if provided (list of tuples)
-    let extracted_merged_ranges = if let Some(mr) = merged_ranges {
-        if let Ok(list) = mr.cast::<pyo3::types::PyList>() {
-            Some(extract_merged_ranges(list)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract hyperlinks if provided (list of tuples)
-    let extracted_hyperlinks = if let Some(hl) = hyperlinks {
-        if let Ok(list) = hl.cast::<pyo3::types::PyList>() {
-            Some(extract_hyperlinks(list)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract comments if provided
-    let extracted_comments = if let Some(c) = comments {
-        if let Ok(dict) = c.cast::<pyo3::types::PyDict>() {
-            Some(extract_comments(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract validations if provided
-    let extracted_validations = if let Some(v) = validations {
-        if let Ok(dict) = v.cast::<pyo3::types::PyDict>() {
-            Some(extract_validations(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract rich_text if provided
-    let extracted_rich_text = if let Some(rt) = rich_text {
-        if let Ok(dict) = rt.cast::<pyo3::types::PyDict>() {
-            Some(extract_rich_text(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract images if provided
-    let extracted_images = if let Some(i) = images {
-        if let Ok(dict) = i.cast::<pyo3::types::PyDict>() {
-            Some(extract_images(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let opts = extract_options(
+        column_widths,
+        header_format,
+        column_formats,
+        conditional_formats,
+        formula_columns,
+        merged_ranges,
+        hyperlinks,
+        comments,
+        validations,
+        rich_text,
+        images,
+    )?;
 
     convert_dataframe_to_xlsx(
         py,
@@ -2785,20 +283,10 @@ fn df_to_xlsx<'py>(
         autofit,
         table_style,
         freeze_panes,
-        extracted_column_widths.as_ref(),
         table_name.as_deref(),
-        extracted_header_format.as_ref(),
         row_heights.as_ref(),
         constant_memory,
-        extracted_column_formats.as_ref(),
-        extracted_conditional_formats.as_ref(),
-        extracted_formula_columns.as_ref(),
-        extracted_merged_ranges.as_deref(),
-        extracted_hyperlinks.as_deref(),
-        extracted_comments.as_ref(),
-        extracted_validations.as_ref(),
-        extracted_rich_text.as_ref(),
-        extracted_images.as_ref(),
+        &opts,
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -2893,140 +381,32 @@ fn dfs_to_xlsx<'py>(
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
 
-    // Extract global column_widths if provided
-    let extracted_column_widths = if let Some(cw) = column_widths {
-        if let Ok(dict) = cw.cast::<pyo3::types::PyDict>() {
-            Some(extract_column_widths(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global header_format if provided
-    let extracted_header_format = if let Some(hf) = header_format {
-        if let Ok(dict) = hf.cast::<pyo3::types::PyDict>() {
-            Some(extract_header_format(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global column_formats if provided (uses IndexMap to preserve order)
-    let extracted_column_formats = if let Some(cf) = column_formats {
-        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
-            Some(extract_column_formats(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global conditional_formats if provided
-    let extracted_conditional_formats = if let Some(cf) = conditional_formats {
-        if let Ok(dict) = cf.cast::<pyo3::types::PyDict>() {
-            Some(extract_conditional_formats(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global formula_columns if provided
-    let extracted_formula_columns = if let Some(fc) = formula_columns {
-        if let Ok(dict) = fc.cast::<pyo3::types::PyDict>() {
-            Some(extract_formula_columns(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global merged_ranges if provided
-    let extracted_merged_ranges = if let Some(mr) = merged_ranges {
-        if let Ok(list) = mr.cast::<pyo3::types::PyList>() {
-            Some(extract_merged_ranges(list)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global hyperlinks if provided
-    let extracted_hyperlinks = if let Some(hl) = hyperlinks {
-        if let Ok(list) = hl.cast::<pyo3::types::PyList>() {
-            Some(extract_hyperlinks(list)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global comments if provided
-    let extracted_comments = if let Some(c) = comments {
-        if let Ok(dict) = c.cast::<pyo3::types::PyDict>() {
-            Some(extract_comments(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global validations if provided
-    let extracted_validations = if let Some(v) = validations {
-        if let Ok(dict) = v.cast::<pyo3::types::PyDict>() {
-            Some(extract_validations(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global rich_text if provided
-    let extracted_rich_text = if let Some(rt) = rich_text {
-        if let Ok(dict) = rt.cast::<pyo3::types::PyDict>() {
-            Some(extract_rich_text(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Extract global images if provided
-    let extracted_images = if let Some(i) = images {
-        if let Ok(dict) = i.cast::<pyo3::types::PyDict>() {
-            Some(extract_images(dict)?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let opts = extract_options(
+        column_widths,
+        header_format,
+        column_formats,
+        conditional_formats,
+        formula_columns,
+        merged_ranges,
+        hyperlinks,
+        comments,
+        validations,
+        rich_text,
+        images,
+    )?;
 
     // Create formats
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
 
     // Parse global header format if provided
-    let global_header_fmt = if let Some(ref fmt_dict) = extracted_header_format {
+    let global_header_fmt = if let Some(ref fmt_dict) = opts.header_format {
         Some(parse_header_format(py, fmt_dict).map_err(pyo3::exceptions::PyValueError::new_err)?)
     } else {
         None
     };
 
     for sheet_tuple in sheets {
-        // Extract sheet info (supports both 2-tuple and 3-tuple formats)
         let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
 
         // Merge per-sheet options with global defaults
@@ -3040,7 +420,7 @@ fn dfs_to_xlsx<'py>(
         let effective_column_widths = sheet_config
             .column_widths
             .as_ref()
-            .or(extracted_column_widths.as_ref());
+            .or(opts.column_widths.as_ref());
         let effective_row_heights = sheet_config.row_heights.as_ref().or(row_heights.as_ref());
         let effective_table_name = sheet_config.table_name.as_ref().or(table_name.as_ref());
 
@@ -3058,7 +438,7 @@ fn dfs_to_xlsx<'py>(
         let effective_column_formats = sheet_config
             .column_formats
             .as_ref()
-            .or(extracted_column_formats.as_ref());
+            .or(opts.column_formats.as_ref());
 
         let worksheet = if constant_memory {
             workbook.add_worksheet_with_constant_memory()
@@ -3212,14 +592,12 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Add Excel Table if requested (not supported in constant_memory mode)
-        // Tables require at least one data row, so skip if DataFrame is empty
         if let Some(ref style_name) = effective_table_style {
             if !constant_memory && row_count > 0 {
                 let style = parse_table_style(style_name)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let mut table = Table::new().set_style(style);
 
-                // Apply table name if provided
                 if let Some(name) = effective_table_name {
                     let sanitized = sanitize_table_name(name);
                     table = table.set_name(&sanitized);
@@ -3242,12 +620,11 @@ fn dfs_to_xlsx<'py>(
             }
         }
 
-        // Apply formula columns (append calculated columns after data)
-        // Use per-sheet formula_columns or fall back to global
+        // Apply formula columns
         let effective_formula_columns = sheet_config
             .formula_columns
             .as_ref()
-            .or(extracted_formula_columns.as_ref());
+            .or(opts.formula_columns.as_ref());
         let mut total_col_count = col_count;
         if let Some(formulas) = effective_formula_columns {
             if !formulas.is_empty() && row_count > 0 {
@@ -3257,7 +634,7 @@ fn dfs_to_xlsx<'py>(
                     let formula_cols_added = apply_formula_columns(
                         worksheet,
                         formulas,
-                        col_count, // Start after original data columns
+                        col_count,
                         data_row_start,
                         data_row_end,
                         effective_header_fmt.as_ref(),
@@ -3269,11 +646,10 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply conditional formats (not supported in constant_memory mode)
-        // Use per-sheet conditional_formats or fall back to global
         let effective_conditional_formats = sheet_config
             .conditional_formats
             .as_ref()
-            .or(extracted_conditional_formats.as_ref());
+            .or(opts.conditional_formats.as_ref());
         if let Some(cond_fmts) = effective_conditional_formats {
             if !constant_memory && row_count > 0 {
                 let data_row_start = if effective_header { 1 } else { 0 };
@@ -3302,20 +678,17 @@ fn dfs_to_xlsx<'py>(
         // Apply custom column widths and/or autofit
         if let Some(widths) = effective_column_widths {
             if effective_autofit && widths.contains_key("_all") && !constant_memory {
-                // Autofit first, then apply cap from '_all' and specific widths
                 apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
             } else {
-                // Just apply the specified widths
                 apply_column_widths(worksheet, col_count, widths)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
             }
         } else if effective_autofit && !constant_memory {
-            // Just autofit, no width constraints
             worksheet.autofit();
         }
 
-        // Apply custom row heights if specified (not supported in constant_memory mode)
+        // Apply custom row heights (not supported in constant_memory mode)
         if let Some(heights) = effective_row_heights {
             if !constant_memory {
                 for (&row_idx_h, &height) in heights.iter() {
@@ -3330,11 +703,10 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply merged ranges (not supported in constant_memory mode)
-        // Use per-sheet merged_ranges or fall back to global
         let effective_merged_ranges = sheet_config
             .merged_ranges
             .as_ref()
-            .or(extracted_merged_ranges.as_ref());
+            .or(opts.merged_ranges.as_ref());
         if let Some(ranges) = effective_merged_ranges {
             if !constant_memory && !ranges.is_empty() {
                 apply_merged_ranges(py, worksheet, ranges)
@@ -3343,11 +715,10 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply hyperlinks (not supported in constant_memory mode)
-        // Use per-sheet hyperlinks or fall back to global
         let effective_hyperlinks = sheet_config
             .hyperlinks
             .as_ref()
-            .or(extracted_hyperlinks.as_ref());
+            .or(opts.hyperlinks.as_ref());
         if let Some(links) = effective_hyperlinks {
             if !constant_memory && !links.is_empty() {
                 apply_hyperlinks(worksheet, links)
@@ -3356,11 +727,7 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply comments/notes (not supported in constant_memory mode)
-        // Use per-sheet comments or fall back to global
-        let effective_comments = sheet_config
-            .comments
-            .as_ref()
-            .or(extracted_comments.as_ref());
+        let effective_comments = sheet_config.comments.as_ref().or(opts.comments.as_ref());
         if let Some(cmts) = effective_comments {
             if !constant_memory && !cmts.is_empty() {
                 apply_comments(worksheet, cmts).map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -3368,11 +735,10 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply data validations (not supported in constant_memory mode)
-        // Use per-sheet validations or fall back to global
         let effective_validations = sheet_config
             .validations
             .as_ref()
-            .or(extracted_validations.as_ref());
+            .or(opts.validations.as_ref());
         if let Some(vals) = effective_validations {
             if !constant_memory && row_count > 0 {
                 let data_row_start = if effective_header { 1 } else { 0 };
@@ -3385,11 +751,7 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply rich text (not supported in constant_memory mode)
-        // Use per-sheet rich_text or fall back to global
-        let effective_rich_text = sheet_config
-            .rich_text
-            .as_ref()
-            .or(extracted_rich_text.as_ref());
+        let effective_rich_text = sheet_config.rich_text.as_ref().or(opts.rich_text.as_ref());
         if let Some(rt) = effective_rich_text {
             if !constant_memory && !rt.is_empty() {
                 apply_rich_text(py, worksheet, rt)
@@ -3398,8 +760,7 @@ fn dfs_to_xlsx<'py>(
         }
 
         // Apply images (not supported in constant_memory mode)
-        // Use per-sheet images or fall back to global
-        let effective_images = sheet_config.images.as_ref().or(extracted_images.as_ref());
+        let effective_images = sheet_config.images.as_ref().or(opts.images.as_ref());
         if let Some(imgs) = effective_images {
             if !constant_memory && !imgs.is_empty() {
                 apply_images(py, worksheet, imgs)
@@ -3448,7 +809,8 @@ fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::parse::{matches_pattern, parse_value};
+    use crate::types::{CellValue, DateOrder};
 
     #[test]
     fn test_parse_integer() {
@@ -3562,5 +924,15 @@ mod tests {
         assert!(matches_pattern("difference", "*difference*"));
         assert!(matches_pattern("my_difference_col", "*difference*"));
         assert!(!matches_pattern("other_column", "*difference*"));
+    }
+
+    #[test]
+    fn test_matches_pattern_wildcard() {
+        // Single "*" matches everything
+        assert!(matches_pattern("anything", "*"));
+        assert!(matches_pattern("", "*"));
+        // Double "**" also matches everything
+        assert!(matches_pattern("anything", "**"));
+        assert!(matches_pattern("", "**"));
     }
 }
