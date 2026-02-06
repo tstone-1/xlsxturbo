@@ -3,6 +3,7 @@ Tests for xlsxturbo features (v0.6.0+):
 - Global column width cap, table names, header styling (v0.6.0)
 - Column formatting with wildcards (v0.7.0)
 - Date order for CSV parsing, edge cases (v0.8.0)
+- Formula columns, merged cells, hyperlinks (v0.9.0)
 - Comments, validations, rich_text, images (v0.10.0)
 """
 
@@ -70,6 +71,12 @@ class TestColumnWidthCap:
         try:
             xlsxturbo.df_to_xlsx(df, path, autofit=True, column_widths={"_all": 25})
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Long column should be capped at ~25
+                assert ws.column_dimensions["B"].width <= 26
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -87,6 +94,14 @@ class TestColumnWidthCap:
                 path,
             )
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                # Sheet1 should have narrower column than Sheet2
+                w1 = wb["Sheet1"].column_dimensions["A"].width or 0
+                w2 = wb["Sheet2"].column_dimensions["A"].width or 0
+                assert w1 <= 21, f"Sheet1 col A width {w1} should be <= 21"
+                assert w2 > 21, f"Sheet2 col A width {w2} should be > 21"
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -292,6 +307,12 @@ class TestBackwardCompatibility:
         try:
             xlsxturbo.df_to_xlsx(df, path, column_widths={0: 20, 1: 30})
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws.column_dimensions["A"].width > 15
+                assert ws.column_dimensions["B"].width > 25
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -319,6 +340,11 @@ class TestPolarsSupport:
         try:
             xlsxturbo.df_to_xlsx(df, path, column_widths={"_all": 20})
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws.column_dimensions["A"].width <= 21
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -328,6 +354,11 @@ class TestPolarsSupport:
         try:
             xlsxturbo.df_to_xlsx(df, path, table_style="Medium2", table_name="PolarsTable")
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert "PolarsTable" in ws.tables
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -337,6 +368,11 @@ class TestPolarsSupport:
         try:
             xlsxturbo.df_to_xlsx(df, path, header_format={"bold": True})
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].font.bold == True
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -641,6 +677,423 @@ class TestDateOrder:
                 os.unlink(xlsx_path)
 
 
+class TestFormulaColumns:
+    """Tests for formula_columns feature (v0.9.0)"""
+
+    def test_basic_formula(self):
+        """Formula column appended after data columns"""
+        df = pd.DataFrame({"price": [100, 200], "quantity": [5, 3]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(
+                df, path, formula_columns={"Total": "=A{row}*B{row}"}
+            )
+            assert cols == 3  # price, quantity, Total
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Header should be "Total"
+                assert ws["C1"].value == "Total"
+                # Data rows should have formulas (openpyxl shows them as =formula)
+                assert ws["C2"].value == "=A2*B2"
+                assert ws["C3"].value == "=A3*B3"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_multiple_formula_columns(self):
+        """Multiple formula columns in order"""
+        df = pd.DataFrame({"price": [100], "qty": [5], "tax": [0.1]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                formula_columns={
+                    "Subtotal": "=A{row}*B{row}",
+                    "TaxAmt": "=D{row}*C{row}",
+                },
+            )
+            assert cols == 5  # price, qty, tax, Subtotal, TaxAmt
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["D1"].value == "Subtotal"
+                assert ws["E1"].value == "TaxAmt"
+                assert ws["D2"].value == "=A2*B2"
+                assert ws["E2"].value == "=D2*C2"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_formula_row_placeholder(self):
+        """The {row} placeholder is correctly replaced per row"""
+        df = pd.DataFrame({"A": [10, 20, 30]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, formula_columns={"Double": "=A{row}*2"}
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["B2"].value == "=A2*2"
+                assert ws["B3"].value == "=A3*2"
+                assert ws["B4"].value == "=A4*2"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_formula_with_dfs_to_xlsx(self):
+        """Formula columns work in multi-sheet mode"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Sheet1", {"formula_columns": {"Sum": "=A{row}+10"}})],
+                path,
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb["Sheet1"]
+                assert ws["B1"].value == "Sum"
+                assert ws["B2"].value == "=A2+10"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestMergedRanges:
+    """Tests for merged_ranges feature (v0.9.0)"""
+
+    def test_simple_merge(self):
+        """Merge a range with text"""
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4], "C": [5, 6]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                merged_ranges=[("A1:C1", "Title Row")],
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Cell A1 should contain the merge text
+                assert ws["A1"].value == "Title Row"
+                # The range should be merged
+                merged = [str(m) for m in ws.merged_cells.ranges]
+                assert "A1:C1" in merged
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_merge_with_format(self):
+        """Merge a range with custom formatting"""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                merged_ranges=[
+                    ("A1:B1", "Styled Merge", {"bold": True, "bg_color": "#4F81BD"})
+                ],
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].value == "Styled Merge"
+                assert ws["A1"].font.bold is True
+                merged = [str(m) for m in ws.merged_cells.ranges]
+                assert "A1:B1" in merged
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_multiple_merges(self):
+        """Multiple merged ranges in same sheet"""
+        df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6], "C": [7, 8, 9]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                merged_ranges=[
+                    ("A1:C1", "Top Title"),
+                    ("A5:C5", "Bottom Title"),
+                ],
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                merged = [str(m) for m in ws.merged_cells.ranges]
+                assert "A1:C1" in merged
+                assert "A5:C5" in merged
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_merge_with_dfs_to_xlsx(self):
+        """Merged ranges work per-sheet"""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Sheet1", {"merged_ranges": [("A1:B1", "Per-Sheet Merge")]})],
+                path,
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb["Sheet1"]
+                assert ws["A1"].value == "Per-Sheet Merge"
+                merged = [str(m) for m in ws.merged_cells.ranges]
+                assert "A1:B1" in merged
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestHyperlinks:
+    """Tests for hyperlinks feature (v0.9.0)"""
+
+    def test_basic_hyperlink(self):
+        """Hyperlink with URL and display text"""
+        df = pd.DataFrame({"Name": ["Example"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                hyperlinks=[("B2", "https://example.com", "Example Site")],
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["B2"].hyperlink is not None
+                assert "example.com" in ws["B2"].hyperlink.target
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_hyperlink_without_display_text(self):
+        """Hyperlink with URL only (no display text)"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                hyperlinks=[("A2", "https://example.com")],
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].hyperlink is not None
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_multiple_hyperlinks(self):
+        """Multiple hyperlinks in same sheet"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                hyperlinks=[
+                    ("B1", "https://one.com", "One"),
+                    ("B2", "https://two.com", "Two"),
+                    ("B3", "https://three.com", "Three"),
+                ],
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["B1"].hyperlink is not None
+                assert ws["B2"].hyperlink is not None
+                assert ws["B3"].hyperlink is not None
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_hyperlinks_with_dfs_to_xlsx(self):
+        """Hyperlinks work per-sheet in multi-sheet mode"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (
+                        df,
+                        "Sheet1",
+                        {"hyperlinks": [("B1", "https://example.com", "Link")]},
+                    )
+                ],
+                path,
+            )
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb["Sheet1"]
+                assert ws["B1"].hyperlink is not None
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestCsvConversion:
+    """Tests for csv_to_xlsx function"""
+
+    def test_basic_csv(self):
+        """Basic CSV with header and data rows"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["name", "age", "score"])
+                writer.writerow(["Alice", "30", "95.5"])
+                writer.writerow(["Bob", "25", "88.0"])
+
+            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            assert rows == 3
+            assert cols == 3
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                assert ws["A1"].value == "name"
+                assert ws["B2"].value == 30  # should be detected as integer
+                assert ws["C2"].value == 95.5  # should be detected as float
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+    def test_csv_type_detection(self):
+        """CSV type detection: int, float, bool, date, string"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["int", "float", "bool", "date", "text"])
+                writer.writerow(["42", "3.14", "true", "2024-01-15", "hello"])
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                assert ws["A2"].value == 42
+                assert abs(ws["B2"].value - 3.14) < 0.001
+                assert ws["C2"].value is True
+                # Date should be a datetime object in openpyxl
+                from datetime import datetime
+
+                assert isinstance(ws["D2"].value, datetime)
+                assert ws["E2"].value == "hello"
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+    def test_csv_special_values(self):
+        """CSV with NaN, Inf, empty cells"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["a", "b", "c"])
+                writer.writerow(["NaN", "Inf", ""])
+                writer.writerow(["nan", "-Inf", "   "])
+
+            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            assert rows == 3
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                # NaN/Inf/empty should become empty strings or None
+                # (written as empty string in write_cell for CellValue::Empty)
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+    def test_csv_parallel(self):
+        """CSV parallel mode produces same output"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_seq = get_temp_path()
+        xlsx_par = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["num", "text"])
+                for i in range(100):
+                    writer.writerow([str(i), f"row_{i}"])
+
+            rows_s, cols_s = xlsxturbo.csv_to_xlsx(csv_path, xlsx_seq, parallel=False)
+            rows_p, cols_p = xlsxturbo.csv_to_xlsx(csv_path, xlsx_par, parallel=True)
+            assert rows_s == rows_p
+            assert cols_s == cols_p
+            if HAS_OPENPYXL:
+                wb_s = load_workbook(xlsx_seq)
+                wb_p = load_workbook(xlsx_par)
+                ws_s = wb_s.active
+                ws_p = wb_p.active
+                # Spot check some cells match
+                for row in [1, 2, 50, 101]:
+                    assert ws_s[f"A{row}"].value == ws_p[f"A{row}"].value
+                    assert ws_s[f"B{row}"].value == ws_p[f"B{row}"].value
+                wb_s.close()
+                wb_p.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_seq):
+                os.unlink(xlsx_seq)
+            if os.path.exists(xlsx_par):
+                os.unlink(xlsx_par)
+
+    def test_csv_with_sheet_name(self):
+        """CSV conversion with custom sheet name"""
+        import csv
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["a"])
+                writer.writerow(["1"])
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, sheet_name="MySheet")
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                assert "MySheet" in wb.sheetnames
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+
 class TestComments:
     """Tests for comments/notes feature (v0.10.0)"""
 
@@ -690,6 +1143,14 @@ class TestComments:
                 df, path, comments={"A1": "Column A", "B1": "Column B", "A2": "First value"}
             )
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].comment is not None
+                assert ws["B1"].comment is not None
+                assert ws["A2"].comment is not None
+                assert "Column A" in ws["A1"].comment.text
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -728,6 +1189,11 @@ class TestValidations:
                 validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
             )
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert len(ws.data_validations.dataValidation) > 0
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -752,6 +1218,14 @@ class TestValidations:
                 },
             )
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert len(ws.data_validations.dataValidation) > 0
+                dv = ws.data_validations.dataValidation[0]
+                assert dv.promptTitle == "Enter Value"
+                assert dv.errorTitle == "Invalid"
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -764,6 +1238,12 @@ class TestValidations:
                 df, path, validations={"score_*": {"type": "whole_number", "min": 0, "max": 100}}
             )
             assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Should have validations on the score columns
+                assert len(ws.data_validations.dataValidation) > 0
+                wb.close()
         finally:
             os.unlink(path)
 
@@ -984,6 +1464,62 @@ class TestErrorPaths:
             if os.path.exists(path):
                 os.unlink(path)
 
+    def test_wrong_type_column_widths_raises_error(self):
+        """Passing a list instead of dict for column_widths raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_widths=[10, 20])
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "expected dict" in str(e).lower()
+            assert "column_widths" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_wrong_type_header_format_raises_error(self):
+        """Passing a string instead of dict for header_format raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, header_format="bold")
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "expected dict" in str(e).lower()
+            assert "header_format" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_wrong_type_merged_ranges_raises_error(self):
+        """Passing a dict instead of list for merged_ranges raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, merged_ranges={"A1:B1": "Title"})
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "expected list" in str(e).lower()
+            assert "merged_ranges" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_wrong_type_hyperlinks_raises_error(self):
+        """Passing a dict instead of list for hyperlinks raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, hyperlinks={"A1": "https://example.com"})
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "expected list" in str(e).lower()
+            assert "hyperlinks" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
     def test_invalid_rich_text_not_list_raises_error(self):
         """Invalid rich_text value (not a list) raises clear error"""
         df = pd.DataFrame({"A": [1]})
@@ -996,6 +1532,252 @@ class TestErrorPaths:
         finally:
             if os.path.exists(path):
                 os.unlink(path)
+
+
+class TestConditionalFormatting:
+    """Tests for conditional formatting feature (v0.8.0)"""
+
+    def test_2_color_scale(self):
+        """2-color scale conditional format"""
+        df = pd.DataFrame({"Score": [10, 50, 90]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                conditional_formats={
+                    "Score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # openpyxl reads conditional formats
+                assert len(ws.conditional_formatting) > 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_3_color_scale(self):
+        """3-color scale conditional format"""
+        df = pd.DataFrame({"Value": [1, 5, 10]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                conditional_formats={
+                    "Value": {
+                        "type": "3_color_scale",
+                        "min_color": "#F8696B",
+                        "mid_color": "#FFEB84",
+                        "max_color": "#63BE7B",
+                    }
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert len(ws.conditional_formatting) > 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_data_bar(self):
+        """Data bar conditional format"""
+        df = pd.DataFrame({"Progress": [25, 50, 75, 100]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                conditional_formats={
+                    "Progress": {"type": "data_bar", "bar_color": "#638EC6"}
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert len(ws.conditional_formatting) > 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_icon_set(self):
+        """Icon set conditional format"""
+        df = pd.DataFrame({"Status": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                conditional_formats={
+                    "Status": {"type": "icon_set", "icon_type": "3_traffic_lights"}
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert len(ws.conditional_formatting) > 0
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_conditional_format_with_pattern(self):
+        """Conditional format with wildcard column pattern"""
+        df = pd.DataFrame({"score_a": [80], "score_b": [60], "name": ["Alice"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                conditional_formats={
+                    "score_*": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
+                },
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Should have conditional formats on both score columns
+                assert len(ws.conditional_formatting) >= 1
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestConstantMemoryMode:
+    """Tests for constant_memory mode (v0.4.0)"""
+
+    def test_basic_constant_memory(self):
+        """File is created in constant memory mode"""
+        df = pd.DataFrame({"A": list(range(100)), "B": list(range(100, 200))})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path, constant_memory=True)
+            assert rows > 0
+            assert cols == 2
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].value == "A"  # header
+                assert ws["A2"].value == 0  # first data row
+                assert ws["B2"].value == 100
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_constant_memory_silently_disables_features(self):
+        """Features are silently disabled in constant memory mode (no crash)"""
+        df = pd.DataFrame({"Score": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                constant_memory=True,
+                # All these should be silently ignored:
+                table_style="Medium9",
+                freeze_panes=True,
+                autofit=True,
+                row_heights={0: 30},
+                conditional_formats={"Score": {"type": "data_bar", "bar_color": "#638EC6"}},
+                formula_columns={"Double": "=A{row}*2"},
+                merged_ranges=[("A1:A1", "Merge")],
+                hyperlinks=[("A1", "https://example.com", "Link")],
+                comments={"A1": "Comment"},
+                validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
+                rich_text={"B1": [("Bold", {"bold": True})]},
+            )
+            assert rows > 0
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Table should NOT be created
+                assert len(ws.tables) == 0
+                # Data should still be written
+                assert ws["A1"].value == "Score"
+                assert ws["A2"].value == 1
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_constant_memory_with_column_widths(self):
+        """Column widths still work in constant memory mode"""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, constant_memory=True, column_widths={0: 25})
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws.column_dimensions["A"].width > 20
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestRowHeights:
+    """Tests for row_heights parameter (v0.4.0)"""
+
+    def test_basic_row_heights(self):
+        """Set specific row heights"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, row_heights={0: 30, 2: 40})
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # openpyxl is 1-indexed; Excel may round heights slightly
+                assert abs(ws.row_dimensions[1].height - 30) < 1
+                assert abs(ws.row_dimensions[3].height - 40) < 1
+                # Rows without explicit height should not have customHeight
+                assert ws.row_dimensions[2].customHeight is False
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_row_heights_with_dfs_to_xlsx(self):
+        """Row heights work per-sheet"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Sheet1", {"row_heights": {0: 25}})],
+                path,
+            )
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb["Sheet1"]
+                assert abs(ws.row_dimensions[1].height - 25) < 1
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_row_heights_ignored_in_constant_memory(self):
+        """Row heights silently ignored in constant memory mode"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, constant_memory=True, row_heights={0: 50})
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Row height should NOT be set (constant memory ignores it)
+                # Default height is ~15, so it should not be 50
+                assert ws.row_dimensions[1].height != 50 or ws.row_dimensions[1].height is None
+                wb.close()
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
@@ -1011,12 +1793,19 @@ if __name__ == "__main__":
         TestAllFeaturesCombined,
         TestEdgeCases,
         TestDateOrder,
+        TestFormulaColumns,
+        TestMergedRanges,
+        TestHyperlinks,
+        TestCsvConversion,
         TestComments,
         TestValidations,
         TestRichText,
         TestImages,
         TestV10AllFeatures,
         TestErrorPaths,
+        TestConditionalFormatting,
+        TestConstantMemoryMode,
+        TestRowHeights,
     ]
 
     failed = 0
