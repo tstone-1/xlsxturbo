@@ -1780,6 +1780,193 @@ class TestRowHeights:
             os.unlink(path)
 
 
+class TestUnicodeAndSpecialData:
+    """Tests for Unicode, mixed types, nulls, and CSV edge cases."""
+
+    def test_unicode_column_names_and_data(self):
+        """Unicode characters in column names and cell data"""
+        df = pd.DataFrame({
+            "\u4ef7\u683c": [100, 200],       # Chinese: "price"
+            "Stra\u00dfe": ["Berlin", "M\u00fcnchen"],  # German: street, Munich
+            "\u540d\u524d": ["\u592a\u90ce", "\u82b1\u5b50"],           # Japanese names
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 3  # header + 2 data rows
+            assert cols == 3
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].value == "\u4ef7\u683c"
+                assert ws["B1"].value == "Stra\u00dfe"
+                assert ws["C1"].value == "\u540d\u524d"
+                assert ws["B2"].value == "Berlin"
+                assert ws["C2"].value == "\u592a\u90ce"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_emoji_in_data(self):
+        """Emoji characters in cell values"""
+        df = pd.DataFrame({
+            "status": ["done", "pending"],
+            "icon": ["\U0001f680", "\U0001f525"],
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 3
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["B2"].value == "\U0001f680"
+                assert ws["B3"].value == "\U0001f525"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_mixed_type_column(self):
+        """Column with mixed int and string values (pandas object dtype)"""
+        df = pd.DataFrame({"mixed": [1, "two", 3, "four", 5.5]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 6  # header + 5 rows
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == 1
+                assert ws["A3"].value == "two"
+                assert ws["A4"].value == 3
+                assert ws["A5"].value == "four"
+                assert ws["A6"].value == 5.5
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_none_and_nat_values(self):
+        """None, NaT, and pd.NA values write as empty cells"""
+        df = pd.DataFrame({
+            "a": [1, None, 3],
+            "b": pd.array([10, pd.NA, 30], dtype="Int64"),
+            "c": pd.to_datetime(["2024-01-01", pd.NaT, "2024-03-01"]),
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 4  # header + 3 rows
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # None/NA cells should be empty
+                assert ws["A3"].value is None or ws["A3"].value == ""
+                assert ws["B3"].value is None or ws["B3"].value == ""
+                assert ws["C3"].value is None or ws["C3"].value == ""
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_all_none_column(self):
+        """Column with all None values"""
+        df = pd.DataFrame({"empty": [None, None, None]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 4
+            assert cols == 1
+        finally:
+            os.unlink(path)
+
+    def test_large_integers_written_as_strings(self):
+        """Integers > 2^53 should be written as strings to prevent precision loss"""
+        large_int = 9007199254740993  # 2^53 + 1
+        df = pd.DataFrame({"id": [large_int, 42]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 3
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                # Large int should be written as string to preserve precision
+                assert str(ws["A2"].value) == str(large_int)
+                # Normal int should be a number
+                assert ws["A3"].value == 42
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_csv_with_bom(self):
+        """CSV file with UTF-8 BOM"""
+        csv_path = tempfile.mktemp(suffix=".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", encoding="utf-8-sig") as f:
+                f.write("name,value\nAlice,1\nBob,2\n")
+            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            assert rows == 3  # header + 2 data rows
+            assert cols == 2
+        finally:
+            os.unlink(xlsx_path)
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+
+    def test_csv_with_crlf(self):
+        """CSV file with Windows CRLF line endings"""
+        csv_path = tempfile.mktemp(suffix=".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "wb") as f:
+                f.write(b"a,b\r\n1,2\r\n3,4\r\n")
+            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            assert rows == 3
+            assert cols == 2
+        finally:
+            os.unlink(xlsx_path)
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+
+    def test_csv_quoted_fields_with_delimiters(self):
+        """CSV with quoted fields containing commas and newlines"""
+        csv_path = tempfile.mktemp(suffix=".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", encoding="utf-8") as f:
+                f.write('name,address\n"Smith, John","123 Main St"\n"Doe, Jane","456 Oak Ave"\n')
+            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            assert rows == 3
+            assert cols == 2
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                assert ws["A2"].value == "Smith, John"
+                assert ws["B2"].value == "123 Main St"
+                wb.close()
+        finally:
+            os.unlink(xlsx_path)
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+
+    def test_polars_unicode(self):
+        """Unicode data through Polars DataFrames"""
+        df = pl.DataFrame({
+            "city": ["T\u00f6ky\u00f6", "Z\u00fcrich", "S\u00e3o Paulo"],
+            "pop": [14000000, 420000, 12300000],
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 4
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == "T\u00f6ky\u00f6"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -1806,6 +1993,7 @@ if __name__ == "__main__":
         TestConditionalFormatting,
         TestConstantMemoryMode,
         TestRowHeights,
+        TestUnicodeAndSpecialData,
     ]
 
     failed = 0

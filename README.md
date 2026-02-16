@@ -796,6 +796,12 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, `MM-DD-YYYY`, `MM/DD/YYYY`
 
+## Known Limitations
+
+- **Datetime precision**: Sub-second precision (microseconds) is not preserved. Datetimes are written with second-level granularity, matching Excel's practical display precision.
+- **Large integers**: Integers exceeding 2^53 (9,007,199,254,740,992) are written as strings to prevent silent precision loss in Excel's floating-point representation.
+- **Validation lists**: Limited to 255 total characters (Excel limitation).
+
 ## Building from Source
 
 Requires Rust toolchain and maturin:
