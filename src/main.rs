@@ -1,13 +1,13 @@
-//! fast_xlsx CLI - High-performance CSV to XLSX converter
+//! xlsxturbo CLI - High-performance CSV to XLSX converter
 //!
-//! Usage: fast_xlsx input.csv output.xlsx [--sheet-name "Sheet1"]
+//! Usage: xlsxturbo input.csv output.xlsx [--sheet-name "Sheet1"]
 
 use clap::Parser;
 use std::time::Instant;
 use xlsxturbo::DateOrder;
 
 #[derive(Parser, Debug)]
-#[command(name = "fast_xlsx")]
+#[command(name = "xlsxturbo")]
 #[command(version)]
 #[command(about = "Fast CSV to XLSX converter with automatic type detection")]
 #[command(
@@ -53,7 +53,7 @@ fn main() {
     });
 
     if args.verbose {
-        eprintln!("fast_xlsx - CSV to XLSX converter");
+        eprintln!("xlsxturbo - CSV to XLSX converter");
         eprintln!("Input:  {}", args.input);
         eprintln!("Output: {}", args.output);
         eprintln!("Sheet:  {}", args.sheet_name);

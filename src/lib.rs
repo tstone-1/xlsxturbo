@@ -29,7 +29,7 @@ use features::{
     extract_rich_text, extract_sheet_info, extract_validations,
 };
 use parse::{build_column_formats, parse_header_format, parse_table_style, sanitize_table_name};
-use types::ExtractedOptions;
+use types::{extract_columns, is_polars_dataframe, ExtractedOptions};
 
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Format, Table, Workbook};
@@ -454,32 +454,18 @@ fn dfs_to_xlsx<'py>(
 
         let mut row_idx: u32 = 0;
 
-        // Get column names - check polars first
-        let columns: Vec<String> = if df.hasattr("schema").unwrap_or(false)
-            && !df.hasattr("iloc").unwrap_or(false)
-        {
-            let cols = df
-                .getattr("columns")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            cols.extract()
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-        } else if df.hasattr("columns").unwrap_or(false) {
-            let cols = df
-                .getattr("columns")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            let col_list = cols
-                .call_method0("tolist")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            col_list
-                .extract()
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-        } else {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Unsupported DataFrame type",
-            ));
-        };
+        // Get column names
+        let is_polars =
+            is_polars_dataframe(&df).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let columns: Vec<String> =
+            extract_columns(&df, is_polars).map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        let col_count = columns.len() as u16;
+        let col_count = u16::try_from(columns.len()).map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Column count {} exceeds u16 limit",
+                columns.len()
+            ))
+        })?;
 
         // Build column formats if provided
         let col_formats: Vec<Option<Format>> = if let Some(cf) = effective_column_formats {
@@ -492,13 +478,14 @@ fn dfs_to_xlsx<'py>(
         // Write header if requested
         if effective_header {
             for (col_idx, col_name) in columns.iter().enumerate() {
+                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
                 if let Some(ref fmt) = effective_header_fmt {
                     worksheet
-                        .write_string_with_format(row_idx, col_idx as u16, col_name, fmt)
+                        .write_string_with_format(row_idx, col, col_name, fmt)
                         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
                 } else {
                     worksheet
-                        .write_string(row_idx, col_idx as u16, col_name)
+                        .write_string(row_idx, col, col_name)
                         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
                 }
             }
@@ -521,9 +508,6 @@ fn dfs_to_xlsx<'py>(
                 .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
         };
 
-        let is_polars =
-            df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false);
-
         // Write data rows
         if is_polars {
             let rows = df
@@ -543,10 +527,11 @@ fn dfs_to_xlsx<'py>(
                     .map_err(|e: PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
                 for (col_idx, value) in row_tuple.iter().enumerate() {
+                    let col = col_idx as u16; // safe: col_count validated
                     write_py_value_with_format(
                         worksheet,
                         row_idx,
-                        col_idx as u16,
+                        col,
                         value,
                         &date_format,
                         &datetime_format,
@@ -569,6 +554,7 @@ fn dfs_to_xlsx<'py>(
                 })?;
 
                 for col_idx in 0..columns.len() {
+                    let col = col_idx as u16; // safe: col_count validated
                     let value = row.get_item(col_idx).map_err(|e| {
                         pyo3::exceptions::PyValueError::new_err(format!(
                             "Failed to get value at ({}, {}): {}",
@@ -579,7 +565,7 @@ fn dfs_to_xlsx<'py>(
                     write_py_value_with_format(
                         worksheet,
                         row_idx,
-                        col_idx as u16,
+                        col,
                         &value,
                         &date_format,
                         &datetime_format,
