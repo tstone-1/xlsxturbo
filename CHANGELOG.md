@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-02-16
+
+### Fixed
+- **Large integer precision loss** - Integers exceeding 2^53 are now written as strings instead of silently losing precision when cast to f64
+- **Numpy int extraction order** - Numpy integer types (e.g. `numpy.int64`) now go through i64 extraction before f64 fallback, preventing precision loss for large values
+- **Unchecked column index casts** - CSV sequential path now uses `u16::try_from` with clear error messages instead of unchecked `as u16` casts
+- **CLI branding** - Replaced 4 remaining `fast_xlsx` references in `main.rs` with `xlsxturbo`
+- **Undocumented `.unwrap()`** - Changed Excel epoch date `.unwrap()` to `.expect()` with explanation
+
+### Changed
+- **DataFrame type detection** - Extracted `is_polars_dataframe()` and `extract_columns()` helpers into `types.rs`, replacing 4 duplicated detection blocks across `convert.rs` and `lib.rs`
+- **Documentation** - Added `constant_memory` disabled features list to Python docstrings; added "Known Limitations" section to README (datetime precision, large integers)
+- **CI** - Bumped `actions/setup-python` from v5 to v6
+
+### Tests
+- Added `TestUnicodeAndSpecialData` class with 10 new tests: Unicode/CJK column names and data, emoji, mixed-type columns, None/NaT/pd.NA handling, all-None columns, large integer precision, CSV with BOM, CSV with CRLF, CSV with quoted delimiters, Polars Unicode
+- Total: 93 Python integration tests, 12 Rust unit tests
+
 ## [0.10.2] - 2026-02-06
 
 ### Fixed

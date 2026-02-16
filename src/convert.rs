@@ -9,7 +9,7 @@ use crate::parse::{
     build_column_formats, naive_date_to_excel, naive_datetime_to_excel, parse_header_format,
     parse_table_style, parse_value, sanitize_table_name,
 };
-use crate::types::*;
+use crate::types::{extract_columns, is_polars_dataframe, CellValue, DateOrder, ExtractedOptions};
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
@@ -18,6 +18,10 @@ use rust_xlsxwriter::{Format, Table, Worksheet, XlsxError};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
+
+/// Maximum safe integer for lossless f64 representation (2^53).
+/// Integers beyond this range lose precision when cast to f64.
+const MAX_SAFE_INT: i64 = 1 << 53;
 
 /// Write a cell value to the worksheet with appropriate formatting
 pub(crate) fn write_cell(
@@ -33,7 +37,11 @@ pub(crate) fn write_cell(
             worksheet.write_string(row, col, "")?;
         }
         CellValue::Integer(v) => {
-            worksheet.write_number(row, col, v as f64)?;
+            if v.abs() > MAX_SAFE_INT {
+                worksheet.write_string(row, col, v.to_string())?;
+            } else {
+                worksheet.write_number(row, col, v as f64)?;
+            }
         }
         CellValue::Float(v) => {
             worksheet.write_number(row, col, v)?;
@@ -96,17 +104,20 @@ pub fn convert_csv_to_xlsx(
     // Process records
     for result in csv_reader.records() {
         let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_count, e))?;
-        let num_cols = record.len() as u16;
+        let num_cols = u16::try_from(record.len())
+            .map_err(|_| format!("Column count {} exceeds u16 limit", record.len()))?;
         if num_cols > col_count {
             col_count = num_cols;
         }
 
         for (col_idx, value) in record.iter().enumerate() {
             let cell_value = parse_value(value, date_order);
+            let col = u16::try_from(col_idx)
+                .map_err(|_| format!("Column index {} exceeds u16 limit", col_idx))?;
             write_cell(
                 worksheet,
                 row_count,
-                col_idx as u16,
+                col,
                 cell_value,
                 &date_format,
                 &datetime_format,
@@ -183,11 +194,15 @@ pub fn convert_csv_to_xlsx_parallel(
 
     // Write parsed values sequentially
     for (row_idx, row) in parsed_rows.into_iter().enumerate() {
+        let row_u32 = u32::try_from(row_idx)
+            .map_err(|_| format!("Row index {} exceeds u32 limit", row_idx))?;
         for (col_idx, cell_value) in row.into_iter().enumerate() {
+            let col_u16 = u16::try_from(col_idx)
+                .map_err(|_| format!("Column index {} exceeds u16 limit", col_idx))?;
             write_cell(
                 worksheet,
-                row_idx as u32,
-                col_idx as u16,
+                row_u32,
+                col_u16,
                 cell_value,
                 &date_format,
                 &datetime_format,
@@ -329,7 +344,18 @@ pub(crate) fn write_py_value_with_format(
     // Try integer
     if let Ok(i) = value.cast::<PyInt>() {
         if let Ok(val) = i.extract::<i64>() {
-            if let Some(fmt) = column_format {
+            if val.abs() > MAX_SAFE_INT {
+                // Write as string to avoid precision loss for large integers
+                if let Some(fmt) = column_format {
+                    worksheet
+                        .write_string_with_format(row, col, val.to_string(), fmt)
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    worksheet
+                        .write_string(row, col, val.to_string())
+                        .map_err(|e| e.to_string())?;
+                }
+            } else if let Some(fmt) = column_format {
                 worksheet
                     .write_number_with_format(row, col, val as f64, fmt)
                     .map_err(|e| e.to_string())?;
@@ -368,7 +394,31 @@ pub(crate) fn write_py_value_with_format(
         }
     }
 
-    // Try to extract as f64 (covers numpy types)
+    // Try to extract as i64 first (covers numpy int types, before f64 to avoid precision loss)
+    if let Ok(val) = value.extract::<i64>() {
+        if val.abs() > MAX_SAFE_INT {
+            if let Some(fmt) = column_format {
+                worksheet
+                    .write_string_with_format(row, col, val.to_string(), fmt)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                worksheet
+                    .write_string(row, col, val.to_string())
+                    .map_err(|e| e.to_string())?;
+            }
+        } else if let Some(fmt) = column_format {
+            worksheet
+                .write_number_with_format(row, col, val as f64, fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_number(row, col, val as f64)
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    // Try to extract as f64 (covers numpy float types)
     if let Ok(val) = value.extract::<f64>() {
         if val.is_nan() || val.is_infinite() {
             if let Some(fmt) = column_format {
@@ -387,20 +437,6 @@ pub(crate) fn write_py_value_with_format(
         } else {
             worksheet
                 .write_number(row, col, val)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    // Try to extract as i64 (covers numpy int types)
-    if let Ok(val) = value.extract::<i64>() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_number_with_format(row, col, val as f64, fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val as f64)
                 .map_err(|e| e.to_string())?;
         }
         return Ok(());
@@ -483,20 +519,9 @@ pub(crate) fn convert_dataframe_to_xlsx(
 
     let mut row_idx: u32 = 0;
 
-    // Get column names - check polars first since it also has .columns
-    let columns: Vec<String> =
-        if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
-            // polars DataFrame (has schema but no iloc)
-            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
-            cols.extract().map_err(|e: pyo3::PyErr| e.to_string())?
-        } else if df.hasattr("columns").unwrap_or(false) {
-            // pandas DataFrame
-            let cols = df.getattr("columns").map_err(|e| e.to_string())?;
-            let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
-            col_list.extract().map_err(|e: pyo3::PyErr| e.to_string())?
-        } else {
-            return Err("Unsupported DataFrame type".to_string());
-        };
+    // Get column names
+    let is_polars = is_polars_dataframe(df)?;
+    let columns: Vec<String> = extract_columns(df, is_polars)?;
 
     let col_count = u16::try_from(columns.len())
         .map_err(|_| format!("Column count {} exceeds u16 limit", columns.len()))?;
@@ -511,13 +536,14 @@ pub(crate) fn convert_dataframe_to_xlsx(
     // Write header if requested (and not using table, since table handles headers)
     if include_header && table_style.is_none() {
         for (col_idx, col_name) in columns.iter().enumerate() {
+            let col = col_idx as u16; // safe: col_count already validated via u16::try_from
             if let Some(ref fmt) = header_fmt {
                 worksheet
-                    .write_string_with_format(row_idx, col_idx as u16, col_name, fmt)
+                    .write_string_with_format(row_idx, col, col_name, fmt)
                     .map_err(|e| e.to_string())?;
             } else {
                 worksheet
-                    .write_string(row_idx, col_idx as u16, col_name)
+                    .write_string(row_idx, col, col_name)
                     .map_err(|e| e.to_string())?;
             }
         }
@@ -527,13 +553,14 @@ pub(crate) fn convert_dataframe_to_xlsx(
     // If using table with header, write header in row 0
     let data_start_row = if table_style.is_some() && include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
+            let col = col_idx as u16; // safe: col_count already validated via u16::try_from
             if let Some(ref fmt) = header_fmt {
                 worksheet
-                    .write_string_with_format(0, col_idx as u16, col_name, fmt)
+                    .write_string_with_format(0, col, col_name, fmt)
                     .map_err(|e| e.to_string())?;
             } else {
                 worksheet
-                    .write_string(0, col_idx as u16, col_name)
+                    .write_string(0, col, col_name)
                     .map_err(|e| e.to_string())?;
             }
         }
@@ -558,9 +585,6 @@ pub(crate) fn convert_dataframe_to_xlsx(
             .map_err(|e: pyo3::PyErr| e.to_string())?
     };
 
-    // Check if it's a polars DataFrame
-    let is_polars = df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false);
-
     if is_polars {
         // Polars: iterate using rows()
         let rows = df.call_method0("iter_rows").map_err(|e| e.to_string())?;
@@ -573,10 +597,11 @@ pub(crate) fn convert_dataframe_to_xlsx(
                 .map_err(|e: PyErr| e.to_string())?;
 
             for (col_idx, value) in row_tuple.iter().enumerate() {
+                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
                 write_py_value_with_format(
                     worksheet,
                     row_idx,
-                    col_idx as u16,
+                    col,
                     value,
                     &date_format,
                     &datetime_format,
@@ -599,10 +624,11 @@ pub(crate) fn convert_dataframe_to_xlsx(
                     .get_item(col_idx)
                     .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
 
+                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
                 write_py_value_with_format(
                     worksheet,
                     row_idx,
-                    col_idx as u16,
+                    col,
                     &value,
                     &date_format,
                     &datetime_format,

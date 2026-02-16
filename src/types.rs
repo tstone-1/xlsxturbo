@@ -103,6 +103,34 @@ pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 /// Type alias for image config: cell_ref -> image path or config dict
 pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
 
+/// Detect whether a Python object is a Polars or Pandas DataFrame.
+/// Returns true for Polars, false for Pandas.
+/// Errors if the object is neither.
+pub(crate) fn is_polars_dataframe(df: &Bound<'_, PyAny>) -> Result<bool, String> {
+    if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
+        Ok(true) // Polars: has schema but no iloc
+    } else if df.hasattr("columns").unwrap_or(false) {
+        Ok(false) // Pandas: has columns
+    } else {
+        Err("Unsupported DataFrame type".to_string())
+    }
+}
+
+/// Extract column names from a DataFrame (Polars or Pandas).
+pub(crate) fn extract_columns(
+    df: &Bound<'_, PyAny>,
+    is_polars: bool,
+) -> Result<Vec<String>, String> {
+    if is_polars {
+        let cols = df.getattr("columns").map_err(|e| e.to_string())?;
+        cols.extract().map_err(|e: pyo3::PyErr| e.to_string())
+    } else {
+        let cols = df.getattr("columns").map_err(|e| e.to_string())?;
+        let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
+        col_list.extract().map_err(|e: pyo3::PyErr| e.to_string())
+    }
+}
+
 /// Extracted and validated write options from Python parameters.
 /// Used to eliminate duplication between df_to_xlsx and dfs_to_xlsx.
 #[derive(Debug, Default)]
