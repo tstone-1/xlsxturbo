@@ -435,7 +435,8 @@ pub(crate) fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
 pub(crate) fn naive_date_to_excel(date: chrono::NaiveDate) -> f64 {
     // Excel epoch is December 30, 1899 (accounting for the 1900 leap year bug)
     // SAFETY: constant date literal, always valid
-    let excel_epoch = chrono::NaiveDate::from_ymd_opt(1899, 12, 30).unwrap();
+    let excel_epoch =
+        chrono::NaiveDate::from_ymd_opt(1899, 12, 30).expect("Excel epoch date is always valid");
     let duration = date.signed_duration_since(excel_epoch);
     duration.num_days() as f64
 }
