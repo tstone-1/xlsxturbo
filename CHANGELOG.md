@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-02-23
+
+### Fixed
+- **Boolean column formatting ignored** - Boolean values now correctly receive column formatting via `write_boolean_with_format` instead of being written without format
+- **formula_columns not disabled in constant_memory mode** - Formula columns are now correctly skipped when `constant_memory=True`, matching the documented behavior
+- **Cell reference column overflow** - `parse_cell_ref` now validates columns against Excel's maximum (XFD = 16384) using u32 intermediate arithmetic instead of silently wrapping u16
+- **Unchecked arithmetic in formula/row operations** - Row and column index calculations now use `checked_add` to prevent silent overflow on extremely large datasets
+- **Dead code** - Removed unreachable `extract::<bool>()` fallback in `write_py_value_with_format`
+
+### Changed
+- **Deduplicated write logic** - Extracted shared `write_sheet_data` function (~200 lines) used by both `convert_dataframe_to_xlsx` and `dfs_to_xlsx`, eliminating ~300 lines of duplicated code
+- **Reference-based option merging** - New `EffectiveOpts` struct uses references instead of cloning, avoiding unnecessary allocations when merging per-sheet and global options in `dfs_to_xlsx`
+- **`extract_sheet_info` refactored** - Now delegates to existing `extract_*` functions instead of reimplementing parsing inline
+- **constant_memory warnings** - When `constant_memory=True` is used with incompatible options, a Python `warnings.warn()` is now emitted listing the disabled features
+- **Dependencies** - Updated `pyo3` 0.28.1 → 0.28.2 (fixes RUSTSEC-2026-0013)
+- **Metadata** - Added Python 3.13 and 3.14 classifiers to pyproject.toml
+
 ## [0.10.3] - 2026-02-16
 
 ### Fixed
@@ -254,6 +271,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.10.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.4
+[0.10.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.3
 [0.10.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.2
 [0.10.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.1
 [0.10.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.0
