@@ -9,7 +9,9 @@ use crate::parse::{
     build_column_formats, naive_date_to_excel, naive_datetime_to_excel, parse_header_format,
     parse_table_style, parse_value, sanitize_table_name,
 };
-use crate::types::{extract_columns, is_polars_dataframe, CellValue, DateOrder, ExtractedOptions};
+use crate::types::{
+    extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
+};
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
@@ -125,7 +127,9 @@ pub fn convert_csv_to_xlsx(
             .map_err(|e| format!("Write error at ({}, {}): {}", row_count, col_idx, e))?;
         }
 
-        row_count += 1;
+        row_count = row_count
+            .checked_add(1)
+            .ok_or("Row count exceeds u32 limit")?;
     }
 
     // Save workbook
@@ -268,9 +272,15 @@ pub(crate) fn write_py_value_with_format(
 
     // Try boolean first (before int, since bool is subclass of int in Python)
     if let Ok(b) = value.cast::<PyBool>() {
-        worksheet
-            .write_boolean(row, col, b.is_true())
-            .map_err(|e| e.to_string())?;
+        if let Some(fmt) = column_format {
+            worksheet
+                .write_boolean_with_format(row, col, b.is_true(), fmt)
+                .map_err(|e| e.to_string())?;
+        } else {
+            worksheet
+                .write_boolean(row, col, b.is_true())
+                .map_err(|e| e.to_string())?;
+        }
         return Ok(());
     }
 
@@ -442,14 +452,6 @@ pub(crate) fn write_py_value_with_format(
         return Ok(());
     }
 
-    // Try to extract as bool
-    if let Ok(val) = value.extract::<bool>() {
-        worksheet
-            .write_boolean(row, col, val)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
     // Try string
     if let Ok(s) = value.cast::<PyString>() {
         if let Some(fmt) = column_format {
@@ -479,13 +481,16 @@ pub(crate) fn write_py_value_with_format(
     Ok(())
 }
 
-/// Convert a DataFrame (pandas or polars) to XLSX format
+/// Write DataFrame data and apply all features to a worksheet.
+///
+/// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
+/// (single-sheet) and `dfs_to_xlsx` (multi-sheet). The caller is responsible for
+/// creating the workbook/worksheet and saving.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_dataframe_to_xlsx(
+pub(crate) fn write_sheet_data(
     py: Python<'_>,
+    worksheet: &mut Worksheet,
     df: &Bound<'_, PyAny>,
-    output_path: &str,
-    sheet_name: &str,
     include_header: bool,
     autofit: bool,
     table_style: Option<&str>,
@@ -493,25 +498,67 @@ pub(crate) fn convert_dataframe_to_xlsx(
     table_name: Option<&str>,
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
-    opts: &ExtractedOptions,
+    opts: EffectiveOpts<'_>,
 ) -> Result<(u32, u16), String> {
-    // Create workbook and worksheet
-    let mut workbook = rust_xlsxwriter::Workbook::new();
-    let worksheet = if constant_memory {
-        workbook.add_worksheet_with_constant_memory()
-    } else {
-        workbook.add_worksheet()
-    };
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+    // Warn if constant_memory is enabled with incompatible options
+    if constant_memory {
+        let mut disabled: Vec<&str> = Vec::new();
+        if table_style.is_some() {
+            disabled.push("table_style");
+        }
+        if freeze_panes {
+            disabled.push("freeze_panes");
+        }
+        if autofit {
+            disabled.push("autofit");
+        }
+        if row_heights.is_some() {
+            disabled.push("row_heights");
+        }
+        if opts.formula_columns.is_some() {
+            disabled.push("formula_columns");
+        }
+        if opts.conditional_formats.is_some() {
+            disabled.push("conditional_formats");
+        }
+        if opts.merged_ranges.is_some() {
+            disabled.push("merged_ranges");
+        }
+        if opts.hyperlinks.is_some() {
+            disabled.push("hyperlinks");
+        }
+        if opts.comments.is_some() {
+            disabled.push("comments");
+        }
+        if opts.validations.is_some() {
+            disabled.push("validations");
+        }
+        if opts.rich_text.is_some() {
+            disabled.push("rich_text");
+        }
+        if opts.images.is_some() {
+            disabled.push("images");
+        }
+        if !disabled.is_empty() {
+            let warnings = py
+                .import("warnings")
+                .map_err(|e| format!("Failed to import warnings: {}", e))?;
+            let msg = format!(
+                "constant_memory=True disables these features (they will be silently skipped): {}",
+                disabled.join(", ")
+            );
+            warnings
+                .call_method1("warn", (msg,))
+                .map_err(|e| format!("Failed to emit warning: {}", e))?;
+        }
+    }
 
     // Create formats
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
 
     // Parse header format if provided
-    let header_fmt = if let Some(ref fmt_dict) = opts.header_format {
+    let header_fmt = if let Some(fmt_dict) = opts.header_format {
         Some(parse_header_format(py, fmt_dict)?)
     } else {
         None
@@ -527,14 +574,14 @@ pub(crate) fn convert_dataframe_to_xlsx(
         .map_err(|_| format!("Column count {} exceeds u16 limit", columns.len()))?;
 
     // Build column formats if provided
-    let col_formats: Vec<Option<Format>> = if let Some(ref cf) = opts.column_formats {
+    let col_formats: Vec<Option<Format>> = if let Some(cf) = opts.column_formats {
         build_column_formats(py, &columns, cf)?
     } else {
         vec![None; columns.len()]
     };
 
-    // Write header if requested (and not using table, since table handles headers)
-    if include_header && table_style.is_none() {
+    // Write header if requested
+    if include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
             let col = col_idx as u16; // safe: col_count already validated via u16::try_from
             if let Some(ref fmt) = header_fmt {
@@ -547,28 +594,8 @@ pub(crate) fn convert_dataframe_to_xlsx(
                     .map_err(|e| e.to_string())?;
             }
         }
-        row_idx += 1;
-    }
-
-    // If using table with header, write header in row 0
-    let data_start_row = if table_style.is_some() && include_header {
-        for (col_idx, col_name) in columns.iter().enumerate() {
-            let col = col_idx as u16; // safe: col_count already validated via u16::try_from
-            if let Some(ref fmt) = header_fmt {
-                worksheet
-                    .write_string_with_format(0, col, col_name, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(0, col, col_name)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
         row_idx = 1;
-        0u32
-    } else {
-        row_idx.saturating_sub(1)
-    };
+    }
 
     // Get row count
     let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
@@ -608,7 +635,9 @@ pub(crate) fn convert_dataframe_to_xlsx(
                     col_formats.get(col_idx).and_then(|f| f.as_ref()),
                 )?;
             }
-            row_idx += 1;
+            row_idx = row_idx
+                .checked_add(1)
+                .ok_or("Row count exceeds u32 limit")?;
         }
     } else {
         // Pandas: use .values for faster access
@@ -635,7 +664,9 @@ pub(crate) fn convert_dataframe_to_xlsx(
                     col_formats.get(col_idx).and_then(|f| f.as_ref()),
                 )?;
             }
-            row_idx += 1;
+            row_idx = row_idx
+                .checked_add(1)
+                .ok_or("Row count exceeds u32 limit")?;
         }
     }
 
@@ -646,12 +677,12 @@ pub(crate) fn convert_dataframe_to_xlsx(
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
-            // Apply table name if provided
             if let Some(name) = table_name {
                 let sanitized = sanitize_table_name(name);
                 table = table.set_name(&sanitized);
             }
 
+            let data_start_row = 0u32;
             let last_row = row_idx.saturating_sub(1);
             let last_col = col_count.saturating_sub(1);
 
@@ -663,29 +694,30 @@ pub(crate) fn convert_dataframe_to_xlsx(
         }
     }
 
-    // Apply formula columns (append calculated columns after data)
-    // Formula columns are added after the original data columns
+    // Apply formula columns (not supported in constant_memory mode)
     let mut total_col_count = col_count;
-    if let Some(ref formulas) = opts.formula_columns {
-        if !formulas.is_empty() && row_count > 0 {
+    if let Some(formulas) = opts.formula_columns {
+        if !constant_memory && !formulas.is_empty() && row_count > 0 {
             let data_row_start = if include_header { 1u32 } else { 0u32 };
             let data_row_end = row_idx.saturating_sub(1);
             if data_row_end >= data_row_start {
                 let formula_cols_added = apply_formula_columns(
                     worksheet,
                     formulas,
-                    col_count, // Start after original data columns
+                    col_count,
                     data_row_start,
                     data_row_end,
                     header_fmt.as_ref(),
                 )?;
-                total_col_count += formula_cols_added;
+                total_col_count = col_count
+                    .checked_add(formula_cols_added)
+                    .ok_or("Total column count exceeds u16 limit")?;
             }
         }
     }
 
     // Apply conditional formats (not supported in constant_memory mode)
-    if let Some(ref cond_fmts) = opts.conditional_formats {
+    if let Some(cond_fmts) = opts.conditional_formats {
         if !constant_memory && row_count > 0 {
             let data_row_start = if include_header { 1 } else { 0 };
             let data_row_end = row_idx.saturating_sub(1);
@@ -710,20 +742,17 @@ pub(crate) fn convert_dataframe_to_xlsx(
     }
 
     // Apply custom column widths and/or autofit
-    if let Some(ref widths) = opts.column_widths {
+    if let Some(widths) = opts.column_widths {
         if autofit && widths.contains_key("_all") && !constant_memory {
-            // Autofit first, then apply cap from '_all' and specific widths
             apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)?;
         } else {
-            // Just apply the specified widths
             apply_column_widths(worksheet, col_count, widths)?;
         }
     } else if autofit && !constant_memory {
-        // Just autofit, no width constraints
         worksheet.autofit();
     }
 
-    // Apply custom row heights if specified (not supported in constant_memory mode)
+    // Apply custom row heights (not supported in constant_memory mode)
     if let Some(heights) = row_heights {
         if !constant_memory {
             for (&row_idx_h, &height) in heights.iter() {
@@ -735,28 +764,28 @@ pub(crate) fn convert_dataframe_to_xlsx(
     }
 
     // Apply merged ranges (not supported in constant_memory mode)
-    if let Some(ref ranges) = opts.merged_ranges {
+    if let Some(ranges) = opts.merged_ranges {
         if !constant_memory && !ranges.is_empty() {
             apply_merged_ranges(py, worksheet, ranges)?;
         }
     }
 
     // Apply hyperlinks (not supported in constant_memory mode)
-    if let Some(ref links) = opts.hyperlinks {
+    if let Some(links) = opts.hyperlinks {
         if !constant_memory && !links.is_empty() {
             apply_hyperlinks(worksheet, links)?;
         }
     }
 
     // Apply comments/notes (not supported in constant_memory mode)
-    if let Some(ref cmts) = opts.comments {
+    if let Some(cmts) = opts.comments {
         if !constant_memory && !cmts.is_empty() {
             apply_comments(worksheet, cmts)?;
         }
     }
 
     // Apply data validations (not supported in constant_memory mode)
-    if let Some(ref vals) = opts.validations {
+    if let Some(vals) = opts.validations {
         if !constant_memory && row_count > 0 {
             let data_row_start = if include_header { 1 } else { 0 };
             let data_row_end = row_idx.saturating_sub(1);
@@ -767,23 +796,65 @@ pub(crate) fn convert_dataframe_to_xlsx(
     }
 
     // Apply rich text (not supported in constant_memory mode)
-    if let Some(ref rt) = opts.rich_text {
+    if let Some(rt) = opts.rich_text {
         if !constant_memory && !rt.is_empty() {
             apply_rich_text(py, worksheet, rt)?;
         }
     }
 
     // Apply images (not supported in constant_memory mode)
-    if let Some(ref imgs) = opts.images {
+    if let Some(imgs) = opts.images {
         if !constant_memory && !imgs.is_empty() {
             apply_images(py, worksheet, imgs)?;
         }
     }
 
-    // Save workbook
+    Ok((row_idx, total_col_count))
+}
+
+/// Convert a DataFrame (pandas or polars) to XLSX format
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_dataframe_to_xlsx(
+    py: Python<'_>,
+    df: &Bound<'_, PyAny>,
+    output_path: &str,
+    sheet_name: &str,
+    include_header: bool,
+    autofit: bool,
+    table_style: Option<&str>,
+    freeze_panes: bool,
+    table_name: Option<&str>,
+    row_heights: Option<&HashMap<u32, f64>>,
+    constant_memory: bool,
+    opts: &ExtractedOptions,
+) -> Result<(u32, u16), String> {
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = if constant_memory {
+        workbook.add_worksheet_with_constant_memory()
+    } else {
+        workbook.add_worksheet()
+    };
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+
+    let result = write_sheet_data(
+        py,
+        worksheet,
+        df,
+        include_header,
+        autofit,
+        table_style,
+        freeze_panes,
+        table_name,
+        row_heights,
+        constant_memory,
+        opts.as_effective(),
+    )?;
+
     workbook
         .save(output_path)
         .map_err(|e| format!("Failed to save workbook: {}", e))?;
 
-    Ok((row_idx, total_col_count))
+    Ok(result)
 }

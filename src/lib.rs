@@ -19,20 +19,16 @@ mod types;
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel};
 pub use types::DateOrder;
 
-use convert::{convert_dataframe_to_xlsx, write_py_value_with_format};
+use convert::{convert_dataframe_to_xlsx, write_sheet_data};
 use features::{
-    apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
-    apply_conditional_formats, apply_formula_columns, apply_hyperlinks, apply_images,
-    apply_merged_ranges, apply_rich_text, apply_validations, extract_column_formats,
-    extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
-    extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
-    extract_rich_text, extract_sheet_info, extract_validations,
+    extract_column_formats, extract_column_widths, extract_comments, extract_conditional_formats,
+    extract_formula_columns, extract_header_format, extract_hyperlinks, extract_images,
+    extract_merged_ranges, extract_rich_text, extract_sheet_info, extract_validations,
 };
-use parse::{build_column_formats, parse_header_format, parse_table_style, sanitize_table_name};
-use types::{extract_columns, is_polars_dataframe, ExtractedOptions};
+use types::{EffectiveOpts, ExtractedOptions};
 
 use pyo3::prelude::*;
-use rust_xlsxwriter::{Format, Table, Workbook};
+use rust_xlsxwriter::Workbook;
 use std::collections::HashMap;
 
 /// Helper: cast a PyAny to PyDict or raise TypeError with a clear message.
@@ -309,7 +305,8 @@ fn version() -> &'static str {
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             column_widths, row_heights, table_name, header_format, column_formats,
-///             conditional_formats
+///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
+///             comments, validations, rich_text, images
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -395,21 +392,10 @@ fn dfs_to_xlsx<'py>(
         images,
     )?;
 
-    // Create formats
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
-
-    // Parse global header format if provided
-    let global_header_fmt = if let Some(ref fmt_dict) = opts.header_format {
-        Some(parse_header_format(py, fmt_dict).map_err(pyo3::exceptions::PyValueError::new_err)?)
-    } else {
-        None
-    };
-
     for sheet_tuple in sheets {
         let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
 
-        // Merge per-sheet options with global defaults
+        // Merge per-sheet options with global defaults (scalars)
         let effective_header = sheet_config.header.unwrap_or(header);
         let effective_autofit = sheet_config.autofit.unwrap_or(autofit);
         let effective_table_style: Option<String> = match sheet_config.table_style {
@@ -417,28 +403,49 @@ fn dfs_to_xlsx<'py>(
             None => table_style.map(|s| s.to_string()),
         };
         let effective_freeze_panes = sheet_config.freeze_panes.unwrap_or(freeze_panes);
-        let effective_column_widths = sheet_config
-            .column_widths
-            .as_ref()
-            .or(opts.column_widths.as_ref());
-        let effective_row_heights = sheet_config.row_heights.as_ref().or(row_heights.as_ref());
-        let effective_table_name = sheet_config.table_name.as_ref().or(table_name.as_ref());
+        let effective_table_name: Option<String> =
+            sheet_config.table_name.or_else(|| table_name.clone());
+        let effective_row_heights: Option<HashMap<u32, f64>> =
+            sheet_config.row_heights.or_else(|| row_heights.clone());
 
-        // Parse per-sheet header format or use global
-        let effective_header_fmt = if let Some(ref fmt_dict) = sheet_config.header_format {
-            Some(
-                parse_header_format(py, fmt_dict)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?,
-            )
-        } else {
-            global_header_fmt.clone()
+        // Merge per-sheet options with global defaults (references, no cloning needed)
+        let effective_opts = EffectiveOpts {
+            column_widths: sheet_config
+                .column_widths
+                .as_ref()
+                .or(opts.column_widths.as_ref()),
+            header_format: sheet_config
+                .header_format
+                .as_ref()
+                .or(opts.header_format.as_ref()),
+            column_formats: sheet_config
+                .column_formats
+                .as_ref()
+                .or(opts.column_formats.as_ref()),
+            conditional_formats: sheet_config
+                .conditional_formats
+                .as_ref()
+                .or(opts.conditional_formats.as_ref()),
+            formula_columns: sheet_config
+                .formula_columns
+                .as_ref()
+                .or(opts.formula_columns.as_ref()),
+            merged_ranges: sheet_config
+                .merged_ranges
+                .as_ref()
+                .or(opts.merged_ranges.as_ref()),
+            hyperlinks: sheet_config
+                .hyperlinks
+                .as_ref()
+                .or(opts.hyperlinks.as_ref()),
+            comments: sheet_config.comments.as_ref().or(opts.comments.as_ref()),
+            validations: sheet_config
+                .validations
+                .as_ref()
+                .or(opts.validations.as_ref()),
+            rich_text: sheet_config.rich_text.as_ref().or(opts.rich_text.as_ref()),
+            images: sheet_config.images.as_ref().or(opts.images.as_ref()),
         };
-
-        // Get effective column formats (per-sheet or global)
-        let effective_column_formats = sheet_config
-            .column_formats
-            .as_ref()
-            .or(opts.column_formats.as_ref());
 
         let worksheet = if constant_memory {
             workbook.add_worksheet_with_constant_memory()
@@ -452,309 +459,22 @@ fn dfs_to_xlsx<'py>(
             ))
         })?;
 
-        let mut row_idx: u32 = 0;
+        let result = write_sheet_data(
+            py,
+            worksheet,
+            &df,
+            effective_header,
+            effective_autofit,
+            effective_table_style.as_deref(),
+            effective_freeze_panes,
+            effective_table_name.as_deref(),
+            effective_row_heights.as_ref(),
+            constant_memory,
+            effective_opts,
+        )
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        // Get column names
-        let is_polars =
-            is_polars_dataframe(&df).map_err(pyo3::exceptions::PyValueError::new_err)?;
-        let columns: Vec<String> =
-            extract_columns(&df, is_polars).map_err(pyo3::exceptions::PyValueError::new_err)?;
-
-        let col_count = u16::try_from(columns.len()).map_err(|_| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "Column count {} exceeds u16 limit",
-                columns.len()
-            ))
-        })?;
-
-        // Build column formats if provided
-        let col_formats: Vec<Option<Format>> = if let Some(cf) = effective_column_formats {
-            build_column_formats(py, &columns, cf)
-                .map_err(pyo3::exceptions::PyValueError::new_err)?
-        } else {
-            vec![None; columns.len()]
-        };
-
-        // Write header if requested
-        if effective_header {
-            for (col_idx, col_name) in columns.iter().enumerate() {
-                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
-                if let Some(ref fmt) = effective_header_fmt {
-                    worksheet
-                        .write_string_with_format(row_idx, col, col_name, fmt)
-                        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                } else {
-                    worksheet
-                        .write_string(row_idx, col, col_name)
-                        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                }
-            }
-            row_idx += 1;
-        }
-
-        // Get row count and check if polars
-        let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
-            let shape = df
-                .getattr("shape")
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            let shape_tuple: (usize, usize) = shape
-                .extract()
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            shape_tuple.0
-        } else {
-            df.call_method0("__len__")
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-                .extract()
-                .map_err(|e: pyo3::PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-        };
-
-        // Write data rows
-        if is_polars {
-            let rows = df
-                .call_method0("iter_rows")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            let iter = rows
-                .try_iter()
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            for row_result in iter {
-                let row = row_result
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                let row_iter = row
-                    .try_iter()
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e: PyErr| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-
-                for (col_idx, value) in row_tuple.iter().enumerate() {
-                    let col = col_idx as u16; // safe: col_count validated
-                    write_py_value_with_format(
-                        worksheet,
-                        row_idx,
-                        col,
-                        value,
-                        &date_format,
-                        &datetime_format,
-                        col_formats.get(col_idx).and_then(|f| f.as_ref()),
-                    )
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                }
-                row_idx += 1;
-            }
-        } else {
-            let values = df
-                .getattr("values")
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            for i in 0..row_count {
-                let row = values.get_item(i).map_err(|e| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
-                        "Failed to get row {}: {}",
-                        i, e
-                    ))
-                })?;
-
-                for col_idx in 0..columns.len() {
-                    let col = col_idx as u16; // safe: col_count validated
-                    let value = row.get_item(col_idx).map_err(|e| {
-                        pyo3::exceptions::PyValueError::new_err(format!(
-                            "Failed to get value at ({}, {}): {}",
-                            i, col_idx, e
-                        ))
-                    })?;
-
-                    write_py_value_with_format(
-                        worksheet,
-                        row_idx,
-                        col,
-                        &value,
-                        &date_format,
-                        &datetime_format,
-                        col_formats.get(col_idx).and_then(|f| f.as_ref()),
-                    )
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                }
-                row_idx += 1;
-            }
-        }
-
-        // Add Excel Table if requested (not supported in constant_memory mode)
-        if let Some(ref style_name) = effective_table_style {
-            if !constant_memory && row_count > 0 {
-                let style = parse_table_style(style_name)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                let mut table = Table::new().set_style(style);
-
-                if let Some(name) = effective_table_name {
-                    let sanitized = sanitize_table_name(name);
-                    table = table.set_name(&sanitized);
-                }
-
-                let data_start_row = 0u32;
-                let last_row = row_idx.saturating_sub(1);
-                let last_col = col_count.saturating_sub(1);
-
-                if last_row >= data_start_row {
-                    worksheet
-                        .add_table(data_start_row, 0, last_row, last_col, &table)
-                        .map_err(|e| {
-                            pyo3::exceptions::PyValueError::new_err(format!(
-                                "Failed to add table: {}",
-                                e
-                            ))
-                        })?;
-                }
-            }
-        }
-
-        // Apply formula columns
-        let effective_formula_columns = sheet_config
-            .formula_columns
-            .as_ref()
-            .or(opts.formula_columns.as_ref());
-        let mut total_col_count = col_count;
-        if let Some(formulas) = effective_formula_columns {
-            if !formulas.is_empty() && row_count > 0 {
-                let data_row_start = if effective_header { 1u32 } else { 0u32 };
-                let data_row_end = row_idx.saturating_sub(1);
-                if data_row_end >= data_row_start {
-                    let formula_cols_added = apply_formula_columns(
-                        worksheet,
-                        formulas,
-                        col_count,
-                        data_row_start,
-                        data_row_end,
-                        effective_header_fmt.as_ref(),
-                    )
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                    total_col_count += formula_cols_added;
-                }
-            }
-        }
-
-        // Apply conditional formats (not supported in constant_memory mode)
-        let effective_conditional_formats = sheet_config
-            .conditional_formats
-            .as_ref()
-            .or(opts.conditional_formats.as_ref());
-        if let Some(cond_fmts) = effective_conditional_formats {
-            if !constant_memory && row_count > 0 {
-                let data_row_start = if effective_header { 1 } else { 0 };
-                let data_row_end = row_idx.saturating_sub(1);
-                if data_row_end >= data_row_start {
-                    apply_conditional_formats(
-                        py,
-                        worksheet,
-                        &columns,
-                        data_row_start,
-                        data_row_end,
-                        cond_fmts,
-                    )
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                }
-            }
-        }
-
-        // Freeze panes (freeze header row) - not supported in constant_memory mode
-        if effective_freeze_panes && effective_header && !constant_memory {
-            worksheet.set_freeze_panes(1, 0).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Failed to freeze panes: {}", e))
-            })?;
-        }
-
-        // Apply custom column widths and/or autofit
-        if let Some(widths) = effective_column_widths {
-            if effective_autofit && widths.contains_key("_all") && !constant_memory {
-                apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            } else {
-                apply_column_widths(worksheet, col_count, widths)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        } else if effective_autofit && !constant_memory {
-            worksheet.autofit();
-        }
-
-        // Apply custom row heights (not supported in constant_memory mode)
-        if let Some(heights) = effective_row_heights {
-            if !constant_memory {
-                for (&row_idx_h, &height) in heights.iter() {
-                    worksheet.set_row_height(row_idx_h, height).map_err(|e| {
-                        pyo3::exceptions::PyValueError::new_err(format!(
-                            "Failed to set row height: {}",
-                            e
-                        ))
-                    })?;
-                }
-            }
-        }
-
-        // Apply merged ranges (not supported in constant_memory mode)
-        let effective_merged_ranges = sheet_config
-            .merged_ranges
-            .as_ref()
-            .or(opts.merged_ranges.as_ref());
-        if let Some(ranges) = effective_merged_ranges {
-            if !constant_memory && !ranges.is_empty() {
-                apply_merged_ranges(py, worksheet, ranges)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        }
-
-        // Apply hyperlinks (not supported in constant_memory mode)
-        let effective_hyperlinks = sheet_config
-            .hyperlinks
-            .as_ref()
-            .or(opts.hyperlinks.as_ref());
-        if let Some(links) = effective_hyperlinks {
-            if !constant_memory && !links.is_empty() {
-                apply_hyperlinks(worksheet, links)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        }
-
-        // Apply comments/notes (not supported in constant_memory mode)
-        let effective_comments = sheet_config.comments.as_ref().or(opts.comments.as_ref());
-        if let Some(cmts) = effective_comments {
-            if !constant_memory && !cmts.is_empty() {
-                apply_comments(worksheet, cmts).map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        }
-
-        // Apply data validations (not supported in constant_memory mode)
-        let effective_validations = sheet_config
-            .validations
-            .as_ref()
-            .or(opts.validations.as_ref());
-        if let Some(vals) = effective_validations {
-            if !constant_memory && row_count > 0 {
-                let data_row_start = if effective_header { 1 } else { 0 };
-                let data_row_end = row_idx.saturating_sub(1);
-                if data_row_end >= data_row_start {
-                    apply_validations(py, worksheet, &columns, data_row_start, data_row_end, vals)
-                        .map_err(pyo3::exceptions::PyValueError::new_err)?;
-                }
-            }
-        }
-
-        // Apply rich text (not supported in constant_memory mode)
-        let effective_rich_text = sheet_config.rich_text.as_ref().or(opts.rich_text.as_ref());
-        if let Some(rt) = effective_rich_text {
-            if !constant_memory && !rt.is_empty() {
-                apply_rich_text(py, worksheet, rt)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        }
-
-        // Apply images (not supported in constant_memory mode)
-        let effective_images = sheet_config.images.as_ref().or(opts.images.as_ref());
-        if let Some(imgs) = effective_images {
-            if !constant_memory && !imgs.is_empty() {
-                apply_images(py, worksheet, imgs)
-                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
-            }
-        }
-
-        stats.push((row_idx, total_col_count));
+        stats.push(result);
     }
 
     // Save workbook
@@ -768,7 +488,7 @@ fn dfs_to_xlsx<'py>(
 /// xlsxturbo - High-performance Excel writer
 ///
 /// A Rust-powered library for converting DataFrames and CSV files to Excel XLSX format.
-/// Up to 25x faster than pure Python solutions.
+/// ~6x faster than pandas + openpyxl (benchmark: 100K rows x 50 columns).
 ///
 /// Features:
 /// - Direct DataFrame support (pandas and polars)
