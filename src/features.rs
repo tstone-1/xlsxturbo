@@ -35,7 +35,7 @@ pub(crate) fn extract_sheet_info<'py>(
         let opts = sheet_tuple.get_item(2)?;
         let mut config = SheetConfig::default();
 
-        // Extract optional fields from the dict
+        // Extract scalar fields
         if let Ok(val) = opts.get_item("header") {
             if !val.is_none() {
                 config.header = Some(val.extract()?);
@@ -47,7 +47,6 @@ pub(crate) fn extract_sheet_info<'py>(
             }
         }
         if let Ok(val) = opts.get_item("table_style") {
-            // Handle both None and string values
             if val.is_none() {
                 config.table_style = Some(None); // Explicitly no style
             } else {
@@ -57,25 +56,6 @@ pub(crate) fn extract_sheet_info<'py>(
         if let Ok(val) = opts.get_item("freeze_panes") {
             if !val.is_none() {
                 config.freeze_panes = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("column_widths") {
-            if !val.is_none() {
-                // Support both integer keys {0: 20} and string keys {"_all": 50}
-                let mut widths: HashMap<String, f64> = HashMap::new();
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    for (k, v) in dict.iter() {
-                        let key_str = if let Ok(i) = k.extract::<i64>() {
-                            i.to_string()
-                        } else {
-                            k.extract::<String>()?
-                        };
-                        widths.insert(key_str, v.extract()?);
-                    }
-                }
-                if !widths.is_empty() {
-                    config.column_widths = Some(widths);
-                }
             }
         }
         if let Ok(val) = opts.get_item("row_heights") {
@@ -88,57 +68,44 @@ pub(crate) fn extract_sheet_info<'py>(
                 config.table_name = Some(val.extract()?);
             }
         }
-        if let Ok(val) = opts.get_item("header_format") {
+
+        // Extract complex fields using existing extract_* functions
+        if let Ok(val) = opts.get_item("column_widths") {
             if !val.is_none() {
-                let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
                 if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    for (k, v) in dict.iter() {
-                        fmt.insert(k.extract()?, v.unbind());
+                    let widths = extract_column_widths(dict)?;
+                    if !widths.is_empty() {
+                        config.column_widths = Some(widths);
                     }
                 }
-                if !fmt.is_empty() {
-                    config.header_format = Some(fmt);
+            }
+        }
+        if let Ok(val) = opts.get_item("header_format") {
+            if !val.is_none() {
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let fmt = extract_header_format(dict)?;
+                    if !fmt.is_empty() {
+                        config.header_format = Some(fmt);
+                    }
                 }
             }
         }
         if let Ok(val) = opts.get_item("column_formats") {
             if !val.is_none() {
-                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
-                        IndexMap::new();
-                    for (pattern, fmt_dict) in outer_dict.iter() {
-                        let pattern_str: String = pattern.extract()?;
-                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in inner_dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            col_fmts.insert(pattern_str, fmt);
-                        }
-                    }
-                    if !col_fmts.is_empty() {
-                        config.column_formats = Some(col_fmts);
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let fmts = extract_column_formats(dict)?;
+                    if !fmts.is_empty() {
+                        config.column_formats = Some(fmts);
                     }
                 }
             }
         }
         if let Ok(val) = opts.get_item("conditional_formats") {
             if !val.is_none() {
-                if let Ok(outer_dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut cond_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> =
-                        IndexMap::new();
-                    for (col_name, fmt_dict) in outer_dict.iter() {
-                        let col_str: String = col_name.extract()?;
-                        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in inner_dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            cond_fmts.insert(col_str, fmt);
-                        }
-                    }
-                    if !cond_fmts.is_empty() {
-                        config.conditional_formats = Some(cond_fmts);
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let fmts = extract_conditional_formats(dict)?;
+                    if !fmts.is_empty() {
+                        config.conditional_formats = Some(fmts);
                     }
                 }
             }
@@ -146,12 +113,7 @@ pub(crate) fn extract_sheet_info<'py>(
         if let Ok(val) = opts.get_item("formula_columns") {
             if !val.is_none() {
                 if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let mut formulas: IndexMap<String, String> = IndexMap::new();
-                    for (col_name, formula) in dict.iter() {
-                        let col_str: String = col_name.extract()?;
-                        let formula_str: String = formula.extract()?;
-                        formulas.insert(col_str, formula_str);
-                    }
+                    let formulas = extract_formula_columns(dict)?;
                     if !formulas.is_empty() {
                         config.formula_columns = Some(formulas);
                     }
@@ -618,7 +580,9 @@ pub(crate) fn apply_formula_columns(
     let mut col_offset = 0u16;
 
     for (col_name, formula_template) in formula_columns {
-        let col_idx = start_col + col_offset;
+        let col_idx = start_col
+            .checked_add(col_offset)
+            .ok_or("Formula column index exceeds u16 limit")?;
 
         // Write header for formula column
         if let Some(fmt) = header_format {
@@ -642,7 +606,9 @@ pub(crate) fn apply_formula_columns(
                 .map_err(|e| format!("Failed to write formula at row {}: {}", row, e))?;
         }
 
-        col_offset += 1;
+        col_offset = col_offset
+            .checked_add(1)
+            .ok_or("Formula column count exceeds u16 limit")?;
     }
 
     Ok(col_offset)

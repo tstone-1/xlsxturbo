@@ -109,10 +109,18 @@ pub(crate) fn parse_cell_ref(cell_ref: &str) -> Result<(u32, u16), String> {
     }
 
     // Convert column letters to 0-based index (A=0, B=1, ..., Z=25, AA=26, etc.)
-    let col: u16 = col_str
+    // Use u32 intermediate to detect overflow, then validate against Excel's max column (XFD = 16383)
+    let col_u32: u32 = col_str
         .chars()
-        .fold(0u16, |acc, c| acc * 26 + (c as u16 - 'A' as u16 + 1))
+        .fold(0u32, |acc, c| acc * 26 + (c as u32 - 'A' as u32 + 1))
         .saturating_sub(1);
+    if col_u32 > 16383 {
+        return Err(format!(
+            "Column '{}' exceeds Excel's maximum column (XFD = 16384)",
+            col_str
+        ));
+    }
+    let col = col_u32 as u16;
 
     // Parse row number (Excel rows are 1-based, so must be >= 1)
     let row_1based: u32 = row_str

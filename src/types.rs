@@ -169,3 +169,38 @@ pub(crate) struct SheetConfig {
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
     pub(crate) images: Option<HashMap<String, ImageConfig>>, // cell_ref -> (path, options)
 }
+
+/// Resolved effective options for writing a single sheet (references only, avoids cloning Py<PyAny>).
+/// Built from either ExtractedOptions (single-sheet) or SheetConfig+ExtractedOptions merge (multi-sheet).
+pub(crate) struct EffectiveOpts<'a> {
+    pub(crate) column_widths: Option<&'a HashMap<String, f64>>,
+    pub(crate) header_format: Option<&'a HashMap<String, Py<PyAny>>>,
+    pub(crate) column_formats: Option<&'a IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    pub(crate) conditional_formats: Option<&'a IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    pub(crate) formula_columns: Option<&'a IndexMap<String, String>>,
+    pub(crate) merged_ranges: Option<&'a Vec<MergedRange>>,
+    pub(crate) hyperlinks: Option<&'a Vec<Hyperlink>>,
+    pub(crate) comments: Option<&'a HashMap<String, Comment>>,
+    pub(crate) validations: Option<&'a IndexMap<String, ValidationConfig>>,
+    pub(crate) rich_text: Option<&'a HashMap<String, Vec<RichTextSegment>>>,
+    pub(crate) images: Option<&'a HashMap<String, ImageConfig>>,
+}
+
+impl ExtractedOptions {
+    /// Create EffectiveOpts from this ExtractedOptions (all fields as references).
+    pub(crate) fn as_effective(&self) -> EffectiveOpts<'_> {
+        EffectiveOpts {
+            column_widths: self.column_widths.as_ref(),
+            header_format: self.header_format.as_ref(),
+            column_formats: self.column_formats.as_ref(),
+            conditional_formats: self.conditional_formats.as_ref(),
+            formula_columns: self.formula_columns.as_ref(),
+            merged_ranges: self.merged_ranges.as_ref(),
+            hyperlinks: self.hyperlinks.as_ref(),
+            comments: self.comments.as_ref(),
+            validations: self.validations.as_ref(),
+            rich_text: self.rich_text.as_ref(),
+            images: self.images.as_ref(),
+        }
+    }
+}
