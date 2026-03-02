@@ -202,8 +202,29 @@ fn csv_to_xlsx(
 ///                      row_heights, and autofit features.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
-///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
+///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
+///     conditional_formats: Dict mapping column names/patterns to conditional format configs (default: None)
+///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
+///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
+///     table_name: Custom name for the Excel table (default: auto-generated).
+///                 Must be alphanumeric/underscore, max 255 chars.
+///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
+///                      Use {row} as placeholder for the current row number.
+///                      Example: {"Total": "=SUM(A{row}:C{row})"}
+///     merged_ranges: List of merge specs: (range, text) or (range, text, format_dict) (default: None).
+///                    Example: [("A1:D1", "Title", {"bold": True, "bg_color": "#4F81BD"})]
+///     hyperlinks: List of link specs: (cell_ref, url) or (cell_ref, url, display_text) (default: None).
+///                 Example: [("A1", "https://example.com", "Click here")]
+///     comments: Dict mapping cell refs to note text or config dict (default: None).
+///               Example: {"A1": "Note text"} or {"A1": {"text": "Note", "author": "John"}}
+///     validations: Dict mapping column names/patterns to validation configs (default: None).
+///                  Types: list, whole_number, decimal, text_length.
+///                  Example: {"status": {"type": "list", "values": ["Open", "Closed"]}}
+///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
+///                Example: {"A1": [("Bold text", {"bold": True}), (" normal text",)]}
+///     images: Dict mapping cell refs to image paths or config dicts (default: None).
+///             Example: {"A1": "logo.png"} or {"A1": {"path": "logo.png", "scale_width": 0.5}}
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -223,12 +244,6 @@ fn csv_to_xlsx(
 ///     >>> xlsxturbo.df_to_xlsx(df, "custom.xlsx", column_widths={0: 25, 1: 10}, row_heights={0: 20})
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
-///     >>> # With conditional formatting (color scales, data bars, icons):
-///     >>> xlsxturbo.df_to_xlsx(df, "heatmap.xlsx", conditional_formats={
-///     ...     'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'},
-///     ...     'progress': {'type': 'data_bar', 'bar_color': '#638EC6'},
-///     ...     'status': {'type': 'icon_set', 'icon_type': '3_traffic_lights'}
-///     ... })
 #[pyfunction]
 #[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None))]
 #[allow(clippy::too_many_arguments)]
@@ -328,6 +343,15 @@ fn version() -> &'static str {
 ///     conditional_formats: Dict mapping column names to conditional format configs (default: None)
 ///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
+///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
+///                      Use {row} as placeholder for the current row number.
+///     merged_ranges: List of merge specs: (range, text) or (range, text, format_dict) (default: None).
+///     hyperlinks: List of link specs: (cell_ref, url) or (cell_ref, url, display_text) (default: None).
+///     comments: Dict mapping cell refs to note text or config dict (default: None).
+///     validations: Dict mapping column names/patterns to validation configs (default: None).
+///                  Types: list, whole_number, decimal, text_length.
+///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
+///     images: Dict mapping cell refs to image paths or config dicts (default: None).
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
