@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5] - 2026-03-02
+
+### Fixed
+- **Formula columns overwrite data when `header=False`** - `apply_formula_columns` no longer hardcodes the formula header to row 0; headers are only written when `include_header=True`, preventing data loss when combining `header=False` with `formula_columns`
+- **`parse_cell_ref` overflow on adversarial input** - Column letter fold now uses `checked_mul`/`checked_add` instead of wrapping arithmetic, returning a clear error on pathologically long column strings
+
+### Changed
+- **Minimum Python version raised to 3.9** - Type stubs use PEP 585 lowercase generics (`list[str]`, `dict[str, ...]`) which require Python 3.9+. Python 3.8 reached EOL in October 2024. Updated `requires-python`, PyO3 ABI tag (`abi3-py39`), and classifiers accordingly
+- **`clap` is now an optional dependency** - CLI argument parser is gated behind a `cli` feature flag (enabled by default), reducing compile time for library-only builds (Python extension)
+- **CI Python test matrix** - Integration tests now run on Python 3.9, 3.12, and 3.14 (previously only 3.12)
+- **Completed Python docstrings** - `df_to_xlsx` and `dfs_to_xlsx` docstrings now document all parameters including `table_name`, `formula_columns`, `merged_ranges`, `hyperlinks`, `comments`, `validations`, `rich_text`, and `images`
+- **`_all` width cap documentation** - Clarified that `_all` sets a uniform width rather than capping autofit results, since `rust_xlsxwriter` does not expose autofitted widths for reading
+
+### Refactored
+- **`write_py_value_with_format` reduced from 252 to ~90 lines** - Extracted `write_str`, `write_num`, `write_bool`, `write_int`, `write_float` helpers to eliminate 10x duplicated format/no-format dispatch
+- **`extract_sheet_info` reduced from 170 to ~60 lines** - Introduced `extract_scalar!`, `extract_dict_field!`, `extract_list_field!` macros to replace 13 copy-pasted extraction blocks
+- **`pydict_to_hashmap` helper** - Replaced 6 duplicated `HashMap<String, Py<PyAny>>` extraction blocks with a single reusable function
+- **Explicit imports in `features.rs`** - Replaced `use crate::types::*` glob import with explicit type imports
+- **Dependencies** - Updated indirect dependencies via `cargo update` (js-sys, wasm-bindgen, tempfile, zlib-rs)
+
 ## [0.10.4] - 2026-02-23
 
 ### Fixed

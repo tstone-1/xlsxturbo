@@ -4,7 +4,9 @@ use crate::parse::{
     matches_pattern, parse_cell_range, parse_cell_ref, parse_color, parse_header_format,
     parse_icon_type,
 };
-use crate::types::*;
+use crate::types::{
+    Comment, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig, ValidationConfig,
+};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
@@ -13,6 +15,60 @@ use rust_xlsxwriter::{
     DataValidationErrorStyle, Format, Image, Note, Worksheet,
 };
 use std::collections::HashMap;
+
+/// Convert a Python dict to a Rust HashMap<String, Py<PyAny>>
+fn pydict_to_hashmap(
+    dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, Py<PyAny>>> {
+    let mut map = HashMap::new();
+    for (k, v) in dict.iter() {
+        map.insert(k.extract()?, v.unbind());
+    }
+    Ok(map)
+}
+
+/// Helper: extract an optional scalar field from a Python dict into a SheetConfig field
+macro_rules! extract_scalar {
+    ($opts:expr, $config:expr, $key:literal, $field:ident) => {
+        if let Ok(val) = $opts.get_item($key) {
+            if !val.is_none() {
+                $config.$field = Some(val.extract()?);
+            }
+        }
+    };
+}
+
+/// Helper: extract an optional dict field, run an extractor, and set if non-empty
+macro_rules! extract_dict_field {
+    ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
+        if let Ok(val) = $opts.get_item($key) {
+            if !val.is_none() {
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let extracted = $extractor(dict)?;
+                    if !extracted.is_empty() {
+                        $config.$field = Some(extracted);
+                    }
+                }
+            }
+        }
+    };
+}
+
+/// Helper: extract an optional list field, run an extractor, and set if non-empty
+macro_rules! extract_list_field {
+    ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
+        if let Ok(val) = $opts.get_item($key) {
+            if !val.is_none() {
+                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
+                    let extracted = $extractor(list)?;
+                    if !extracted.is_empty() {
+                        $config.$field = Some(extracted);
+                    }
+                }
+            }
+        }
+    };
+}
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
 /// 2-tuple: (df, sheet_name)
@@ -36,150 +92,77 @@ pub(crate) fn extract_sheet_info<'py>(
         let mut config = SheetConfig::default();
 
         // Extract scalar fields
-        if let Ok(val) = opts.get_item("header") {
-            if !val.is_none() {
-                config.header = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("autofit") {
-            if !val.is_none() {
-                config.autofit = Some(val.extract()?);
-            }
-        }
+        extract_scalar!(opts, config, "header", header);
+        extract_scalar!(opts, config, "autofit", autofit);
+        extract_scalar!(opts, config, "freeze_panes", freeze_panes);
+        extract_scalar!(opts, config, "row_heights", row_heights);
+        extract_scalar!(opts, config, "table_name", table_name);
+
+        // table_style needs special handling: None means "explicitly no style"
         if let Ok(val) = opts.get_item("table_style") {
             if val.is_none() {
-                config.table_style = Some(None); // Explicitly no style
+                config.table_style = Some(None);
             } else {
                 config.table_style = Some(Some(val.extract()?));
             }
         }
-        if let Ok(val) = opts.get_item("freeze_panes") {
-            if !val.is_none() {
-                config.freeze_panes = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("row_heights") {
-            if !val.is_none() {
-                config.row_heights = Some(val.extract()?);
-            }
-        }
-        if let Ok(val) = opts.get_item("table_name") {
-            if !val.is_none() {
-                config.table_name = Some(val.extract()?);
-            }
-        }
 
-        // Extract complex fields using existing extract_* functions
-        if let Ok(val) = opts.get_item("column_widths") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let widths = extract_column_widths(dict)?;
-                    if !widths.is_empty() {
-                        config.column_widths = Some(widths);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("header_format") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let fmt = extract_header_format(dict)?;
-                    if !fmt.is_empty() {
-                        config.header_format = Some(fmt);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("column_formats") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let fmts = extract_column_formats(dict)?;
-                    if !fmts.is_empty() {
-                        config.column_formats = Some(fmts);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("conditional_formats") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let fmts = extract_conditional_formats(dict)?;
-                    if !fmts.is_empty() {
-                        config.conditional_formats = Some(fmts);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("formula_columns") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let formulas = extract_formula_columns(dict)?;
-                    if !formulas.is_empty() {
-                        config.formula_columns = Some(formulas);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("merged_ranges") {
-            if !val.is_none() {
-                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
-                    let extracted = extract_merged_ranges(list)?;
-                    if !extracted.is_empty() {
-                        config.merged_ranges = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("hyperlinks") {
-            if !val.is_none() {
-                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
-                    let extracted = extract_hyperlinks(list)?;
-                    if !extracted.is_empty() {
-                        config.hyperlinks = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("comments") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_comments(dict)?;
-                    if !extracted.is_empty() {
-                        config.comments = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("validations") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_validations(dict)?;
-                    if !extracted.is_empty() {
-                        config.validations = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("rich_text") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_rich_text(dict)?;
-                    if !extracted.is_empty() {
-                        config.rich_text = Some(extracted);
-                    }
-                }
-            }
-        }
-        if let Ok(val) = opts.get_item("images") {
-            if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_images(dict)?;
-                    if !extracted.is_empty() {
-                        config.images = Some(extracted);
-                    }
-                }
-            }
-        }
+        // Extract complex dict fields
+        extract_dict_field!(
+            opts,
+            config,
+            "column_widths",
+            column_widths,
+            extract_column_widths
+        );
+        extract_dict_field!(
+            opts,
+            config,
+            "header_format",
+            header_format,
+            extract_header_format
+        );
+        extract_dict_field!(
+            opts,
+            config,
+            "column_formats",
+            column_formats,
+            extract_column_formats
+        );
+        extract_dict_field!(
+            opts,
+            config,
+            "conditional_formats",
+            conditional_formats,
+            extract_conditional_formats
+        );
+        extract_dict_field!(
+            opts,
+            config,
+            "formula_columns",
+            formula_columns,
+            extract_formula_columns
+        );
+        extract_dict_field!(opts, config, "comments", comments, extract_comments);
+        extract_dict_field!(
+            opts,
+            config,
+            "validations",
+            validations,
+            extract_validations
+        );
+        extract_dict_field!(opts, config, "rich_text", rich_text, extract_rich_text);
+        extract_dict_field!(opts, config, "images", images, extract_images);
+
+        // Extract complex list fields
+        extract_list_field!(
+            opts,
+            config,
+            "merged_ranges",
+            merged_ranges,
+            extract_merged_ranges
+        );
+        extract_list_field!(opts, config, "hyperlinks", hyperlinks, extract_hyperlinks);
 
         config
     } else {
@@ -209,11 +192,7 @@ pub(crate) fn extract_column_widths(
 pub(crate) fn extract_header_format(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
 ) -> PyResult<HashMap<String, Py<PyAny>>> {
-    let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-    for (k, v) in py_dict.iter() {
-        fmt.insert(k.extract()?, v.unbind());
-    }
-    Ok(fmt)
+    pydict_to_hashmap(py_dict)
 }
 
 /// Extract column_formats from Python dict (pattern -> format dict)
@@ -225,11 +204,7 @@ pub(crate) fn extract_column_formats(
     for (pattern, fmt_dict) in py_dict.iter() {
         let pattern_str: String = pattern.extract()?;
         if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                fmt.insert(k.extract()?, v.unbind());
-            }
-            col_fmts.insert(pattern_str, fmt);
+            col_fmts.insert(pattern_str, pydict_to_hashmap(inner_dict)?);
         }
     }
     Ok(col_fmts)
@@ -244,11 +219,7 @@ pub(crate) fn extract_conditional_formats(
     for (col_name, fmt_dict) in py_dict.iter() {
         let col_str: String = col_name.extract()?;
         if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                fmt.insert(k.extract()?, v.unbind());
-            }
-            cond_fmts.insert(col_str, fmt);
+            cond_fmts.insert(col_str, pydict_to_hashmap(inner_dict)?);
         }
     }
     Ok(cond_fmts)
@@ -290,12 +261,7 @@ pub(crate) fn extract_merged_ranges(
             let fmt_item = item.get_item(2)?;
             if !fmt_item.is_none() {
                 if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                    let mut fmt_map: HashMap<String, Py<PyAny>> = HashMap::new();
-                    for (k, v) in dict.iter() {
-                        let key: String = k.extract()?;
-                        fmt_map.insert(key, v.unbind());
-                    }
-                    Some(fmt_map)
+                    Some(pydict_to_hashmap(dict)?)
                 } else {
                     None
                 }
@@ -397,11 +363,7 @@ pub(crate) fn extract_validations(
     for (col_name, config) in py_dict.iter() {
         let col_str: String = col_name.extract()?;
         if let Ok(inner_dict) = config.cast::<pyo3::types::PyDict>() {
-            let mut cfg: ValidationConfig = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                cfg.insert(k.extract()?, v.unbind());
-            }
-            validations.insert(col_str, cfg);
+            validations.insert(col_str, pydict_to_hashmap(inner_dict)?);
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "validations['{}']: expected dict, got {}",
@@ -431,11 +393,7 @@ pub(crate) fn extract_rich_text(
                     let format_dict = if tuple.len() >= 2 {
                         let fmt_item = tuple.get_item(1)?;
                         if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                            let mut fmt: HashMap<String, Py<PyAny>> = HashMap::new();
-                            for (k, v) in dict.iter() {
-                                fmt.insert(k.extract()?, v.unbind());
-                            }
-                            Some(fmt)
+                            Some(pydict_to_hashmap(dict)?)
                         } else {
                             None
                         }
@@ -492,13 +450,8 @@ pub(crate) fn extract_images(
                     ))
                 })?
                 .extract()?;
-            let mut options: HashMap<String, Py<PyAny>> = HashMap::new();
-            for (k, v) in inner_dict.iter() {
-                let key: String = k.extract()?;
-                if key != "path" {
-                    options.insert(key, v.unbind());
-                }
-            }
+            let mut options = pydict_to_hashmap(inner_dict)?;
+            options.remove("path");
             images.insert(cell_str, (path, Some(options)));
         } else {
             // Simple string format (just path)
@@ -534,7 +487,9 @@ pub(crate) fn apply_column_widths(
     Ok(())
 }
 
-/// Apply column widths with autofit cap: autofit first, then cap columns at '_all' width
+/// Apply column widths with autofit: autofit first, then set '_all' as uniform width for
+/// columns without a specific override. Note: rust_xlsxwriter does not expose autofitted
+/// widths for reading, so '_all' replaces (not caps) the autofit result.
 pub(crate) fn apply_column_widths_with_autofit_cap(
     worksheet: &mut Worksheet,
     col_count: u16,
@@ -557,8 +512,8 @@ pub(crate) fn apply_column_widths_with_autofit_cap(
                 .set_column_width(col_idx, *width)
                 .map_err(|e| format!("Failed to set column width: {}", e))?;
         } else if let Some(cap) = global_cap {
-            // '_all' acts as a cap - only set if current width exceeds cap
-            // Since we can't read current width, just set the cap
+            // '_all' sets a uniform width (replaces autofit result since
+            // rust_xlsxwriter doesn't expose a way to read autofitted widths)
             worksheet
                 .set_column_width(col_idx, cap)
                 .map_err(|e| format!("Failed to set column width: {}", e))?;
@@ -575,6 +530,7 @@ pub(crate) fn apply_formula_columns(
     start_col: u16,
     data_start_row: u32,
     data_end_row: u32,
+    include_header: bool,
     header_format: Option<&Format>,
 ) -> Result<u16, String> {
     let mut col_offset = 0u16;
@@ -584,15 +540,17 @@ pub(crate) fn apply_formula_columns(
             .checked_add(col_offset)
             .ok_or("Formula column index exceeds u16 limit")?;
 
-        // Write header for formula column
-        if let Some(fmt) = header_format {
-            worksheet
-                .write_string_with_format(0, col_idx, col_name, fmt)
-                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
-        } else {
-            worksheet
-                .write_string(0, col_idx, col_name)
-                .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+        // Write header for formula column (only when headers are enabled)
+        if include_header {
+            if let Some(fmt) = header_format {
+                worksheet
+                    .write_string_with_format(0, col_idx, col_name, fmt)
+                    .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+            } else {
+                worksheet
+                    .write_string(0, col_idx, col_name)
+                    .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+            }
         }
 
         // Write formula for each data row

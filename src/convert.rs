@@ -25,6 +25,88 @@ use std::io::BufReader;
 /// Integers beyond this range lose precision when cast to f64.
 const MAX_SAFE_INT: i64 = 1 << 53;
 
+/// Write a string to a cell, applying column format if provided
+fn write_str(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: impl Into<String>,
+    fmt: Option<&Format>,
+) -> Result<(), String> {
+    let s = val.into();
+    if let Some(f) = fmt {
+        worksheet.write_string_with_format(row, col, &s, f)
+    } else {
+        worksheet.write_string(row, col, &s)
+    }
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Write a number to a cell, applying column format if provided
+fn write_num(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: f64,
+    fmt: Option<&Format>,
+) -> Result<(), String> {
+    if let Some(f) = fmt {
+        worksheet.write_number_with_format(row, col, val, f)
+    } else {
+        worksheet.write_number(row, col, val)
+    }
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Write a boolean to a cell, applying column format if provided
+fn write_bool(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: bool,
+    fmt: Option<&Format>,
+) -> Result<(), String> {
+    if let Some(f) = fmt {
+        worksheet.write_boolean_with_format(row, col, val, f)
+    } else {
+        worksheet.write_boolean(row, col, val)
+    }
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Write an integer, falling back to string for values beyond f64 precision (>2^53)
+fn write_int(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: i64,
+    fmt: Option<&Format>,
+) -> Result<(), String> {
+    if val.abs() > MAX_SAFE_INT {
+        write_str(worksheet, row, col, val.to_string(), fmt)
+    } else {
+        write_num(worksheet, row, col, val as f64, fmt)
+    }
+}
+
+/// Write a float, treating NaN/Inf as empty
+fn write_float(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: f64,
+    fmt: Option<&Format>,
+) -> Result<(), String> {
+    if val.is_nan() || val.is_infinite() {
+        write_str(worksheet, row, col, "", fmt)
+    } else {
+        write_num(worksheet, row, col, val, fmt)
+    }
+}
+
 /// Write a cell value to the worksheet with appropriate formatting
 pub(crate) fn write_cell(
     worksheet: &mut Worksheet,
@@ -239,16 +321,7 @@ pub(crate) fn write_py_value_with_format(
 ) -> Result<(), String> {
     // Check for None first
     if value.is_none() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, "", fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, "")
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_str(worksheet, row, col, "", column_format);
     }
 
     // Check for pandas NA/NaT
@@ -258,30 +331,12 @@ pub(crate) fn write_py_value_with_format(
         .map_err(|e| e.to_string())?
         .to_string();
     if type_name == "NAType" || type_name == "NaTType" {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, "", fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, "")
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_str(worksheet, row, col, "", column_format);
     }
 
     // Try boolean first (before int, since bool is subclass of int in Python)
     if let Ok(b) = value.cast::<PyBool>() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_boolean_with_format(row, col, b.is_true(), fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_boolean(row, col, b.is_true())
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_bool(worksheet, row, col, b.is_true(), column_format);
     }
 
     // Try datetime (before date, since datetime is subclass of date)
@@ -315,12 +370,8 @@ pub(crate) fn write_py_value_with_format(
             if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
                 let dt = chrono::NaiveDateTime::new(date, time);
                 let excel_dt = naive_datetime_to_excel(dt);
-                // For datetime, use column format if provided, otherwise datetime_format
                 let fmt = column_format.unwrap_or(datetime_format);
-                worksheet
-                    .write_number_with_format(row, col, excel_dt, fmt)
-                    .map_err(|e| e.to_string())?;
-                return Ok(());
+                return write_num(worksheet, row, col, excel_dt, Some(fmt));
             }
         }
     }
@@ -342,143 +393,43 @@ pub(crate) fn write_py_value_with_format(
 
         if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
             let excel_date = naive_date_to_excel(date);
-            // For date, use column format if provided, otherwise date_format
             let fmt = column_format.unwrap_or(date_format);
-            worksheet
-                .write_number_with_format(row, col, excel_date, fmt)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
+            return write_num(worksheet, row, col, excel_date, Some(fmt));
         }
     }
 
     // Try integer
     if let Ok(i) = value.cast::<PyInt>() {
         if let Ok(val) = i.extract::<i64>() {
-            if val.abs() > MAX_SAFE_INT {
-                // Write as string to avoid precision loss for large integers
-                if let Some(fmt) = column_format {
-                    worksheet
-                        .write_string_with_format(row, col, val.to_string(), fmt)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    worksheet
-                        .write_string(row, col, val.to_string())
-                        .map_err(|e| e.to_string())?;
-                }
-            } else if let Some(fmt) = column_format {
-                worksheet
-                    .write_number_with_format(row, col, val as f64, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_number(row, col, val as f64)
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
+            return write_int(worksheet, row, col, val, column_format);
         }
     }
 
     // Try float
     if let Ok(f) = value.cast::<PyFloat>() {
         if let Ok(val) = f.extract::<f64>() {
-            if val.is_nan() || val.is_infinite() {
-                if let Some(fmt) = column_format {
-                    worksheet
-                        .write_string_with_format(row, col, "", fmt)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    worksheet
-                        .write_string(row, col, "")
-                        .map_err(|e| e.to_string())?;
-                }
-            } else if let Some(fmt) = column_format {
-                worksheet
-                    .write_number_with_format(row, col, val, fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_number(row, col, val)
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
+            return write_float(worksheet, row, col, val, column_format);
         }
     }
 
     // Try to extract as i64 first (covers numpy int types, before f64 to avoid precision loss)
     if let Ok(val) = value.extract::<i64>() {
-        if val.abs() > MAX_SAFE_INT {
-            if let Some(fmt) = column_format {
-                worksheet
-                    .write_string_with_format(row, col, val.to_string(), fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(row, col, val.to_string())
-                    .map_err(|e| e.to_string())?;
-            }
-        } else if let Some(fmt) = column_format {
-            worksheet
-                .write_number_with_format(row, col, val as f64, fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val as f64)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_int(worksheet, row, col, val, column_format);
     }
 
     // Try to extract as f64 (covers numpy float types)
     if let Ok(val) = value.extract::<f64>() {
-        if val.is_nan() || val.is_infinite() {
-            if let Some(fmt) = column_format {
-                worksheet
-                    .write_string_with_format(row, col, "", fmt)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                worksheet
-                    .write_string(row, col, "")
-                    .map_err(|e| e.to_string())?;
-            }
-        } else if let Some(fmt) = column_format {
-            worksheet
-                .write_number_with_format(row, col, val, fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_number(row, col, val)
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_float(worksheet, row, col, val, column_format);
     }
 
     // Try string
     if let Ok(s) = value.cast::<PyString>() {
-        if let Some(fmt) = column_format {
-            worksheet
-                .write_string_with_format(row, col, s.to_string(), fmt)
-                .map_err(|e| e.to_string())?;
-        } else {
-            worksheet
-                .write_string(row, col, s.to_string())
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(());
+        return write_str(worksheet, row, col, s.to_string(), column_format);
     }
 
     // Fallback: convert to string
     let s = value.str().map_err(|e| e.to_string())?.to_string();
-    if let Some(fmt) = column_format {
-        worksheet
-            .write_string_with_format(row, col, &s, fmt)
-            .map_err(|e| e.to_string())?;
-    } else {
-        worksheet
-            .write_string(row, col, &s)
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    write_str(worksheet, row, col, s, column_format)
 }
 
 /// Write DataFrame data and apply all features to a worksheet.
@@ -707,6 +658,7 @@ pub(crate) fn write_sheet_data(
                     col_count,
                     data_row_start,
                     data_row_end,
+                    include_header,
                     header_fmt.as_ref(),
                 )?;
                 total_col_count = col_count

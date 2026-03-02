@@ -109,10 +109,13 @@ pub(crate) fn parse_cell_ref(cell_ref: &str) -> Result<(u32, u16), String> {
     }
 
     // Convert column letters to 0-based index (A=0, B=1, ..., Z=25, AA=26, etc.)
-    // Use u32 intermediate to detect overflow, then validate against Excel's max column (XFD = 16383)
+    // Use checked arithmetic to detect overflow on adversarial input
     let col_u32: u32 = col_str
         .chars()
-        .fold(0u32, |acc, c| acc * 26 + (c as u32 - 'A' as u32 + 1))
+        .try_fold(0u32, |acc, c| {
+            acc.checked_mul(26)?.checked_add(c as u32 - 'A' as u32 + 1)
+        })
+        .ok_or_else(|| format!("Column '{}' is too large", col_str))?
         .saturating_sub(1);
     if col_u32 > 16383 {
         return Err(format!(
