@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust toolchain (stable): https://rustup.rs/
-- Python 3.8+
+- Python 3.9+
 - maturin: `pip install maturin`
 
 ## Local Development
