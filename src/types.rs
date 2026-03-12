@@ -107,12 +107,26 @@ pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (
 /// Returns true for Polars, false for Pandas.
 /// Errors if the object is neither.
 pub(crate) fn is_polars_dataframe(df: &Bound<'_, PyAny>) -> Result<bool, String> {
-    if df.hasattr("schema").unwrap_or(false) && !df.hasattr("iloc").unwrap_or(false) {
-        Ok(true) // Polars: has schema but no iloc
-    } else if df.hasattr("columns").unwrap_or(false) {
-        Ok(false) // Pandas: has columns
+    // Check the actual module to avoid misidentifying objects that happen to
+    // have similar attributes (e.g., Pydantic models with .schema)
+    let module = df
+        .get_type()
+        .getattr("__module__")
+        .and_then(|m| m.extract::<String>())
+        .unwrap_or_else(|_| String::new());
+
+    if module.starts_with("polars") {
+        Ok(true)
+    } else if module.starts_with("pandas") {
+        Ok(false)
     } else {
-        Err("Unsupported DataFrame type".to_string())
+        Err(format!(
+            "Unsupported DataFrame type: {}.{}. Expected pandas or polars DataFrame.",
+            module,
+            df.get_type()
+                .name()
+                .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
+        ))
     }
 }
 
