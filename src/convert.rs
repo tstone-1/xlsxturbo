@@ -118,6 +118,8 @@ pub(crate) fn write_cell(
 ) -> Result<(), XlsxError> {
     match value {
         CellValue::Empty => {
+            // Write empty string rather than leaving cell blank so Excel table
+            // formatting renders consistently. Trade-off: COUNTA will count these.
             worksheet.write_string(row, col, "")?;
         }
         CellValue::Integer(v) => {
@@ -621,10 +623,63 @@ pub(crate) fn write_sheet_data(
         }
     }
 
-    // Add Excel Table if requested (not supported in constant_memory mode)
-    // Tables require at least one data row, so skip if DataFrame is empty
+    // Apply all worksheet features (table, formulas, formatting, etc.)
+    let total_col_count = apply_worksheet_features(
+        py,
+        worksheet,
+        &columns,
+        col_count,
+        row_idx,
+        row_count,
+        include_header,
+        autofit,
+        table_style,
+        freeze_panes,
+        table_name,
+        row_heights,
+        constant_memory,
+        header_fmt.as_ref(),
+        &opts,
+    )?;
+
+    Ok((row_idx, total_col_count))
+}
+
+/// Apply all worksheet features after data has been written.
+///
+/// Handles: table formatting, formula columns, conditional formats, freeze panes,
+/// column widths/autofit, row heights, merged ranges, hyperlinks, comments,
+/// validations, rich text, and images. All features except column widths are
+/// skipped in constant_memory mode.
+#[allow(clippy::too_many_arguments)]
+fn apply_worksheet_features(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    columns: &[String],
+    col_count: u16,
+    last_row_idx: u32,
+    row_count: usize,
+    include_header: bool,
+    autofit: bool,
+    table_style: Option<&str>,
+    freeze_panes: bool,
+    table_name: Option<&str>,
+    row_heights: Option<&HashMap<u32, f64>>,
+    constant_memory: bool,
+    header_fmt: Option<&Format>,
+    opts: &EffectiveOpts<'_>,
+) -> Result<u16, String> {
+    // In constant_memory mode, only column widths (without autofit) are supported
+    if constant_memory {
+        if let Some(widths) = opts.column_widths {
+            apply_column_widths(worksheet, col_count, widths)?;
+        }
+        return Ok(col_count);
+    }
+
+    // Add Excel Table if requested (requires at least one data row)
     if let Some(style_name) = table_style {
-        if !constant_memory && row_count > 0 {
+        if row_count > 0 {
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
@@ -633,61 +688,54 @@ pub(crate) fn write_sheet_data(
                 table = table.set_name(&sanitized);
             }
 
-            let data_start_row = 0u32;
-            let last_row = row_idx.saturating_sub(1);
+            let last_row = last_row_idx.saturating_sub(1);
             let last_col = col_count.saturating_sub(1);
 
-            if last_row >= data_start_row {
-                worksheet
-                    .add_table(data_start_row, 0, last_row, last_col, &table)
-                    .map_err(|e| format!("Failed to add table: {}", e))?;
-            }
+            worksheet
+                .add_table(0, 0, last_row, last_col, &table)
+                .map_err(|e| format!("Failed to add table: {}", e))?;
         }
     }
 
-    // Apply formula columns (not supported in constant_memory mode)
+    let data_row_start = if include_header { 1u32 } else { 0u32 };
+    let data_row_end = last_row_idx.saturating_sub(1);
+    let has_data_rows = row_count > 0 && data_row_end >= data_row_start;
+
+    // Apply formula columns
     let mut total_col_count = col_count;
     if let Some(formulas) = opts.formula_columns {
-        if !constant_memory && !formulas.is_empty() && row_count > 0 {
-            let data_row_start = if include_header { 1u32 } else { 0u32 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                let formula_cols_added = apply_formula_columns(
-                    worksheet,
-                    formulas,
-                    col_count,
-                    data_row_start,
-                    data_row_end,
-                    include_header,
-                    header_fmt.as_ref(),
-                )?;
-                total_col_count = col_count
-                    .checked_add(formula_cols_added)
-                    .ok_or("Total column count exceeds u16 limit")?;
-            }
+        if !formulas.is_empty() && has_data_rows {
+            let formula_cols_added = apply_formula_columns(
+                worksheet,
+                formulas,
+                col_count,
+                data_row_start,
+                data_row_end,
+                include_header,
+                header_fmt,
+            )?;
+            total_col_count = col_count
+                .checked_add(formula_cols_added)
+                .ok_or("Total column count exceeds u16 limit")?;
         }
     }
 
-    // Apply conditional formats (not supported in constant_memory mode)
+    // Apply conditional formats
     if let Some(cond_fmts) = opts.conditional_formats {
-        if !constant_memory && row_count > 0 {
-            let data_row_start = if include_header { 1 } else { 0 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                apply_conditional_formats(
-                    py,
-                    worksheet,
-                    &columns,
-                    data_row_start,
-                    data_row_end,
-                    cond_fmts,
-                )?;
-            }
+        if has_data_rows {
+            apply_conditional_formats(
+                py,
+                worksheet,
+                columns,
+                data_row_start,
+                data_row_end,
+                cond_fmts,
+            )?;
         }
     }
 
-    // Freeze panes (freeze header row) - not supported in constant_memory mode
-    if freeze_panes && include_header && !constant_memory {
+    // Freeze panes (freeze header row)
+    if freeze_panes && include_header {
         worksheet
             .set_freeze_panes(1, 0)
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
@@ -695,73 +743,67 @@ pub(crate) fn write_sheet_data(
 
     // Apply custom column widths and/or autofit
     if let Some(widths) = opts.column_widths {
-        if autofit && widths.contains_key("_all") && !constant_memory {
-            apply_column_widths_with_autofit_cap(worksheet, col_count, widths, constant_memory)?;
+        if autofit && widths.contains_key("_all") {
+            apply_column_widths_with_autofit_cap(worksheet, col_count, widths)?;
         } else {
             apply_column_widths(worksheet, col_count, widths)?;
         }
-    } else if autofit && !constant_memory {
+    } else if autofit {
         worksheet.autofit();
     }
 
-    // Apply custom row heights (not supported in constant_memory mode)
+    // Apply custom row heights
     if let Some(heights) = row_heights {
-        if !constant_memory {
-            for (&row_idx_h, &height) in heights.iter() {
-                worksheet
-                    .set_row_height(row_idx_h, height)
-                    .map_err(|e| format!("Failed to set row height: {}", e))?;
-            }
+        for (&row_idx_h, &height) in heights.iter() {
+            worksheet
+                .set_row_height(row_idx_h, height)
+                .map_err(|e| format!("Failed to set row height: {}", e))?;
         }
     }
 
-    // Apply merged ranges (not supported in constant_memory mode)
+    // Apply merged ranges
     if let Some(ranges) = opts.merged_ranges {
-        if !constant_memory && !ranges.is_empty() {
+        if !ranges.is_empty() {
             apply_merged_ranges(py, worksheet, ranges)?;
         }
     }
 
-    // Apply hyperlinks (not supported in constant_memory mode)
+    // Apply hyperlinks
     if let Some(links) = opts.hyperlinks {
-        if !constant_memory && !links.is_empty() {
+        if !links.is_empty() {
             apply_hyperlinks(worksheet, links)?;
         }
     }
 
-    // Apply comments/notes (not supported in constant_memory mode)
+    // Apply comments/notes
     if let Some(cmts) = opts.comments {
-        if !constant_memory && !cmts.is_empty() {
+        if !cmts.is_empty() {
             apply_comments(worksheet, cmts)?;
         }
     }
 
-    // Apply data validations (not supported in constant_memory mode)
+    // Apply data validations
     if let Some(vals) = opts.validations {
-        if !constant_memory && row_count > 0 {
-            let data_row_start = if include_header { 1 } else { 0 };
-            let data_row_end = row_idx.saturating_sub(1);
-            if data_row_end >= data_row_start {
-                apply_validations(py, worksheet, &columns, data_row_start, data_row_end, vals)?;
-            }
+        if has_data_rows {
+            apply_validations(py, worksheet, columns, data_row_start, data_row_end, vals)?;
         }
     }
 
-    // Apply rich text (not supported in constant_memory mode)
+    // Apply rich text
     if let Some(rt) = opts.rich_text {
-        if !constant_memory && !rt.is_empty() {
+        if !rt.is_empty() {
             apply_rich_text(py, worksheet, rt)?;
         }
     }
 
-    // Apply images (not supported in constant_memory mode)
+    // Apply images
     if let Some(imgs) = opts.images {
-        if !constant_memory && !imgs.is_empty() {
+        if !imgs.is_empty() {
             apply_images(py, worksheet, imgs)?;
         }
     }
 
-    Ok((row_idx, total_col_count))
+    Ok(total_col_count)
 }
 
 /// Convert a DataFrame (pandas or polars) to XLSX format

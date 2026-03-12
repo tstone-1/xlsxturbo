@@ -490,16 +490,15 @@ pub(crate) fn apply_column_widths(
 /// Apply column widths with autofit: autofit first, then set '_all' as uniform width for
 /// columns without a specific override. Note: rust_xlsxwriter does not expose autofitted
 /// widths for reading, so '_all' replaces (not caps) the autofit result.
+///
+/// Caller must ensure this is NOT called in constant_memory mode (autofit is unsupported).
 pub(crate) fn apply_column_widths_with_autofit_cap(
     worksheet: &mut Worksheet,
     col_count: u16,
     widths: &HashMap<String, f64>,
-    constant_memory: bool,
 ) -> Result<(), String> {
     // First autofit
-    if !constant_memory {
-        worksheet.autofit();
-    }
+    worksheet.autofit();
 
     // Then apply specific widths and cap at '_all' if specified
     let global_cap = widths.get("_all").copied();

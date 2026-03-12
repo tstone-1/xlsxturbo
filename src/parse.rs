@@ -8,75 +8,41 @@ use pyo3::Py;
 use rust_xlsxwriter::{ConditionalFormatIconType, Format, TableStyle};
 use std::collections::HashMap;
 
-/// Parse a table style string into a `TableStyle` enum value
+/// Generate a table style lookup match from a list of (string, variant) pairs.
+macro_rules! table_style_match {
+    ($style:expr, $( $name:literal => $variant:ident ),+ $(,)?) => {
+        match $style {
+            $( $name => Ok(TableStyle::$variant), )+
+            _ => Err(format!(
+                "Unknown table_style '{}'. Valid styles: Light1-Light21, Medium1-Medium28, Dark1-Dark11, None",
+                $style
+            )),
+        }
+    };
+}
+
+/// Parse a table style string into a `TableStyle` enum value.
+/// Synced with rust_xlsxwriter 0.94 TableStyle variants.
 pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
-    match style {
-        "None" => Ok(TableStyle::None),
-        "Light1" => Ok(TableStyle::Light1),
-        "Light2" => Ok(TableStyle::Light2),
-        "Light3" => Ok(TableStyle::Light3),
-        "Light4" => Ok(TableStyle::Light4),
-        "Light5" => Ok(TableStyle::Light5),
-        "Light6" => Ok(TableStyle::Light6),
-        "Light7" => Ok(TableStyle::Light7),
-        "Light8" => Ok(TableStyle::Light8),
-        "Light9" => Ok(TableStyle::Light9),
-        "Light10" => Ok(TableStyle::Light10),
-        "Light11" => Ok(TableStyle::Light11),
-        "Light12" => Ok(TableStyle::Light12),
-        "Light13" => Ok(TableStyle::Light13),
-        "Light14" => Ok(TableStyle::Light14),
-        "Light15" => Ok(TableStyle::Light15),
-        "Light16" => Ok(TableStyle::Light16),
-        "Light17" => Ok(TableStyle::Light17),
-        "Light18" => Ok(TableStyle::Light18),
-        "Light19" => Ok(TableStyle::Light19),
-        "Light20" => Ok(TableStyle::Light20),
-        "Light21" => Ok(TableStyle::Light21),
-        "Medium1" => Ok(TableStyle::Medium1),
-        "Medium2" => Ok(TableStyle::Medium2),
-        "Medium3" => Ok(TableStyle::Medium3),
-        "Medium4" => Ok(TableStyle::Medium4),
-        "Medium5" => Ok(TableStyle::Medium5),
-        "Medium6" => Ok(TableStyle::Medium6),
-        "Medium7" => Ok(TableStyle::Medium7),
-        "Medium8" => Ok(TableStyle::Medium8),
-        "Medium9" => Ok(TableStyle::Medium9),
-        "Medium10" => Ok(TableStyle::Medium10),
-        "Medium11" => Ok(TableStyle::Medium11),
-        "Medium12" => Ok(TableStyle::Medium12),
-        "Medium13" => Ok(TableStyle::Medium13),
-        "Medium14" => Ok(TableStyle::Medium14),
-        "Medium15" => Ok(TableStyle::Medium15),
-        "Medium16" => Ok(TableStyle::Medium16),
-        "Medium17" => Ok(TableStyle::Medium17),
-        "Medium18" => Ok(TableStyle::Medium18),
-        "Medium19" => Ok(TableStyle::Medium19),
-        "Medium20" => Ok(TableStyle::Medium20),
-        "Medium21" => Ok(TableStyle::Medium21),
-        "Medium22" => Ok(TableStyle::Medium22),
-        "Medium23" => Ok(TableStyle::Medium23),
-        "Medium24" => Ok(TableStyle::Medium24),
-        "Medium25" => Ok(TableStyle::Medium25),
-        "Medium26" => Ok(TableStyle::Medium26),
-        "Medium27" => Ok(TableStyle::Medium27),
-        "Medium28" => Ok(TableStyle::Medium28),
-        "Dark1" => Ok(TableStyle::Dark1),
-        "Dark2" => Ok(TableStyle::Dark2),
-        "Dark3" => Ok(TableStyle::Dark3),
-        "Dark4" => Ok(TableStyle::Dark4),
-        "Dark5" => Ok(TableStyle::Dark5),
-        "Dark6" => Ok(TableStyle::Dark6),
-        "Dark7" => Ok(TableStyle::Dark7),
-        "Dark8" => Ok(TableStyle::Dark8),
-        "Dark9" => Ok(TableStyle::Dark9),
-        "Dark10" => Ok(TableStyle::Dark10),
-        "Dark11" => Ok(TableStyle::Dark11),
-        _ => Err(format!(
-            "Unknown table_style '{}'. Valid styles: Light1-Light21, Medium1-Medium28, Dark1-Dark11, None",
-            style
-        )),
-    }
+    table_style_match!(style,
+        "None" => None,
+        "Light1" => Light1, "Light2" => Light2, "Light3" => Light3, "Light4" => Light4,
+        "Light5" => Light5, "Light6" => Light6, "Light7" => Light7, "Light8" => Light8,
+        "Light9" => Light9, "Light10" => Light10, "Light11" => Light11, "Light12" => Light12,
+        "Light13" => Light13, "Light14" => Light14, "Light15" => Light15, "Light16" => Light16,
+        "Light17" => Light17, "Light18" => Light18, "Light19" => Light19, "Light20" => Light20,
+        "Light21" => Light21,
+        "Medium1" => Medium1, "Medium2" => Medium2, "Medium3" => Medium3, "Medium4" => Medium4,
+        "Medium5" => Medium5, "Medium6" => Medium6, "Medium7" => Medium7, "Medium8" => Medium8,
+        "Medium9" => Medium9, "Medium10" => Medium10, "Medium11" => Medium11, "Medium12" => Medium12,
+        "Medium13" => Medium13, "Medium14" => Medium14, "Medium15" => Medium15, "Medium16" => Medium16,
+        "Medium17" => Medium17, "Medium18" => Medium18, "Medium19" => Medium19, "Medium20" => Medium20,
+        "Medium21" => Medium21, "Medium22" => Medium22, "Medium23" => Medium23, "Medium24" => Medium24,
+        "Medium25" => Medium25, "Medium26" => Medium26, "Medium27" => Medium27, "Medium28" => Medium28,
+        "Dark1" => Dark1, "Dark2" => Dark2, "Dark3" => Dark3, "Dark4" => Dark4,
+        "Dark5" => Dark5, "Dark6" => Dark6, "Dark7" => Dark7, "Dark8" => Dark8,
+        "Dark9" => Dark9, "Dark10" => Dark10, "Dark11" => Dark11,
+    )
 }
 
 /// Parse a cell reference like "A1" into (row, col) - 0-based

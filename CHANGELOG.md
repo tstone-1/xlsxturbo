@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6] - 2026-03-12
+
+### Fixed
+- **Polars DataFrame detection now checks module name** - `is_polars_dataframe` checks `__module__` instead of duck-typing attributes, preventing misidentification of non-DataFrame objects with `.schema` attribute (e.g., Pydantic models)
+
+### Changed
+- **CI uses pytest** - Integration tests now run via `pytest tests/ -v` instead of `python tests/test_features.py`, with proper test discovery and failure reporting
+- **CI Python dependencies pinned** - `pandas>=2,<3`, `polars>=1,<2`, `openpyxl>=3,<4`, `pytest>=8,<9`, `maturin>=1.4,<2.0` to prevent unexpected breakage from upstream releases
+- **`parse_table_style` uses macro** - Replaced 79-line match statement with `table_style_match!` macro; added version sync comment for `rust_xlsxwriter` 0.94
+- **Dependencies** - Updated `rust_xlsxwriter` 0.93 -> 0.94, `actions/upload-artifact` v4 -> v7, `actions/download-artifact` v7 -> v8
+
+### Refactored
+- **Extracted `apply_worksheet_features` from `write_sheet_data`** - Feature application (table, formulas, conditional formats, freeze panes, widths, heights, merged ranges, hyperlinks, comments, validations, rich text, images) moved to a dedicated function with a single `constant_memory` early-return gate instead of 12 scattered checks
+- **Removed redundant `constant_memory` parameter** from `apply_column_widths_with_autofit_cap` (caller already guards)
+
+### Tests
+- Added 22 new Rust unit tests: `parse_cell_ref` (basic, case-insensitive, max column, overflow, Excel max, row zero, empty, no row, no column), `parse_cell_range` (basic, invalid), `parse_color` (hex, named, invalid, whitespace), `sanitize_table_name` (valid, special chars, digit prefix, truncation, empty), `parse_table_style` (valid, invalid), `naive_date_to_excel` (epoch, known date), `DateOrder::parse`
+
 ## [0.10.5] - 2026-03-02
 
 ### Fixed
