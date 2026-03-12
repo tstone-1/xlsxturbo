@@ -539,7 +539,10 @@ fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{matches_pattern, parse_value};
+    use crate::parse::{
+        matches_pattern, naive_date_to_excel, parse_cell_range, parse_cell_ref, parse_color,
+        parse_table_style, parse_value, sanitize_table_name,
+    };
     use crate::types::{CellValue, DateOrder};
 
     #[test]
@@ -664,5 +667,185 @@ mod tests {
         // Double "**" also matches everything
         assert!(matches_pattern("anything", "**"));
         assert!(matches_pattern("", "**"));
+    }
+
+    // --- parse_cell_ref tests ---
+
+    #[test]
+    fn test_parse_cell_ref_basic() {
+        assert_eq!(parse_cell_ref("A1").unwrap(), (0, 0));
+        assert_eq!(parse_cell_ref("B2").unwrap(), (1, 1));
+        assert_eq!(parse_cell_ref("Z1").unwrap(), (0, 25));
+        assert_eq!(parse_cell_ref("AA1").unwrap(), (0, 26));
+        assert_eq!(parse_cell_ref("AZ1").unwrap(), (0, 51));
+    }
+
+    #[test]
+    fn test_parse_cell_ref_case_insensitive() {
+        assert_eq!(parse_cell_ref("a1").unwrap(), (0, 0));
+        assert_eq!(parse_cell_ref("aa1").unwrap(), (0, 26));
+    }
+
+    #[test]
+    fn test_parse_cell_ref_max_column() {
+        // XFD = 16384th column = index 16383
+        assert_eq!(parse_cell_ref("XFD1").unwrap(), (0, 16383));
+    }
+
+    #[test]
+    fn test_parse_cell_ref_overflow_column() {
+        assert!(parse_cell_ref("ZZZZ1").is_err());
+    }
+
+    #[test]
+    fn test_parse_cell_ref_exceeds_excel_max() {
+        // XFE = 16385th column, exceeds Excel max
+        assert!(parse_cell_ref("XFE1").is_err());
+    }
+
+    #[test]
+    fn test_parse_cell_ref_row_zero() {
+        assert!(parse_cell_ref("A0").is_err());
+    }
+
+    #[test]
+    fn test_parse_cell_ref_empty() {
+        assert!(parse_cell_ref("").is_err());
+    }
+
+    #[test]
+    fn test_parse_cell_ref_no_row() {
+        assert!(parse_cell_ref("A").is_err());
+    }
+
+    #[test]
+    fn test_parse_cell_ref_no_column() {
+        assert!(parse_cell_ref("1").is_err());
+    }
+
+    // --- parse_cell_range tests ---
+
+    #[test]
+    fn test_parse_cell_range_basic() {
+        assert_eq!(parse_cell_range("A1:B2").unwrap(), (0, 0, 1, 1));
+        assert_eq!(parse_cell_range("A1:D1").unwrap(), (0, 0, 0, 3));
+    }
+
+    #[test]
+    fn test_parse_cell_range_invalid_format() {
+        assert!(parse_cell_range("A1").is_err()); // no colon
+        assert!(parse_cell_range("A1:B2:C3").is_err()); // too many colons
+    }
+
+    // --- parse_color tests ---
+
+    #[test]
+    fn test_parse_color_hex() {
+        assert_eq!(parse_color("#FF0000").unwrap(), 0xFF0000);
+        assert_eq!(parse_color("#000000").unwrap(), 0x000000);
+        assert_eq!(parse_color("#FFFFFF").unwrap(), 0xFFFFFF);
+        assert_eq!(parse_color("#4F81BD").unwrap(), 0x4F81BD);
+    }
+
+    #[test]
+    fn test_parse_color_named() {
+        assert_eq!(parse_color("red").unwrap(), 0xFF0000);
+        assert_eq!(parse_color("Red").unwrap(), 0xFF0000);
+        assert_eq!(parse_color("WHITE").unwrap(), 0xFFFFFF);
+        assert_eq!(parse_color("gray").unwrap(), 0x808080);
+        assert_eq!(parse_color("grey").unwrap(), 0x808080);
+    }
+
+    #[test]
+    fn test_parse_color_invalid() {
+        assert!(parse_color("#FFF").is_err()); // too short
+        assert!(parse_color("#GGGGGG").is_err()); // invalid hex
+        assert!(parse_color("chartreuse").is_err()); // unsupported name
+    }
+
+    #[test]
+    fn test_parse_color_whitespace() {
+        assert_eq!(parse_color("  #FF0000  ").unwrap(), 0xFF0000);
+        assert_eq!(parse_color("  red  ").unwrap(), 0xFF0000);
+    }
+
+    // --- sanitize_table_name tests ---
+
+    #[test]
+    fn test_sanitize_table_name_valid() {
+        assert_eq!(sanitize_table_name("MyTable"), "MyTable");
+        assert_eq!(sanitize_table_name("_table1"), "_table1");
+    }
+
+    #[test]
+    fn test_sanitize_table_name_special_chars() {
+        assert_eq!(sanitize_table_name("My Table!"), "My_Table_");
+        assert_eq!(sanitize_table_name("data-2024"), "data_2024");
+    }
+
+    #[test]
+    fn test_sanitize_table_name_starts_with_digit() {
+        assert_eq!(sanitize_table_name("123Data"), "_123Data");
+    }
+
+    #[test]
+    fn test_sanitize_table_name_truncation() {
+        let long_name = "a".repeat(300);
+        let sanitized = sanitize_table_name(&long_name);
+        assert_eq!(sanitized.len(), 255);
+    }
+
+    #[test]
+    fn test_sanitize_table_name_empty() {
+        assert_eq!(sanitize_table_name(""), "_");
+    }
+
+    // --- parse_table_style tests ---
+
+    #[test]
+    fn test_parse_table_style_valid() {
+        assert!(parse_table_style("None").is_ok());
+        assert!(parse_table_style("Light1").is_ok());
+        assert!(parse_table_style("Medium14").is_ok());
+        assert!(parse_table_style("Dark11").is_ok());
+    }
+
+    #[test]
+    fn test_parse_table_style_invalid() {
+        assert!(parse_table_style("light1").is_err()); // case-sensitive
+        assert!(parse_table_style("Medium29").is_err()); // out of range
+        assert!(parse_table_style("Dark12").is_err()); // out of range
+        assert!(parse_table_style("").is_err());
+    }
+
+    // --- naive_date_to_excel tests ---
+
+    #[test]
+    fn test_naive_date_to_excel_epoch() {
+        // Excel epoch is 1899-12-30, so 1900-01-01 = day 2
+        let date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+        assert_eq!(naive_date_to_excel(date), 2.0);
+    }
+
+    #[test]
+    fn test_naive_date_to_excel_known_date() {
+        // 2024-01-15 is a known Excel serial date
+        let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        assert_eq!(naive_date_to_excel(date), 45306.0);
+    }
+
+    // --- DateOrder tests ---
+
+    #[test]
+    fn test_date_order_parse() {
+        assert_eq!(DateOrder::parse("auto"), Some(DateOrder::Auto));
+        assert_eq!(DateOrder::parse("mdy"), Some(DateOrder::MDY));
+        assert_eq!(DateOrder::parse("us"), Some(DateOrder::MDY));
+        assert_eq!(DateOrder::parse("dmy"), Some(DateOrder::DMY));
+        assert_eq!(DateOrder::parse("eu"), Some(DateOrder::DMY));
+        assert_eq!(DateOrder::parse("european"), Some(DateOrder::DMY));
+        assert_eq!(DateOrder::parse("AUTO"), Some(DateOrder::Auto));
+        assert_eq!(DateOrder::parse("invalid"), None);
+        assert_eq!(DateOrder::parse(""), None);
     }
 }
