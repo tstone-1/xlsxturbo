@@ -56,6 +56,64 @@ jobs:
           source .venv/bin/activate
           pytest tests/ -v
 
+  python-test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv\Scripts\activate
+          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+
+      - name: Build and install xlsxturbo
+        run: |
+          .venv\Scripts\activate
+          maturin develop --release
+
+      - name: Run Python integration tests
+        run: |
+          .venv\Scripts\activate
+          pytest tests/ -v
+
+  python-test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+
+      - name: Build and install xlsxturbo
+        run: |
+          source .venv/bin/activate
+          maturin develop --release
+
+      - name: Run Python integration tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/ -v
+
   lint:
     runs-on: ubuntu-latest
     steps:
