@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-03-15
+
+### Added
+- **Defined names** - `defined_names` parameter for workbook-level named ranges
+  - Dict mapping name to Excel reference: `defined_names={"MyRange": "=Sheet1!$A$1:$D$100"}`
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()`
+- **Arbitrary cell writes** - `cells` parameter for writing values to specific cells
+  - Simple values: `cells={"B9": "Label", "B10": 42}`
+  - With number format: `cells={"D6": {"value": "934728173849", "num_format": "@"}}`
+  - Cells are written after DataFrame data, allowing overwrite of data cells
+  - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
+
 ## [0.10.6] - 2026-03-12
 
 ### Fixed

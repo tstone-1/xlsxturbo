@@ -94,6 +94,14 @@ class ImageOptions(TypedDict, total=False):
     scale_height: float  # Scale factor for height (1.0 = original)
     alt_text: str        # Alternative text for accessibility
 
+class CellValueOptions(TypedDict, total=False):
+    """Options for a cell write with custom formatting.
+
+    Note: 'value' is required at runtime but TypedDict doesn't enforce this.
+    """
+    value: str | int | float | bool  # The cell value (required at runtime)
+    num_format: str                   # Excel number format string, e.g. '@' for text, '0.00' for decimal
+
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional."""
     header: bool
@@ -113,6 +121,7 @@ class SheetOptions(TypedDict, total=False):
     validations: dict[str, ValidationOptions] | None  # Column name/pattern -> validation options
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> list of (text, format) or plain text
     images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
+    cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
     input_path: str,
@@ -165,6 +174,8 @@ def df_to_xlsx(
     validations: dict[str, ValidationOptions] | None = None,
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
+    defined_names: dict[str, str] | None = None,
+    cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> tuple[int, int]:
     """
     Convert a pandas or polars DataFrame to XLSX format.
@@ -210,6 +221,12 @@ def df_to_xlsx(
             Example: {'A1': [('Bold', {'bold': True}), ' normal text']}
         images: Dict mapping cell refs to image path or ImageOptions.
             Example: {'B5': 'logo.png'} or {'B5': {'path': 'logo.png', 'scale_width': 0.5}}
+        defined_names: Dict mapping name to Excel reference for workbook-level defined names.
+            Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
+        cells: Dict mapping cell refs to values for arbitrary cell writes.
+            Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
+            Cells are written after DataFrame data, so they can overwrite existing values.
+            Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
     """
     ...
 
@@ -234,6 +251,8 @@ def dfs_to_xlsx(
     validations: dict[str, ValidationOptions] | None = None,
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
+    defined_names: dict[str, str] | None = None,
+    cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> list[tuple[int, int]]:
     """
     Write multiple DataFrames to separate sheets in a single workbook.
@@ -267,6 +286,11 @@ def dfs_to_xlsx(
         validations: Dict mapping column name/pattern to data validation config.
         rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
         images: Dict mapping cell refs to image path or ImageOptions.
+        defined_names: Dict mapping name to Excel reference for workbook-level defined names.
+            Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
+        cells: Dict mapping cell refs to values for arbitrary cell writes.
+            Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
+            Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
     """
     ...
 
