@@ -1,7 +1,7 @@
 //! Core conversion functions for CSV and DataFrame to XLSX
 
 use crate::features::{
-    apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
+    apply_cells, apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
     apply_conditional_formats, apply_formula_columns, apply_hyperlinks, apply_images,
     apply_merged_ranges, apply_rich_text, apply_validations,
 };
@@ -24,6 +24,10 @@ use std::io::BufReader;
 /// Maximum safe integer for lossless f64 representation (2^53).
 /// Integers beyond this range lose precision when cast to f64.
 const MAX_SAFE_INT: i64 = 1 << 53;
+
+/// Excel number format strings (shared with features::apply_cells)
+pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
+pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
 
 /// Write a string to a cell, applying column format if provided
 fn write_str(
@@ -181,8 +185,8 @@ pub fn convert_csv_to_xlsx(
         .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
     // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
 
     let mut row_count: u32 = 0;
     let mut col_count: u16 = 0;
@@ -277,8 +281,8 @@ pub fn convert_csv_to_xlsx_parallel(
         .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
     // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
 
     // Write parsed values sequentially
     for (row_idx, row) in parsed_rows.into_iter().enumerate() {
@@ -492,6 +496,9 @@ pub(crate) fn write_sheet_data(
         if opts.images.is_some() {
             disabled.push("images");
         }
+        if opts.cells.is_some() {
+            disabled.push("cells");
+        }
         if !disabled.is_empty() {
             let warnings = py
                 .import("warnings")
@@ -507,8 +514,8 @@ pub(crate) fn write_sheet_data(
     }
 
     // Create formats
-    let date_format = Format::new().set_num_format("yyyy-mm-dd");
-    let datetime_format = Format::new().set_num_format("yyyy-mm-dd hh:mm:ss");
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
 
     // Parse header format if provided
     let header_fmt = if let Some(fmt_dict) = opts.header_format {
@@ -803,6 +810,13 @@ fn apply_worksheet_features(
         }
     }
 
+    // Apply cells (arbitrary cell writes, after all DataFrame data)
+    if let Some(cells) = opts.cells {
+        if !cells.is_empty() {
+            apply_cells(py, worksheet, cells)?;
+        }
+    }
+
     Ok(total_col_count)
 }
 
@@ -821,6 +835,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
     row_heights: Option<&HashMap<u32, f64>>,
     constant_memory: bool,
     opts: &ExtractedOptions,
+    defined_names: Option<&HashMap<String, String>>,
 ) -> Result<(u32, u16), String> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
     let worksheet = if constant_memory {
@@ -845,6 +860,15 @@ pub(crate) fn convert_dataframe_to_xlsx(
         constant_memory,
         opts.as_effective(),
     )?;
+
+    // Apply defined names (workbook-level)
+    if let Some(names) = defined_names {
+        for (name, reference) in names {
+            workbook
+                .define_name(name, reference)
+                .map_err(|e| format!("Failed to define name '{}': {}", name, e))?;
+        }
+    }
 
     workbook
         .save(output_path)

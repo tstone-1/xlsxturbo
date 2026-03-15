@@ -1,11 +1,13 @@
 //! Feature extraction and application functions
 
+use crate::convert::{write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
 use crate::parse::{
     matches_pattern, parse_cell_range, parse_cell_ref, parse_color, parse_header_format,
     parse_icon_type,
 };
 use crate::types::{
-    Comment, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig, ValidationConfig,
+    CellWrite, Comment, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig,
+    ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -153,6 +155,18 @@ pub(crate) fn extract_sheet_info<'py>(
         );
         extract_dict_field!(opts, config, "rich_text", rich_text, extract_rich_text);
         extract_dict_field!(opts, config, "images", images, extract_images);
+
+        // Extract cells
+        if let Ok(val) = opts.get_item("cells") {
+            if !val.is_none() {
+                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
+                    let extracted = extract_cells(dict)?;
+                    if !extracted.is_empty() {
+                        config.cells = Some(extracted);
+                    }
+                }
+            }
+        }
 
         // Extract complex list fields
         extract_list_field!(
@@ -886,6 +900,72 @@ pub(crate) fn apply_images(
             .map_err(|e| format!("Failed to insert image at '{}': {}", cell_ref, e))?;
     }
 
+    Ok(())
+}
+
+/// Extract cells from Python dict (cell_ref -> value or {value, num_format})
+pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Vec<CellWrite>> {
+    let mut cells = Vec::new();
+    for (key, value) in py_dict.iter() {
+        let cell_ref: String = key.extract()?;
+        let (row, col) =
+            parse_cell_ref(&cell_ref).map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+        // Check if value is a dict with "value" and optional "num_format"
+        if let Ok(d) = value.cast::<pyo3::types::PyDict>() {
+            let val = d.get_item("value")?.ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "cells['{}'] dict missing 'value' key",
+                    cell_ref
+                ))
+            })?;
+            let num_fmt: Option<String> = d
+                .get_item("num_format")?
+                .map(|v| v.extract::<String>())
+                .transpose()?;
+            cells.push(CellWrite {
+                row,
+                col,
+                value: val.unbind(),
+                num_format: num_fmt,
+            });
+        } else {
+            cells.push(CellWrite {
+                row,
+                col,
+                value: value.unbind(),
+                num_format: None,
+            });
+        }
+    }
+    Ok(cells)
+}
+
+/// Apply arbitrary cell writes to a worksheet
+pub(crate) fn apply_cells(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    cells: &[CellWrite],
+) -> Result<(), String> {
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
+
+    for cell in cells {
+        let value = cell.value.bind(py);
+        let fmt = cell
+            .num_format
+            .as_ref()
+            .map(|nf| Format::new().set_num_format(nf));
+        write_py_value_with_format(
+            worksheet,
+            cell.row,
+            cell.col,
+            value,
+            &date_format,
+            &datetime_format,
+            fmt.as_ref(),
+        )?;
+    }
     Ok(())
 }
 

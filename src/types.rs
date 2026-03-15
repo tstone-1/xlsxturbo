@@ -103,6 +103,15 @@ pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 /// Type alias for image config: cell_ref -> image path or config dict
 pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
 
+/// Represents a single cell write operation with optional number format
+#[derive(Debug)]
+pub(crate) struct CellWrite {
+    pub(crate) row: u32,
+    pub(crate) col: u16,
+    pub(crate) value: Py<PyAny>,
+    pub(crate) num_format: Option<String>,
+}
+
 /// Detect whether a Python object is a Polars or Pandas DataFrame.
 /// Returns true for Polars, false for Pandas.
 /// Errors if the object is neither.
@@ -160,6 +169,7 @@ pub(crate) struct ExtractedOptions {
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>,
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<HashMap<String, ImageConfig>>,
+    pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
 /// Per-sheet configuration options (all optional, defaults to global settings)
@@ -182,6 +192,7 @@ pub(crate) struct SheetConfig {
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>, // column name/pattern -> validation config
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
     pub(crate) images: Option<HashMap<String, ImageConfig>>, // cell_ref -> (path, options)
+    pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
 /// Resolved effective options for writing a single sheet (references only, avoids cloning Py<PyAny>).
@@ -198,6 +209,7 @@ pub(crate) struct EffectiveOpts<'a> {
     pub(crate) validations: Option<&'a IndexMap<String, ValidationConfig>>,
     pub(crate) rich_text: Option<&'a HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<&'a HashMap<String, ImageConfig>>,
+    pub(crate) cells: Option<&'a Vec<CellWrite>>,
 }
 
 impl ExtractedOptions {
@@ -215,6 +227,7 @@ impl ExtractedOptions {
             validations: self.validations.as_ref(),
             rich_text: self.rich_text.as_ref(),
             images: self.images.as_ref(),
+            cells: self.cells.as_ref(),
         }
     }
 }

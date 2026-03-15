@@ -21,9 +21,10 @@ pub use types::DateOrder;
 
 use convert::{convert_dataframe_to_xlsx, write_sheet_data};
 use features::{
-    extract_column_formats, extract_column_widths, extract_comments, extract_conditional_formats,
-    extract_formula_columns, extract_header_format, extract_hyperlinks, extract_images,
-    extract_merged_ranges, extract_rich_text, extract_sheet_info, extract_validations,
+    extract_cells, extract_column_formats, extract_column_widths, extract_comments,
+    extract_conditional_formats, extract_formula_columns, extract_header_format,
+    extract_hyperlinks, extract_images, extract_merged_ranges, extract_rich_text,
+    extract_sheet_info, extract_validations,
 };
 use types::{EffectiveOpts, ExtractedOptions};
 
@@ -67,18 +68,19 @@ fn require_list<'py>(
 
 /// Extract and validate all optional write parameters from Python into typed Rust structs.
 #[allow(clippy::too_many_arguments)]
-fn extract_options(
-    column_widths: Option<&Bound<'_, PyAny>>,
-    header_format: Option<&Bound<'_, PyAny>>,
-    column_formats: Option<&Bound<'_, PyAny>>,
-    conditional_formats: Option<&Bound<'_, PyAny>>,
-    formula_columns: Option<&Bound<'_, PyAny>>,
-    merged_ranges: Option<&Bound<'_, PyAny>>,
-    hyperlinks: Option<&Bound<'_, PyAny>>,
-    comments: Option<&Bound<'_, PyAny>>,
-    validations: Option<&Bound<'_, PyAny>>,
-    rich_text: Option<&Bound<'_, PyAny>>,
-    images: Option<&Bound<'_, PyAny>>,
+fn extract_options<'py>(
+    column_widths: Option<&Bound<'py, PyAny>>,
+    header_format: Option<&Bound<'py, PyAny>>,
+    column_formats: Option<&Bound<'py, PyAny>>,
+    conditional_formats: Option<&Bound<'py, PyAny>>,
+    formula_columns: Option<&Bound<'py, PyAny>>,
+    merged_ranges: Option<&Bound<'py, PyAny>>,
+    hyperlinks: Option<&Bound<'py, PyAny>>,
+    comments: Option<&Bound<'py, PyAny>>,
+    validations: Option<&Bound<'py, PyAny>>,
+    rich_text: Option<&Bound<'py, PyAny>>,
+    images: Option<&Bound<'py, PyAny>>,
+    cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<ExtractedOptions> {
     Ok(ExtractedOptions {
         column_widths: column_widths
@@ -115,6 +117,9 @@ fn extract_options(
             .transpose()?,
         images: images
             .map(|v| require_dict(v, "images").and_then(|d| extract_images(&d)))
+            .transpose()?,
+        cells: cells
+            .map(|v| require_dict(v, "cells").and_then(|d| extract_cells(&d)))
             .transpose()?,
     })
 }
@@ -225,6 +230,12 @@ fn csv_to_xlsx(
 ///                Example: {"A1": [("Bold text", {"bold": True}), (" normal text",)]}
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
 ///             Example: {"A1": "logo.png"} or {"A1": {"path": "logo.png", "scale_width": 0.5}}
+///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
+///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
+///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
+///            Values can be simple (str, int, float, bool) or dicts with "value" and optional "num_format".
+///            Cells are written after all DataFrame data, so they can overwrite data cells.
+///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -245,7 +256,7 @@ fn csv_to_xlsx(
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None))]
+#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None, defined_names = None, cells = None))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
     py: Python<'py>,
@@ -270,6 +281,8 @@ fn df_to_xlsx<'py>(
     validations: Option<&Bound<'py, PyAny>>,
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
+    defined_names: Option<HashMap<String, String>>,
+    cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let opts = extract_options(
         column_widths,
@@ -283,6 +296,7 @@ fn df_to_xlsx<'py>(
         validations,
         rich_text,
         images,
+        cells,
     )?;
 
     convert_dataframe_to_xlsx(
@@ -298,6 +312,7 @@ fn df_to_xlsx<'py>(
         row_heights.as_ref(),
         constant_memory,
         &opts,
+        defined_names.as_ref(),
     )
     .map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -321,7 +336,7 @@ fn version() -> &'static str {
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
-///             comments, validations, rich_text, images
+///             comments, validations, rich_text, images, cells
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -352,6 +367,11 @@ fn version() -> &'static str {
 ///                  Types: list, whole_number, decimal, text_length.
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
+///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
+///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
+///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
+///            Values can be simple (str, int, float, bool) or dicts with "value" and optional "num_format".
+///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
@@ -374,7 +394,7 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None))]
+#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None, defined_names = None, cells = None))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
@@ -398,6 +418,8 @@ fn dfs_to_xlsx<'py>(
     validations: Option<&Bound<'py, PyAny>>,
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
+    defined_names: Option<HashMap<String, String>>,
+    cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
@@ -414,6 +436,7 @@ fn dfs_to_xlsx<'py>(
         validations,
         rich_text,
         images,
+        cells,
     )?;
 
     for sheet_tuple in sheets {
@@ -469,6 +492,7 @@ fn dfs_to_xlsx<'py>(
                 .or(opts.validations.as_ref()),
             rich_text: sheet_config.rich_text.as_ref().or(opts.rich_text.as_ref()),
             images: sheet_config.images.as_ref().or(opts.images.as_ref()),
+            cells: sheet_config.cells.as_ref().or(opts.cells.as_ref()),
         };
 
         let worksheet = if constant_memory {
@@ -499,6 +523,18 @@ fn dfs_to_xlsx<'py>(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         stats.push(result);
+    }
+
+    // Apply defined names (workbook-level)
+    if let Some(ref names) = defined_names {
+        for (name, reference) in names {
+            workbook.define_name(name, reference).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "Failed to define name '{}': {}",
+                    name, e
+                ))
+            })?;
+        }
     }
 
     // Save workbook

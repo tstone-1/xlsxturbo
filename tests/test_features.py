@@ -1967,6 +1967,233 @@ class TestUnicodeAndSpecialData:
             os.unlink(path)
 
 
+class TestDefinedNames:
+    """Tests for workbook-level defined names (v0.11.0)"""
+
+    def test_single_defined_name(self):
+        """Single defined name is created in workbook"""
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path,
+                defined_names={"MyRange": "=Sheet1!$A$1:$A$4"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                names = {dn.name: dn.attr_text for dn in wb.defined_names.values()}
+                assert "MyRange" in names
+                assert "$A$1:$A$4" in names["MyRange"]
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_multiple_defined_names(self):
+        """Multiple defined names created"""
+        df = pd.DataFrame({"a": [1], "b": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, defined_names={
+                "Range1": "=Sheet1!$A$1:$A$2",
+                "Range2": "=Sheet1!$B$1:$B$2",
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                names = {dn.name for dn in wb.defined_names.values()}
+                assert "Range1" in names
+                assert "Range2" in names
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_defined_names_dfs_to_xlsx(self):
+        """defined_names works in multi-sheet mode"""
+        df1 = pd.DataFrame({"x": [1]})
+        df2 = pd.DataFrame({"y": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df1, "S1"), (df2, "S2")], path,
+                defined_names={"AllData": "=S1!$A$1:$A$2"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                names = {dn.name for dn in wb.defined_names.values()}
+                assert "AllData" in names
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_defined_name_with_quoted_sheet(self):
+        """Defined name with quoted sheet name containing space"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path,
+                sheet_name="LCA Calculator Parameters",
+                defined_names={"Settings": "='LCA Calculator Parameters'!$B$13:$D$155"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                names = {dn.name for dn in wb.defined_names.values()}
+                assert "Settings" in names
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestCells:
+    """Tests for arbitrary cell writes (v0.11.0)"""
+
+    def test_simple_string_cell(self):
+        """Write a string to a specific cell"""
+        df = pd.DataFrame({"a": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={"C1": "hello"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb.active["C1"].value == "hello"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_numeric_cells(self):
+        """Write int and float to cells"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={"B5": 42, "C5": 3.14})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb.active["B5"].value == 42
+                assert abs(wb.active["C5"].value - 3.14) < 0.001
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_bool_cell(self):
+        """Write boolean to cell"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={"B2": True})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb.active["B2"].value is True
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cell_with_num_format(self):
+        """Dict-style cell with num_format preserves text format"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={
+                "D6": {"value": "934728173849", "num_format": "@"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                cell = wb.active["D6"]
+                assert cell.value == "934728173849"
+                assert cell.number_format == "@"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cell_overwrites_dataframe_data(self):
+        """cells parameter overwrites existing DataFrame values"""
+        df = pd.DataFrame({"a": ["original"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={"A2": "overwritten"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb.active["A2"].value == "overwritten"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cell_dict_missing_value_key(self):
+        """Dict-style cell without 'value' key raises ValueError"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="missing 'value' key"):
+                xlsxturbo.df_to_xlsx(df, path, cells={"A1": {"num_format": "@"}})
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_cell_ref(self):
+        """Invalid cell reference raises ValueError"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError):
+                xlsxturbo.df_to_xlsx(df, path, cells={"ZZZZ1": "x"})
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_cells_per_sheet_override(self):
+        """Per-sheet cells override global cells in dfs_to_xlsx"""
+        df1 = pd.DataFrame({"a": [1]})
+        df2 = pd.DataFrame({"b": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df1, "S1"), (df2, "S2", {"cells": {"C1": "per-sheet"}})],
+                path, cells={"C1": "global"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb["S1"]["C1"].value == "global"
+                assert wb["S2"]["C1"].value == "per-sheet"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cells_constant_memory_warns(self):
+        """cells with constant_memory emits a warning"""
+        df = pd.DataFrame({"a": [1, 2]})
+        path = get_temp_path()
+        try:
+            import warnings
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(df, path, constant_memory=True,
+                    cells={"C1": "test"})
+                assert len(w) == 1
+                assert "cells" in str(w[0].message)
+        finally:
+            os.unlink(path)
+
+    def test_num_format_wrong_type_raises(self):
+        """Non-string num_format raises TypeError"""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(TypeError):
+                xlsxturbo.df_to_xlsx(df, path,
+                    cells={"A1": {"value": "x", "num_format": 123}})
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_cells_with_polars(self):
+        """cells work with polars DataFrames"""
+        df = pl.DataFrame({"a": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={"C1": "extra"})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                assert wb.active["C1"].value == "extra"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -1994,6 +2221,8 @@ if __name__ == "__main__":
         TestConstantMemoryMode,
         TestRowHeights,
         TestUnicodeAndSpecialData,
+        TestDefinedNames,
+        TestCells,
     ]
 
     failed = 0
