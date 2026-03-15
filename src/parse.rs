@@ -5,7 +5,7 @@ use chrono::Timelike;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::Py;
-use rust_xlsxwriter::{ConditionalFormatIconType, Format, TableStyle};
+use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatBorder, TableStyle};
 use std::collections::HashMap;
 
 /// Generate a table style lookup match from a list of (string, variant) pairs.
@@ -182,6 +182,31 @@ pub(crate) fn sanitize_table_name(name: &str) -> String {
     sanitized
 }
 
+/// Parse border style string into `FormatBorder` enum value.
+pub(crate) fn parse_border_style(style: &str) -> Result<FormatBorder, String> {
+    match style.to_lowercase().as_str() {
+        "thin" => Ok(FormatBorder::Thin),
+        "medium" => Ok(FormatBorder::Medium),
+        "thick" => Ok(FormatBorder::Thick),
+        "dashed" => Ok(FormatBorder::Dashed),
+        "dotted" => Ok(FormatBorder::Dotted),
+        "double" => Ok(FormatBorder::Double),
+        "hair" => Ok(FormatBorder::Hair),
+        "medium_dashed" | "mediumdashed" => Ok(FormatBorder::MediumDashed),
+        "dash_dot" | "dashdot" => Ok(FormatBorder::DashDot),
+        "medium_dash_dot" | "mediumdashdot" => Ok(FormatBorder::MediumDashDot),
+        "dash_dot_dot" | "dashdotdot" => Ok(FormatBorder::DashDotDot),
+        "medium_dash_dot_dot" | "mediumdashdotdot" => Ok(FormatBorder::MediumDashDotDot),
+        "slant_dash_dot" | "slantdashdot" => Ok(FormatBorder::SlantDashDot),
+        _ => Err(format!(
+            "Unknown border style '{}'. Valid styles: thin, medium, thick, dashed, dotted, \
+             double, hair, medium_dashed, dash_dot, medium_dash_dot, dash_dot_dot, \
+             medium_dash_dot_dot, slant_dash_dot",
+            style
+        )),
+    }
+}
+
 /// Parse color string (hex #RRGGBB or named color) to u32
 pub(crate) fn parse_color(color_str: &str) -> Result<u32, String> {
     let color = color_str.trim();
@@ -226,7 +251,8 @@ pub(crate) fn parse_header_format(
 }
 
 /// Shared format parser for both header and column formats.
-/// When `include_column_options` is true, also handles num_format and border.
+/// When `include_column_options` is true, also handles num_format.
+/// Border keys (border, border_left/right/top/bottom, border_color) are always parsed.
 fn parse_format_dict(
     py: Python<'_>,
     fmt_dict: &HashMap<String, Py<PyAny>>,
@@ -281,12 +307,57 @@ fn parse_format_dict(
                 format = format.set_num_format(&num_fmt_str);
             }
         }
+    }
 
-        if let Some(border_obj) = fmt_dict.get("border") {
-            let border: bool = border_obj.bind(py).extract().unwrap_or(false);
+    // border: bool (backward compat) or str (style name) for all 4 sides
+    if let Some(border_obj) = fmt_dict.get("border") {
+        let bound = border_obj.bind(py);
+        if let Ok(style_str) = bound.extract::<String>() {
+            let style = parse_border_style(&style_str)?;
+            format = format.set_border(style);
+        } else {
+            let border: bool = bound.extract().unwrap_or(false);
             if border {
-                format = format.set_border(rust_xlsxwriter::FormatBorder::Thin);
+                format = format.set_border(FormatBorder::Thin);
             }
+        }
+    }
+
+    // Per-side borders: border_left, border_right, border_top, border_bottom
+    for (key, setter) in [
+        (
+            "border_left",
+            Format::set_border_left as fn(Format, FormatBorder) -> Format,
+        ),
+        (
+            "border_right",
+            Format::set_border_right as fn(Format, FormatBorder) -> Format,
+        ),
+        (
+            "border_top",
+            Format::set_border_top as fn(Format, FormatBorder) -> Format,
+        ),
+        (
+            "border_bottom",
+            Format::set_border_bottom as fn(Format, FormatBorder) -> Format,
+        ),
+    ] {
+        if let Some(obj) = fmt_dict.get(key) {
+            let bound = obj.bind(py);
+            if let Ok(style_str) = bound.extract::<String>() {
+                let style = parse_border_style(&style_str)?;
+                format = setter(format, style);
+            } else if bound.extract::<bool>().unwrap_or(false) {
+                format = setter(format, FormatBorder::Thin);
+            }
+        }
+    }
+
+    // border_color: color for all borders (requires a border to be set to have visible effect)
+    if let Some(color_obj) = fmt_dict.get("border_color") {
+        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
+            let color = parse_color(&color_str)?;
+            format = format.set_border_color(color);
         }
     }
 

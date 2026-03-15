@@ -576,8 +576,8 @@ fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use crate::parse::{
-        matches_pattern, naive_date_to_excel, parse_cell_range, parse_cell_ref, parse_color,
-        parse_table_style, parse_value, sanitize_table_name,
+        matches_pattern, naive_date_to_excel, parse_border_style, parse_cell_range, parse_cell_ref,
+        parse_color, parse_table_style, parse_value, sanitize_table_name,
     };
     use crate::types::{CellValue, DateOrder};
 
@@ -883,5 +883,63 @@ mod tests {
         assert_eq!(DateOrder::parse("AUTO"), Some(DateOrder::Auto));
         assert_eq!(DateOrder::parse("invalid"), None);
         assert_eq!(DateOrder::parse(""), None);
+    }
+
+    // --- parse_border_style tests ---
+
+    #[test]
+    fn test_parse_border_style_valid() {
+        use rust_xlsxwriter::FormatBorder;
+        assert_eq!(parse_border_style("thin").unwrap(), FormatBorder::Thin);
+        assert_eq!(parse_border_style("medium").unwrap(), FormatBorder::Medium);
+        assert_eq!(parse_border_style("thick").unwrap(), FormatBorder::Thick);
+        assert_eq!(parse_border_style("dashed").unwrap(), FormatBorder::Dashed);
+        assert_eq!(parse_border_style("dotted").unwrap(), FormatBorder::Dotted);
+        assert_eq!(parse_border_style("double").unwrap(), FormatBorder::Double);
+        assert_eq!(parse_border_style("hair").unwrap(), FormatBorder::Hair);
+    }
+
+    #[test]
+    fn test_parse_border_style_case_insensitive() {
+        use rust_xlsxwriter::FormatBorder;
+        assert_eq!(parse_border_style("THIN").unwrap(), FormatBorder::Thin);
+        assert_eq!(parse_border_style("Thick").unwrap(), FormatBorder::Thick);
+        assert_eq!(parse_border_style("Medium").unwrap(), FormatBorder::Medium);
+    }
+
+    #[test]
+    fn test_parse_border_style_aliases() {
+        use rust_xlsxwriter::FormatBorder;
+        assert_eq!(
+            parse_border_style("medium_dashed").unwrap(),
+            FormatBorder::MediumDashed
+        );
+        assert_eq!(
+            parse_border_style("mediumdashed").unwrap(),
+            FormatBorder::MediumDashed
+        );
+        assert_eq!(
+            parse_border_style("dash_dot").unwrap(),
+            FormatBorder::DashDot
+        );
+        assert_eq!(
+            parse_border_style("dashdot").unwrap(),
+            FormatBorder::DashDot
+        );
+        assert_eq!(
+            parse_border_style("slant_dash_dot").unwrap(),
+            FormatBorder::SlantDashDot
+        );
+        assert_eq!(
+            parse_border_style("slantdashdot").unwrap(),
+            FormatBorder::SlantDashDot
+        );
+    }
+
+    #[test]
+    fn test_parse_border_style_invalid() {
+        assert!(parse_border_style("").is_err());
+        assert!(parse_border_style("bold").is_err());
+        assert!(parse_border_style("heavy").is_err());
     }
 }
