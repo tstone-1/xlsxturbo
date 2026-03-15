@@ -9,10 +9,16 @@ class HeaderFormat(TypedDict, total=False):
     """Header cell formatting options. All fields are optional."""
     bold: bool
     italic: bool
-    font_color: str  # '#RRGGBB' or named color (white, black, red, blue, etc.)
-    bg_color: str    # '#RRGGBB' or named color
+    font_color: str    # '#RRGGBB' or named color (white, black, red, blue, etc.)
+    bg_color: str      # '#RRGGBB' or named color
     font_size: float
     underline: bool
+    border: bool | str # True = thin all sides, str = named style all sides
+    border_left: str   # Border style for left side only (thin, medium, thick, dashed, dotted, double, hair, etc.)
+    border_right: str  # Border style for right side only
+    border_top: str    # Border style for top side only
+    border_bottom: str # Border style for bottom side only
+    border_color: str  # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
 
 class ColumnFormat(TypedDict, total=False):
     """Column cell formatting options. All fields are optional."""
@@ -22,8 +28,13 @@ class ColumnFormat(TypedDict, total=False):
     bg_color: str    # '#RRGGBB' or named color
     font_size: float
     underline: bool
-    num_format: str  # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
-    border: bool     # Add thin border around cells
+    num_format: str    # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
+    border: bool | str # True = thin all sides (backward compat), str = named style all sides
+    border_left: str   # Border style for left side only (thin, medium, thick, dashed, dotted, double, hair, etc.)
+    border_right: str  # Border style for right side only
+    border_top: str    # Border style for top side only
+    border_bottom: str # Border style for bottom side only
+    border_color: str  # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
 
 class ConditionalFormat(TypedDict, total=False):
     """Conditional formatting options for a column. 'type' is required.

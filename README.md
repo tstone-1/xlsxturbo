@@ -202,6 +202,9 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - bg_color (str): Background color
 # - font_size (float): Font size in points
 # - underline (bool): Underlined text
+# - border (bool|str): True = thin all sides, or style name
+# - border_left/right/top/bottom (str): Per-side border style
+# - border_color (str): Color for all borders
 ```
 
 ### Column Formatting
@@ -239,12 +242,28 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
 # - bold (bool): Bold text
 # - italic (bool): Italic text
 # - underline (bool): Underlined text
-# - border (bool): Add thin border
+# - border (bool|str): True = thin all sides, or style name all sides
+# - border_left (str): Border style for left side only
+# - border_right (str): Border style for right side only
+# - border_top (str): Border style for top side only
+# - border_bottom (str): Border style for bottom side only
+# - border_color (str): Color for all borders ('#RRGGBB' or named)
+#
+# Border styles: thin, medium, thick, dashed, dotted, double, hair,
+#   medium_dashed, dash_dot, medium_dash_dot, dash_dot_dot,
+#   medium_dash_dot_dot, slant_dash_dot
 
 # First matching pattern wins (order preserved)
 xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
     'price_usd': {'bg_color': '#FFEB3B'},  # Specific: yellow for USD
     'price_*': {'bg_color': '#E3F2FD'}     # General: blue for other prices
+})
+
+# Per-side borders with style control
+xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
+    'price_usd': {'border_right': 'thick'},              # Thick right border only
+    'quantity': {'border': 'thin'},                       # Thin border all sides
+    'product_name': {'border_left': 'medium', 'border_right': 'medium'},  # Left+right
 })
 ```
 

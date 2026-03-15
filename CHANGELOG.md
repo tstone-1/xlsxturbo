@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - Unreleased
+
+### Added
+- **Per-side border styles** - Fine-grained border control for `column_formats` and `header_format`
+  - `border` now accepts string style names: `'border': 'thick'` (all 4 sides)
+  - Per-side keys: `border_left`, `border_right`, `border_top`, `border_bottom`
+  - Per-side keys accept `True` (= thin) or a style name string
+  - `border_color` for setting border color (`'#RRGGBB'` or named color, applies to all sides)
+  - 13 border styles: thin, medium, thick, dashed, dotted, double, hair, medium_dashed, dash_dot, medium_dash_dot, dash_dot_dot, medium_dash_dot_dot, slant_dash_dot
+  - Works in both `column_formats` and `header_format`
+  - Backward compatible: `'border': True` still works (thin, all sides)
+  - Example: `column_formats={'col': {'border_right': 'thick'}}`
+
 ## [0.11.0] - 2026-03-15
 
 ### Added
