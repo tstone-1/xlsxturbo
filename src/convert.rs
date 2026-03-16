@@ -29,6 +29,76 @@ const MAX_SAFE_INT: i64 = 1 << 53;
 pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
 pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
 
+/// Compute approximate content widths for each column from headers + DataFrame data.
+/// Uses string representation lengths as a proxy for Excel's autofit calculation.
+fn compute_content_widths(
+    _py: Python<'_>,
+    columns: &[String],
+    df: &Bound<'_, PyAny>,
+    include_header: bool,
+    is_polars: bool,
+) -> Vec<f64> {
+    let col_count = columns.len();
+    let mut max_lens = vec![0usize; col_count];
+
+    // Header lengths
+    if include_header {
+        for (i, name) in columns.iter().enumerate() {
+            max_lens[i] = name.len();
+        }
+    }
+
+    // Sample data lengths (check all rows for accuracy)
+    let row_count: usize = df
+        .getattr("shape")
+        .and_then(|s| s.get_item(0))
+        .and_then(|v| v.extract())
+        .unwrap_or(0);
+
+    if is_polars {
+        if let Ok(rows) = df.call_method0("iter_rows") {
+            for row_result in rows.try_iter().unwrap().flatten() {
+                if let Ok(row_iter) = row_result.try_iter() {
+                    for (col_idx, val) in row_iter.flatten().enumerate() {
+                        if col_idx < col_count {
+                            let len = val.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                            if len > max_lens[col_idx] {
+                                max_lens[col_idx] = len;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Pandas: use .values
+        if let Ok(values) = df.getattr("values") {
+            for i in 0..row_count {
+                if let Ok(row) = values.get_item(i) {
+                    for (col_idx, max_len) in max_lens.iter_mut().enumerate() {
+                        if let Ok(val) = row.get_item(col_idx) {
+                            let len = val.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                            if len > *max_len {
+                                *max_len = len;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert character counts to approximate Excel column widths
+    // Excel width ≈ max(len + 1, 8.43) with some padding
+    max_lens
+        .iter()
+        .map(|&len| {
+            let width = len as f64 + 1.0;
+            width.max(8.43) // Excel default minimum
+        })
+        .collect()
+}
+
 /// Write a string to a cell, applying column format if provided
 fn write_str(
     worksheet: &mut Worksheet,
@@ -630,6 +700,13 @@ pub(crate) fn write_sheet_data(
         }
     }
 
+    // Compute content widths for autofit+cap (only when both are active)
+    let content_widths = if autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all")) {
+        compute_content_widths(py, &columns, df, include_header, is_polars)
+    } else {
+        Vec::new()
+    };
+
     // Apply all worksheet features (table, formulas, formatting, etc.)
     let total_col_count = apply_worksheet_features(
         py,
@@ -647,6 +724,7 @@ pub(crate) fn write_sheet_data(
         constant_memory,
         header_fmt.as_ref(),
         &opts,
+        &content_widths,
     )?;
 
     Ok((row_idx, total_col_count))
@@ -675,6 +753,7 @@ fn apply_worksheet_features(
     constant_memory: bool,
     header_fmt: Option<&Format>,
     opts: &EffectiveOpts<'_>,
+    content_widths: &[f64],
 ) -> Result<u16, String> {
     // In constant_memory mode, only column widths (without autofit) are supported
     if constant_memory {
@@ -751,7 +830,7 @@ fn apply_worksheet_features(
     // Apply custom column widths and/or autofit
     if let Some(widths) = opts.column_widths {
         if autofit && widths.contains_key("_all") {
-            apply_column_widths_with_autofit_cap(worksheet, col_count, widths)?;
+            apply_column_widths_with_autofit_cap(worksheet, col_count, widths, content_widths)?;
         } else {
             apply_column_widths(worksheet, col_count, widths)?;
         }
