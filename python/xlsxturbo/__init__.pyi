@@ -18,7 +18,10 @@ class HeaderFormat(TypedDict, total=False):
     border_right: str  # Border style for right side only
     border_top: str    # Border style for top side only
     border_bottom: str # Border style for bottom side only
-    border_color: str  # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
+    border_color: str        # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
+    align_horizontal: str    # Horizontal alignment: 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed', 'general'
+    align_vertical: str      # Vertical alignment: 'top', 'center', 'bottom', 'justify', 'distributed'
+    wrap_text: bool          # Enable text wrapping within cell
 
 class ColumnFormat(TypedDict, total=False):
     """Column cell formatting options. All fields are optional."""
@@ -34,7 +37,10 @@ class ColumnFormat(TypedDict, total=False):
     border_right: str  # Border style for right side only
     border_top: str    # Border style for top side only
     border_bottom: str # Border style for bottom side only
-    border_color: str  # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
+    border_color: str        # Color for all borders ('#RRGGBB' or named). Requires a border to be set for visible effect
+    align_horizontal: str    # Horizontal alignment: 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed', 'general'
+    align_vertical: str      # Vertical alignment: 'top', 'center', 'bottom', 'justify', 'distributed'
+    wrap_text: bool          # Enable text wrapping within cell
 
 class ConditionalFormat(TypedDict, total=False):
     """Conditional formatting options for a column. 'type' is required.
@@ -112,6 +118,9 @@ class CellValueOptions(TypedDict, total=False):
     """
     value: str | int | float | bool  # The cell value (required at runtime)
     num_format: str                   # Excel number format string, e.g. '@' for text, '0.00' for decimal
+    align_horizontal: str             # Horizontal alignment: 'left', 'center', 'right', 'fill', 'justify'
+    align_vertical: str               # Vertical alignment: 'top', 'center', 'bottom'
+    wrap_text: bool                   # Enable text wrapping within cell
 
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional."""

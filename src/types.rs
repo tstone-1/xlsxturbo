@@ -103,13 +103,16 @@ pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 /// Type alias for image config: cell_ref -> image path or config dict
 pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
 
-/// Represents a single cell write operation with optional number format
+/// Represents a single cell write operation with optional formatting
 #[derive(Debug)]
 pub(crate) struct CellWrite {
     pub(crate) row: u32,
     pub(crate) col: u16,
     pub(crate) value: Py<PyAny>,
     pub(crate) num_format: Option<String>,
+    pub(crate) align_horizontal: Option<String>,
+    pub(crate) align_vertical: Option<String>,
+    pub(crate) wrap_text: bool,
 }
 
 /// Detect whether a Python object is a Polars or Pandas DataFrame.
