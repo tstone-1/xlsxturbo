@@ -577,7 +577,8 @@ fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use crate::parse::{
         matches_pattern, naive_date_to_excel, parse_border_style, parse_cell_range, parse_cell_ref,
-        parse_color, parse_table_style, parse_value, sanitize_table_name,
+        parse_color, parse_horizontal_alignment, parse_table_style, parse_value,
+        parse_vertical_alignment, sanitize_table_name,
     };
     use crate::types::{CellValue, DateOrder};
 
@@ -941,5 +942,71 @@ mod tests {
         assert!(parse_border_style("").is_err());
         assert!(parse_border_style("bold").is_err());
         assert!(parse_border_style("heavy").is_err());
+    }
+
+    // --- parse_horizontal_alignment tests ---
+
+    #[test]
+    fn test_parse_horizontal_alignment_valid() {
+        use rust_xlsxwriter::FormatAlign;
+        assert_eq!(
+            parse_horizontal_alignment("left").unwrap(),
+            FormatAlign::Left
+        );
+        assert_eq!(
+            parse_horizontal_alignment("center").unwrap(),
+            FormatAlign::Center
+        );
+        assert_eq!(
+            parse_horizontal_alignment("right").unwrap(),
+            FormatAlign::Right
+        );
+        assert_eq!(
+            parse_horizontal_alignment("fill").unwrap(),
+            FormatAlign::Fill
+        );
+        assert_eq!(
+            parse_horizontal_alignment("justify").unwrap(),
+            FormatAlign::Justify
+        );
+        assert_eq!(
+            parse_horizontal_alignment("CENTER").unwrap(),
+            FormatAlign::Center
+        );
+    }
+
+    #[test]
+    fn test_parse_horizontal_alignment_invalid() {
+        assert!(parse_horizontal_alignment("").is_err());
+        assert!(parse_horizontal_alignment("top").is_err());
+        assert!(parse_horizontal_alignment("middle").is_err());
+    }
+
+    // --- parse_vertical_alignment tests ---
+
+    #[test]
+    fn test_parse_vertical_alignment_valid() {
+        use rust_xlsxwriter::FormatAlign;
+        assert_eq!(parse_vertical_alignment("top").unwrap(), FormatAlign::Top);
+        assert_eq!(
+            parse_vertical_alignment("center").unwrap(),
+            FormatAlign::VerticalCenter
+        );
+        assert_eq!(
+            parse_vertical_alignment("bottom").unwrap(),
+            FormatAlign::Bottom
+        );
+        assert_eq!(
+            parse_vertical_alignment("vertical_center").unwrap(),
+            FormatAlign::VerticalCenter
+        );
+        assert_eq!(parse_vertical_alignment("TOP").unwrap(), FormatAlign::Top);
+    }
+
+    #[test]
+    fn test_parse_vertical_alignment_invalid() {
+        assert!(parse_vertical_alignment("").is_err());
+        assert!(parse_vertical_alignment("left").is_err());
+        assert!(parse_vertical_alignment("right").is_err());
     }
 }
