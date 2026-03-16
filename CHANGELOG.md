@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Table creation crash when `header=False`** - Excel tables require a header row; table creation is now skipped when `include_header` is false, preventing `Table must have at least one row` errors (#12)
+- **`autofit=True` + `column_widths={'_all': N}` now caps instead of overriding** - columns are autofit to content then capped at N (`min(content_width, cap)`), matching the documented behavior (#13)
 
 ## [0.12.0] - 2026-03-16
 
