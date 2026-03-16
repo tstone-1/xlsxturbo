@@ -103,6 +103,9 @@ pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 /// Type alias for image config: cell_ref -> image path or config dict
 pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
 
+/// Type alias for conditional format configs: column/pattern -> list of format config dicts
+pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
+
 /// Represents a single cell write operation with optional formatting
 #[derive(Debug)]
 pub(crate) struct CellWrite {
@@ -164,7 +167,7 @@ pub(crate) struct ExtractedOptions {
     pub(crate) column_widths: Option<HashMap<String, f64>>,
     pub(crate) header_format: Option<HashMap<String, Py<PyAny>>>,
     pub(crate) column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>,
-    pub(crate) conditional_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    pub(crate) conditional_formats: Option<ConditionalFormatConfigs>,
     pub(crate) formula_columns: Option<IndexMap<String, String>>,
     pub(crate) merged_ranges: Option<Vec<MergedRange>>,
     pub(crate) hyperlinks: Option<Vec<Hyperlink>>,
@@ -187,7 +190,7 @@ pub(crate) struct SheetConfig {
     pub(crate) header_format: Option<HashMap<String, Py<PyAny>>>,
     pub(crate) row_heights: Option<HashMap<u32, f64>>,
     pub(crate) column_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Pattern -> format dict (ordered)
-    pub(crate) conditional_formats: Option<IndexMap<String, HashMap<String, Py<PyAny>>>>, // Column/pattern -> conditional format config (ordered)
+    pub(crate) conditional_formats: Option<ConditionalFormatConfigs>, // Column/pattern -> list of conditional format configs
     pub(crate) formula_columns: Option<IndexMap<String, String>>, // Column name -> formula template (ordered)
     pub(crate) merged_ranges: Option<Vec<MergedRange>>,           // (range, text, format)
     pub(crate) hyperlinks: Option<Vec<Hyperlink>>, // (cell, url, optional display_text)
@@ -204,7 +207,7 @@ pub(crate) struct EffectiveOpts<'a> {
     pub(crate) column_widths: Option<&'a HashMap<String, f64>>,
     pub(crate) header_format: Option<&'a HashMap<String, Py<PyAny>>>,
     pub(crate) column_formats: Option<&'a IndexMap<String, HashMap<String, Py<PyAny>>>>,
-    pub(crate) conditional_formats: Option<&'a IndexMap<String, HashMap<String, Py<PyAny>>>>,
+    pub(crate) conditional_formats: Option<&'a ConditionalFormatConfigs>,
     pub(crate) formula_columns: Option<&'a IndexMap<String, String>>,
     pub(crate) merged_ranges: Option<&'a Vec<MergedRange>>,
     pub(crate) hyperlinks: Option<&'a Vec<Hyperlink>>,
