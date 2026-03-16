@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Vertical: `'top'`, `'center'`, `'bottom'`, `'justify'`, `'distributed'`
   - `wrap_text: True` enables text wrapping within cells
   - Example: `column_formats={'description': {'align_horizontal': 'left', 'wrap_text': True}}`
+- **Rule-based conditional formatting** - `type: 'cell'` in `conditional_formats` for value-based highlighting
+  - Comparison criteria: `equal_to`, `not_equal_to`, `greater_than`, `less_than`, `greater_than_or_equal_to`, `less_than_or_equal_to`
+  - Range criteria: `between`, `not_between` (with `min_value`/`max_value`)
+  - Text criteria: `containing`, `not_containing`, `begins_with`, `ends_with`
+  - Special: `blanks`, `no_blanks`
+  - `format` key accepts all column format options (bg_color, font_color, bold, border, etc.)
+  - Multiple rules per column: pass a list of config dicts instead of a single dict
+  - Example: `conditional_formats={'status': {'type': 'cell', 'criteria': 'equal_to', 'value': 'ERROR', 'format': {'bg_color': '#FF0000'}}}`
 
 ## [0.11.0] - 2026-03-15
 

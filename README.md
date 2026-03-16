@@ -393,11 +393,49 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 | `3_color_scale` | `min_color`, `mid_color`, `max_color` |
 | `data_bar` | `bar_color`, `border_color`, `solid`, `direction` |
 | `icon_set` | `icon_type`, `reverse`, `icons_only` |
+| `cell` | `criteria`, `value`, `min_value`, `max_value`, `format` |
 
 **Available icon types:**
 - 3 icons: `3_arrows`, `3_arrows_gray`, `3_flags`, `3_traffic_lights`, `3_traffic_lights_rimmed`, `3_signs`, `3_symbols`, `3_symbols_uncircled`
 - 4 icons: `4_arrows`, `4_arrows_gray`, `4_traffic_lights`, `4_rating`
 - 5 icons: `5_arrows`, `5_arrows_gray`, `5_quarters`, `5_rating`
+
+**Cell rules** — highlight cells based on value conditions:
+```python
+# Single rule
+conditional_formats={
+    'status': {
+        'type': 'cell',
+        'criteria': 'equal_to',
+        'value': 'ERROR',
+        'format': {'bg_color': '#FF0000', 'font_color': 'white', 'bold': True}
+    }
+}
+
+# Multiple rules on one column (pass a list)
+conditional_formats={
+    'severity': [
+        {'type': 'cell', 'criteria': 'equal_to', 'value': 'HIGH', 'format': {'bg_color': '#FF0000'}},
+        {'type': 'cell', 'criteria': 'equal_to', 'value': 'MEDIUM', 'format': {'bg_color': '#FFA500'}},
+        {'type': 'cell', 'criteria': 'equal_to', 'value': 'LOW', 'format': {'bg_color': '#FFFF00'}},
+    ]
+}
+
+# Numeric comparison
+conditional_formats={'score': {'type': 'cell', 'criteria': 'between', 'min_value': 0, 'max_value': 50, 'format': {'bg_color': '#FF0000'}}}
+```
+
+**Available criteria for `cell` type:**
+
+| Criteria | Value keys | Description |
+|----------|-----------|-------------|
+| `equal_to`, `not_equal_to` | `value` | Exact match (string or number) |
+| `greater_than`, `less_than` | `value` | Numeric comparison |
+| `greater_than_or_equal_to`, `less_than_or_equal_to` | `value` | Numeric comparison |
+| `between`, `not_between` | `min_value`, `max_value` | Range check |
+| `containing`, `not_containing` | `value` | Text contains substring |
+| `begins_with`, `ends_with` | `value` | Text prefix/suffix match |
+| `blanks`, `no_blanks` | *(none)* | Empty/non-empty cells |
 
 Column patterns work with conditional formats:
 ```python
