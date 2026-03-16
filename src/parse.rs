@@ -215,12 +215,11 @@ pub(crate) fn parse_horizontal_alignment(align: &str) -> Result<FormatAlign, Str
         "right" => Ok(FormatAlign::Right),
         "fill" => Ok(FormatAlign::Fill),
         "justify" => Ok(FormatAlign::Justify),
-        "center_across" | "centeracross" => Ok(FormatAlign::CenterAcross),
+        "center_across" => Ok(FormatAlign::CenterAcross),
         "distributed" => Ok(FormatAlign::Distributed),
-        "general" => Ok(FormatAlign::General),
         _ => Err(format!(
             "Unknown horizontal alignment '{}'. Valid values: left, center, right, \
-             fill, justify, center_across, distributed, general",
+             fill, justify, center_across, distributed",
             align
         )),
     }
@@ -230,16 +229,10 @@ pub(crate) fn parse_horizontal_alignment(align: &str) -> Result<FormatAlign, Str
 pub(crate) fn parse_vertical_alignment(align: &str) -> Result<FormatAlign, String> {
     match align.to_lowercase().as_str() {
         "top" => Ok(FormatAlign::Top),
-        "center" | "vcenter" | "vertical_center" | "verticalcenter" => {
-            Ok(FormatAlign::VerticalCenter)
-        }
+        "center" => Ok(FormatAlign::VerticalCenter),
         "bottom" => Ok(FormatAlign::Bottom),
-        "justify" | "vjustify" | "vertical_justify" | "verticaljustify" => {
-            Ok(FormatAlign::VerticalJustify)
-        }
-        "distributed" | "vdistributed" | "vertical_distributed" | "verticaldistributed" => {
-            Ok(FormatAlign::VerticalDistributed)
-        }
+        "justify" => Ok(FormatAlign::VerticalJustify),
+        "distributed" => Ok(FormatAlign::VerticalDistributed),
         _ => Err(format!(
             "Unknown vertical alignment '{}'. Valid values: top, center, bottom, \
              justify, distributed",

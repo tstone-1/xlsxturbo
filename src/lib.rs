@@ -997,8 +997,8 @@ mod tests {
             FormatAlign::Bottom
         );
         assert_eq!(
-            parse_vertical_alignment("vertical_center").unwrap(),
-            FormatAlign::VerticalCenter
+            parse_vertical_alignment("justify").unwrap(),
+            FormatAlign::VerticalJustify
         );
         assert_eq!(parse_vertical_alignment("TOP").unwrap(), FormatAlign::Top);
     }
@@ -1008,5 +1008,6 @@ mod tests {
         assert!(parse_vertical_alignment("").is_err());
         assert!(parse_vertical_alignment("left").is_err());
         assert!(parse_vertical_alignment("right").is_err());
+        assert!(parse_vertical_alignment("general").is_err());
     }
 }
