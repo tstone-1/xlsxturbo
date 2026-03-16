@@ -5,7 +5,7 @@ use chrono::Timelike;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::Py;
-use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatBorder, TableStyle};
+use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatAlign, FormatBorder, TableStyle};
 use std::collections::HashMap;
 
 /// Generate a table style lookup match from a list of (string, variant) pairs.
@@ -207,6 +207,47 @@ pub(crate) fn parse_border_style(style: &str) -> Result<FormatBorder, String> {
     }
 }
 
+/// Parse horizontal alignment string into `FormatAlign` enum value.
+pub(crate) fn parse_horizontal_alignment(align: &str) -> Result<FormatAlign, String> {
+    match align.to_lowercase().as_str() {
+        "left" => Ok(FormatAlign::Left),
+        "center" => Ok(FormatAlign::Center),
+        "right" => Ok(FormatAlign::Right),
+        "fill" => Ok(FormatAlign::Fill),
+        "justify" => Ok(FormatAlign::Justify),
+        "center_across" | "centeracross" => Ok(FormatAlign::CenterAcross),
+        "distributed" => Ok(FormatAlign::Distributed),
+        "general" => Ok(FormatAlign::General),
+        _ => Err(format!(
+            "Unknown horizontal alignment '{}'. Valid values: left, center, right, \
+             fill, justify, center_across, distributed, general",
+            align
+        )),
+    }
+}
+
+/// Parse vertical alignment string into `FormatAlign` enum value.
+pub(crate) fn parse_vertical_alignment(align: &str) -> Result<FormatAlign, String> {
+    match align.to_lowercase().as_str() {
+        "top" => Ok(FormatAlign::Top),
+        "center" | "vcenter" | "vertical_center" | "verticalcenter" => {
+            Ok(FormatAlign::VerticalCenter)
+        }
+        "bottom" => Ok(FormatAlign::Bottom),
+        "justify" | "vjustify" | "vertical_justify" | "verticaljustify" => {
+            Ok(FormatAlign::VerticalJustify)
+        }
+        "distributed" | "vdistributed" | "vertical_distributed" | "verticaldistributed" => {
+            Ok(FormatAlign::VerticalDistributed)
+        }
+        _ => Err(format!(
+            "Unknown vertical alignment '{}'. Valid values: top, center, bottom, \
+             justify, distributed",
+            align
+        )),
+    }
+}
+
 /// Parse color string (hex #RRGGBB or named color) to u32
 pub(crate) fn parse_color(color_str: &str) -> Result<u32, String> {
     let color = color_str.trim();
@@ -358,6 +399,28 @@ fn parse_format_dict(
         if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
             let color = parse_color(&color_str)?;
             format = format.set_border_color(color);
+        }
+    }
+
+    // Text alignment
+    if let Some(align_obj) = fmt_dict.get("align_horizontal") {
+        if let Ok(align_str) = align_obj.bind(py).extract::<String>() {
+            let align = parse_horizontal_alignment(&align_str)?;
+            format = format.set_align(align);
+        }
+    }
+
+    if let Some(align_obj) = fmt_dict.get("align_vertical") {
+        if let Ok(align_str) = align_obj.bind(py).extract::<String>() {
+            let align = parse_vertical_alignment(&align_str)?;
+            format = format.set_align(align);
+        }
+    }
+
+    if let Some(wrap_obj) = fmt_dict.get("wrap_text") {
+        let wrap: bool = wrap_obj.bind(py).extract().unwrap_or(false);
+        if wrap {
+            format = format.set_text_wrap();
         }
     }
 

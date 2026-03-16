@@ -6,6 +6,7 @@ Tests for xlsxturbo features (v0.6.0+):
 - Formula columns, merged cells, hyperlinks (v0.9.0)
 - Comments, validations, rich_text, images (v0.10.0)
 - Per-side border styles (v0.12.0)
+- Text alignment (v0.12.0)
 """
 
 import xlsxturbo
@@ -2532,6 +2533,259 @@ class TestBorderStyles:
             os.unlink(path)
 
 
+class TestTextAlignment:
+    """Tests for text alignment (v0.12.0)"""
+
+    def test_column_format_horizontal_center(self):
+        """align_horizontal='center' centers cell text"""
+        df = pd.DataFrame({"A": ["hello", "world"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_horizontal": "center"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.horizontal == "center"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_column_format_horizontal_right(self):
+        """align_horizontal='right' right-aligns cell text"""
+        df = pd.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_horizontal": "right"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.horizontal == "right"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_column_format_vertical_top(self):
+        """align_vertical='top' top-aligns cell text"""
+        df = pd.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_vertical": "top"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.vertical == "top"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_column_format_vertical_center(self):
+        """align_vertical='center' vertically centers cell text"""
+        df = pd.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_vertical": "center"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.vertical == "center"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_column_format_wrap_text(self):
+        """wrap_text=True enables text wrapping"""
+        df = pd.DataFrame({"A": ["hello world this is a long text"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"wrap_text": True}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.wrapText is True
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_column_format_combined_alignment(self):
+        """Horizontal + vertical + wrap_text together"""
+        df = pd.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_horizontal": "center", "align_vertical": "top", "wrap_text": True}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                cell = ws["A2"]
+                assert cell.alignment.horizontal == "center"
+                assert cell.alignment.vertical == "top"
+                assert cell.alignment.wrapText is True
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_header_format_alignment(self):
+        """header_format supports alignment"""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, header_format={
+                "bold": True, "align_horizontal": "center", "wrap_text": True
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                header = ws["A1"]
+                assert header.alignment.horizontal == "center"
+                assert header.alignment.wrapText is True
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_merged_range_alignment(self):
+        """merged_ranges format supports alignment"""
+        df = pd.DataFrame({"A": [1], "B": [2], "C": [3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, merged_ranges=[
+                ("A1:C1", "Title", {"bold": True, "align_horizontal": "left"})
+            ])
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].alignment.horizontal == "left"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_merged_range_default_center(self):
+        """merged_ranges without format still auto-center"""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, merged_ranges=[
+                ("A1:B1", "Title")
+            ])
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].alignment.horizontal == "center"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cells_alignment(self):
+        """cells parameter supports alignment options"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, cells={
+                "C1": {"value": "Header", "align_horizontal": "center", "wrap_text": True}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                cell = ws["C1"]
+                assert cell.value == "Header"
+                assert cell.alignment.horizontal == "center"
+                assert cell.alignment.wrapText is True
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_alignment_with_wildcard(self):
+        """Alignment works with wildcard column patterns"""
+        df = pd.DataFrame({"desc_a": ["x"], "desc_b": ["y"], "num": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "desc_*": {"align_horizontal": "left", "wrap_text": True}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.horizontal == "left"
+                assert ws["A2"].alignment.wrapText is True
+                assert ws["B2"].alignment.horizontal == "left"
+                assert ws["C2"].alignment.horizontal is None
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_alignment_with_border(self):
+        """Alignment combines with border styles"""
+        df = pd.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_horizontal": "center", "border": "thin"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                cell = ws["A2"]
+                assert cell.alignment.horizontal == "center"
+                assert cell.border.left.style == "thin"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_invalid_horizontal_alignment_raises(self):
+        """Invalid horizontal alignment raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="Unknown horizontal alignment"):
+                xlsxturbo.df_to_xlsx(df, path, column_formats={
+                    "A": {"align_horizontal": "middle"}
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_invalid_vertical_alignment_raises(self):
+        """Invalid vertical alignment raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="Unknown vertical alignment"):
+                xlsxturbo.df_to_xlsx(df, path, column_formats={
+                    "A": {"align_vertical": "left"}
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_alignment_with_polars(self):
+        """Alignment works with polars DataFrames"""
+        df = pl.DataFrame({"A": ["hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, column_formats={
+                "A": {"align_horizontal": "center"}
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].alignment.horizontal == "center"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -2562,6 +2816,7 @@ if __name__ == "__main__":
         TestDefinedNames,
         TestCells,
         TestBorderStyles,
+        TestTextAlignment,
     ]
 
     failed = 0

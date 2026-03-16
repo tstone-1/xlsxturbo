@@ -205,6 +205,9 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - border (bool|str): True = thin all sides, or style name
 # - border_left/right/top/bottom (str): Per-side border style
 # - border_color (str): Color for all borders
+# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify'
+# - align_vertical (str): 'top', 'center', 'bottom'
+# - wrap_text (bool): Enable text wrapping within cell
 ```
 
 ### Column Formatting
@@ -252,6 +255,9 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
 # Border styles: thin, medium, thick, dashed, dotted, double, hair,
 #   medium_dashed, dash_dot, medium_dash_dot, dash_dot_dot,
 #   medium_dash_dot_dot, slant_dash_dot
+# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify'
+# - align_vertical (str): 'top', 'center', 'bottom'
+# - wrap_text (bool): Enable text wrapping within cell
 
 # First matching pattern wins (order preserved)
 xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
