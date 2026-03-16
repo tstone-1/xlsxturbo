@@ -233,7 +233,7 @@ def df_to_xlsx(
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             First matching pattern wins (order preserved).
         conditional_formats: Dict mapping column names to conditional format configs.
-            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
+            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'.
             Example: {'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}
         formula_columns: Dict mapping new column names to Excel formula templates.
             Use {row} placeholder for the current row number (1-based Excel row).
@@ -307,7 +307,7 @@ def dfs_to_xlsx(
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
         conditional_formats: Dict mapping column names to conditional format configs.
-            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'.
+            Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'.
         formula_columns: Dict mapping new column names to Excel formula templates.
             Use {row} placeholder for the current row number (1-based Excel row).
         merged_ranges: List of (range, text) or (range, text, format) tuples to merge cells.
