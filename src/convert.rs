@@ -29,76 +29,6 @@ const MAX_SAFE_INT: i64 = 1 << 53;
 pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
 pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
 
-/// Compute approximate content widths for each column from headers + DataFrame data.
-/// Uses string representation lengths as a proxy for Excel's autofit calculation.
-fn compute_content_widths(
-    _py: Python<'_>,
-    columns: &[String],
-    df: &Bound<'_, PyAny>,
-    include_header: bool,
-    is_polars: bool,
-) -> Vec<f64> {
-    let col_count = columns.len();
-    let mut max_lens = vec![0usize; col_count];
-
-    // Header lengths
-    if include_header {
-        for (i, name) in columns.iter().enumerate() {
-            max_lens[i] = name.len();
-        }
-    }
-
-    // Sample data lengths (check all rows for accuracy)
-    let row_count: usize = df
-        .getattr("shape")
-        .and_then(|s| s.get_item(0))
-        .and_then(|v| v.extract())
-        .unwrap_or(0);
-
-    if is_polars {
-        if let Ok(rows) = df.call_method0("iter_rows") {
-            for row_result in rows.try_iter().unwrap().flatten() {
-                if let Ok(row_iter) = row_result.try_iter() {
-                    for (col_idx, val) in row_iter.flatten().enumerate() {
-                        if col_idx < col_count {
-                            let len = val.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
-                            if len > max_lens[col_idx] {
-                                max_lens[col_idx] = len;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        // Pandas: use .values
-        if let Ok(values) = df.getattr("values") {
-            for i in 0..row_count {
-                if let Ok(row) = values.get_item(i) {
-                    for (col_idx, max_len) in max_lens.iter_mut().enumerate() {
-                        if let Ok(val) = row.get_item(col_idx) {
-                            let len = val.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
-                            if len > *max_len {
-                                *max_len = len;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Convert character counts to approximate Excel column widths
-    // Excel width ≈ max(len + 1, 8.43) with some padding
-    max_lens
-        .iter()
-        .map(|&len| {
-            let width = len as f64 + 1.0;
-            width.max(8.43) // Excel default minimum
-        })
-        .collect()
-}
-
 /// Write a string to a cell, applying column format if provided
 fn write_str(
     worksheet: &mut Worksheet,
@@ -610,10 +540,17 @@ pub(crate) fn write_sheet_data(
         vec![None; columns.len()]
     };
 
+    // Track max content lengths for autofit+cap (only when both are active)
+    let track_widths = autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all"));
+    let mut max_lens = vec![0usize; columns.len()];
+
     // Write header if requested
     if include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
             let col = col_idx as u16; // safe: col_count already validated via u16::try_from
+            if track_widths {
+                max_lens[col_idx] = col_name.len();
+            }
             if let Some(ref fmt) = header_fmt {
                 worksheet
                     .write_string_with_format(row_idx, col, col_name, fmt)
@@ -655,6 +592,12 @@ pub(crate) fn write_sheet_data(
 
             for (col_idx, value) in row_tuple.iter().enumerate() {
                 let col = col_idx as u16; // safe: col_count already validated via u16::try_from
+                if track_widths {
+                    let len = value.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                    if len > max_lens[col_idx] {
+                        max_lens[col_idx] = len;
+                    }
+                }
                 write_py_value_with_format(
                     worksheet,
                     row_idx,
@@ -678,10 +621,18 @@ pub(crate) fn write_sheet_data(
                 .get_item(i)
                 .map_err(|e| format!("Failed to get row {}: {}", i, e))?;
 
+            #[allow(clippy::needless_range_loop)]
             for col_idx in 0..columns.len() {
                 let value = row
                     .get_item(col_idx)
                     .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
+
+                if track_widths {
+                    let len = value.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                    if len > max_lens[col_idx] {
+                        max_lens[col_idx] = len;
+                    }
+                }
 
                 let col = col_idx as u16; // safe: col_count already validated via u16::try_from
                 write_py_value_with_format(
@@ -700,9 +651,12 @@ pub(crate) fn write_sheet_data(
         }
     }
 
-    // Compute content widths for autofit+cap (only when both are active)
-    let content_widths = if autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all")) {
-        compute_content_widths(py, &columns, df, include_header, is_polars)
+    // Convert tracked content lengths to approximate Excel column widths
+    let content_widths: Vec<f64> = if track_widths {
+        max_lens
+            .iter()
+            .map(|&len| (len as f64 + 1.0).max(8.43))
+            .collect()
     } else {
         Vec::new()
     };
