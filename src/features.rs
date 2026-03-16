@@ -927,10 +927,16 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 .get_item("align_horizontal")?
                 .map(|v| v.extract::<String>())
                 .transpose()?;
+            if let Some(ref ah) = align_h {
+                parse_horizontal_alignment(ah).map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
             let align_v: Option<String> = d
                 .get_item("align_vertical")?
                 .map(|v| v.extract::<String>())
                 .transpose()?;
+            if let Some(ref av) = align_v {
+                parse_vertical_alignment(av).map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
             let wrap: bool = d
                 .get_item("wrap_text")?
                 .map(|v| v.extract::<bool>().unwrap_or(false))

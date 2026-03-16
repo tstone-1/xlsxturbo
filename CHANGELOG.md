@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Example: `column_formats={'col': {'border_right': 'thick'}}`
 - **Text alignment** - `align_horizontal`, `align_vertical`, and `wrap_text` formatting options
   - Available in `header_format`, `column_formats`, `merged_ranges`, and `cells`
-  - Horizontal: `'left'`, `'center'`, `'right'`, `'fill'`, `'justify'`, `'center_across'`, `'distributed'`, `'general'`
+  - Horizontal: `'left'`, `'center'`, `'right'`, `'fill'`, `'justify'`, `'center_across'`, `'distributed'`
   - Vertical: `'top'`, `'center'`, `'bottom'`, `'justify'`, `'distributed'`
   - `wrap_text: True` enables text wrapping within cells
   - Example: `column_formats={'description': {'align_horizontal': 'left', 'wrap_text': True}}`
