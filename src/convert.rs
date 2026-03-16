@@ -684,9 +684,9 @@ fn apply_worksheet_features(
         return Ok(col_count);
     }
 
-    // Add Excel Table if requested (requires at least one data row)
+    // Add Excel Table if requested (requires header + at least one data row)
     if let Some(style_name) = table_style {
-        if row_count > 0 {
+        if row_count > 0 && include_header {
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
