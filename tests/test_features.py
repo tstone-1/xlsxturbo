@@ -552,6 +552,42 @@ class TestEdgeCases:
         finally:
             os.unlink(path)
 
+    def test_table_style_skipped_when_header_false(self):
+        """table_style is skipped when header=False (tables require headers)"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, header=False, table_style="Medium2")
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A1"].value == 1  # data in row 1, no header
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_dfs_per_sheet_header_false_with_global_table_style(self):
+        """Per-sheet header=False skips table even with global table_style"""
+        df1 = pd.DataFrame({"A": [1]})
+        df2 = pd.DataFrame({"B": [2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx([
+                (df1, "WithHeader"),
+                (df2, "NoHeader", {"header": False}),
+            ], path, table_style="Medium2")
+            assert os.path.exists(path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                # WithHeader sheet should have table
+                assert wb["WithHeader"]["A1"].value == "A"
+                # NoHeader sheet should have data in row 1
+                assert wb["NoHeader"]["A1"].value == 2
+                wb.close()
+        finally:
+            os.unlink(path)
+
 
 class TestDateOrder:
     """Tests for date_order parameter in csv_to_xlsx"""
