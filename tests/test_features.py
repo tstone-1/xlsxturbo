@@ -109,6 +109,50 @@ class TestColumnWidthCap:
             os.unlink(path)
 
 
+    def test_autofit_with_all_cap(self):
+        """autofit=True + _all caps autofit widths instead of overriding"""
+        df = pd.DataFrame({
+            "Short": ["ab", "cd"],
+            "VeryLong": ["A" * 100, "B" * 80],
+            "Medium": ["hello world", "test data"],
+        })
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, autofit=True, column_widths={"_all": 25})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                w_short = ws.column_dimensions["A"].width or 0
+                w_long = ws.column_dimensions["B"].width or 0
+                w_med = ws.column_dimensions["C"].width or 0
+                # Short column should be narrow (content-fitted, not inflated to 25)
+                assert w_short < 15, f"Short col width {w_short} should be < 15"
+                # VeryLong column should be capped at ~25
+                assert w_long <= 26, f"VeryLong col width {w_long} should be <= 26"
+                # Medium column should be content-fitted (< 25)
+                assert w_med < 20, f"Medium col width {w_med} should be < 20"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_autofit_with_all_cap_polars(self):
+        """autofit + _all cap works with polars DataFrames"""
+        df = pl.DataFrame({"Short": ["x"], "Long": ["A" * 80]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, autofit=True, column_widths={"_all": 20})
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                w_short = ws.column_dimensions["A"].width or 0
+                w_long = ws.column_dimensions["B"].width or 0
+                assert w_short < 15, f"Short col width {w_short} should be < 15"
+                assert w_long <= 21, f"Long col width {w_long} should be <= 21"
+                wb.close()
+        finally:
+            os.unlink(path)
+
+
 class TestTableName:
     """Tests for table_name parameter"""
 
