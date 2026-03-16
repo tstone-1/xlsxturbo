@@ -237,14 +237,23 @@ pub(crate) fn extract_conditional_formats(
         // Accept either a single dict or a list of dicts
         if let Ok(list) = fmt_value.cast::<pyo3::types::PyList>() {
             let mut configs = Vec::new();
-            for item in list.iter() {
-                if let Ok(d) = item.cast::<pyo3::types::PyDict>() {
-                    configs.push(pydict_to_hashmap(d)?);
-                }
+            for (i, item) in list.iter().enumerate() {
+                let d = item.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "conditional_formats['{}']: list item {} must be a dict",
+                        col_str, i
+                    ))
+                })?;
+                configs.push(pydict_to_hashmap(d)?);
             }
             cond_fmts.insert(col_str, configs);
         } else if let Ok(inner_dict) = fmt_value.cast::<pyo3::types::PyDict>() {
             cond_fmts.insert(col_str, vec![pydict_to_hashmap(inner_dict)?]);
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "conditional_formats['{}']: value must be a dict or list of dicts",
+                col_str
+            )));
         }
     }
     Ok(cond_fmts)
@@ -1266,25 +1275,42 @@ fn apply_single_conditional_format(
                 }
                 _ => {
                     // Single-value comparison rules (equal to, greater than, etc.)
-                    let value = extract_cell_value(py, config, col_pattern)?;
-                    let rule = match criteria_lower.as_str() {
-                        "equal_to" | "equal to" | "==" | "eq" => {
-                            ConditionalFormatCellRule::EqualTo(value)
-                        }
-                        "not_equal_to" | "not equal to" | "!=" | "ne" => {
-                            ConditionalFormatCellRule::NotEqualTo(value)
-                        }
-                        "greater_than" | "greater than" | ">" | "gt" => {
-                            ConditionalFormatCellRule::GreaterThan(value)
-                        }
-                        "less_than" | "less than" | "<" | "lt" => {
-                            ConditionalFormatCellRule::LessThan(value)
-                        }
+                    // Build rule with proper type to preserve numeric vs string in Excel
+                    let value_obj = config.get("value").ok_or_else(|| {
+                        format!(
+                            "conditional_formats['{}']: missing 'value' key",
+                            col_pattern
+                        )
+                    })?;
+                    let bound = value_obj.bind(py);
+
+                    macro_rules! make_rule {
+                        ($variant:ident) => {
+                            if let Ok(v) = bound.extract::<f64>() {
+                                ConditionalFormatCell::new()
+                                    .set_rule(ConditionalFormatCellRule::$variant(v))
+                            } else if let Ok(s) = bound.extract::<String>() {
+                                ConditionalFormatCell::new()
+                                    .set_rule(ConditionalFormatCellRule::$variant(s))
+                            } else {
+                                return Err(format!(
+                                    "conditional_formats['{}']: 'value' must be a string or number",
+                                    col_pattern
+                                ));
+                            }
+                        };
+                    }
+
+                    let mut cf = match criteria_lower.as_str() {
+                        "equal_to" | "equal to" | "==" | "eq" => make_rule!(EqualTo),
+                        "not_equal_to" | "not equal to" | "!=" | "ne" => make_rule!(NotEqualTo),
+                        "greater_than" | "greater than" | ">" | "gt" => make_rule!(GreaterThan),
+                        "less_than" | "less than" | "<" | "lt" => make_rule!(LessThan),
                         "greater_than_or_equal_to" | "greater than or equal to" | ">=" | "gte" => {
-                            ConditionalFormatCellRule::GreaterThanOrEqualTo(value)
+                            make_rule!(GreaterThanOrEqualTo)
                         }
                         "less_than_or_equal_to" | "less than or equal to" | "<=" | "lte" => {
-                            ConditionalFormatCellRule::LessThanOrEqualTo(value)
+                            make_rule!(LessThanOrEqualTo)
                         }
                         _ => {
                             return Err(format!(
@@ -1297,7 +1323,6 @@ fn apply_single_conditional_format(
                             ))
                         }
                     };
-                    let mut cf = ConditionalFormatCell::new().set_rule(rule);
                     if let Some(f) = fmt {
                         cf = cf.set_format(f);
                     }
@@ -1368,34 +1393,6 @@ fn extract_f64_value(
                 col_pattern, key, e
             )
         })
-}
-
-/// Extract a cell comparison value (string or number) from config
-fn extract_cell_value(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-) -> Result<String, String> {
-    let obj = config.get("value").ok_or_else(|| {
-        format!(
-            "conditional_formats['{}']: missing 'value' key",
-            col_pattern
-        )
-    })?;
-    let bound = obj.bind(py);
-    // Try numeric first, then string
-    if let Ok(v) = bound.extract::<f64>() {
-        Ok(v.to_string())
-    } else if let Ok(v) = bound.extract::<i64>() {
-        Ok(v.to_string())
-    } else if let Ok(s) = bound.extract::<String>() {
-        Ok(format!("\"{}\"", s.replace('"', "\"\"")))
-    } else {
-        Err(format!(
-            "conditional_formats['{}']: 'value' must be a string or number",
-            col_pattern
-        ))
-    }
 }
 
 /// Apply conditional formats to a worksheet

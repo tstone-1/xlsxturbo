@@ -3072,6 +3072,141 @@ class TestCellConditionalFormat:
         finally:
             os.unlink(path)
 
+    def test_cell_not_equal_to(self):
+        """not_equal_to criteria"""
+        df = pd.DataFrame({"A": ["ok", "fail", "ok"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "A": {"type": "cell", "criteria": "not_equal_to", "value": "ok",
+                       "format": {"bg_color": "#FF0000"}}
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_less_than_or_equal_to(self):
+        """less_than_or_equal_to criteria"""
+        df = pd.DataFrame({"A": [1, 5, 10]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "A": {"type": "cell", "criteria": "less_than_or_equal_to", "value": 5,
+                       "format": {"bold": True}}
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_not_containing(self):
+        """not_containing criteria"""
+        df = pd.DataFrame({"A": ["hello world", "goodbye", "hello"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "A": {"type": "cell", "criteria": "not_containing", "value": "hello",
+                       "format": {"italic": True}}
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_without_format_key(self):
+        """Cell rule without format key still works (no styling applied)"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "A": {"type": "cell", "criteria": "greater_than", "value": 1}
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_missing_value_raises(self):
+        """Missing value key for value-requiring criteria raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="missing 'value'"):
+                xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                    "A": {"type": "cell", "criteria": "greater_than",
+                           "format": {"bold": True}}
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_cell_numeric_comparison_correct(self):
+        """Numeric values produce numeric (not string) comparisons in Excel"""
+        df = pd.DataFrame({"score": [8, 50, 70, 100]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "score": {
+                    "type": "cell",
+                    "criteria": "greater_than",
+                    "value": 70,
+                    "format": {"bg_color": "#00FF00"}
+                }
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                cf_rules = ws.conditional_formatting
+                assert len(list(cf_rules)) > 0
+                rule = list(cf_rules)[0]
+                cf = rule.rules[0]
+                assert cf.type == "cellIs"
+                assert cf.operator == "greaterThan"
+                assert cf.formula == ['70']
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_cell_string_comparison_correct(self):
+        """String values produce string comparisons in Excel"""
+        df = pd.DataFrame({"status": ["OK", "ERROR", "OK"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "status": {
+                    "type": "cell",
+                    "criteria": "equal_to",
+                    "value": "ERROR",
+                    "format": {"bg_color": "#FF0000"}
+                }
+            })
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                cf_rules = ws.conditional_formatting
+                assert len(list(cf_rules)) > 0
+                rule = list(cf_rules)[0]
+                cf = rule.rules[0]
+                assert cf.type == "cellIs"
+                assert cf.operator == "equal"
+                assert cf.formula == ['"ERROR"']
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_invalid_list_item_raises(self):
+        """Non-dict item in conditional format list raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(TypeError, match="list item .* must be a dict"):
+                xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                    "A": [{"type": "cell", "criteria": "equal_to", "value": 1,
+                            "format": {"bold": True}}, "not_a_dict"]
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
 
 if __name__ == "__main__":
     import sys
