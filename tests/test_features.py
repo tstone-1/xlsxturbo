@@ -7,6 +7,7 @@ Tests for xlsxturbo features (v0.6.0+):
 - Comments, validations, rich_text, images (v0.10.0)
 - Per-side border styles (v0.12.0)
 - Text alignment (v0.12.0)
+- Rule-based conditional formatting (v0.12.0)
 """
 
 import xlsxturbo
@@ -2786,6 +2787,292 @@ class TestTextAlignment:
             os.unlink(path)
 
 
+class TestCellConditionalFormat:
+    """Tests for rule-based conditional formatting (v0.12.0)"""
+
+    def test_cell_equal_to_string(self):
+        """type='cell' with criteria='equal_to' highlights matching string cells"""
+        df = pd.DataFrame({"status": ["OK", "ERROR", "OK", "ERROR"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "status": {
+                    "type": "cell",
+                    "criteria": "equal_to",
+                    "value": "ERROR",
+                    "format": {"bg_color": "#FF0000", "bold": True}
+                }
+            })
+            assert os.path.exists(path)
+            assert os.path.getsize(path) > 0
+        finally:
+            os.unlink(path)
+
+    def test_cell_equal_to_number(self):
+        """type='cell' with numeric value"""
+        df = pd.DataFrame({"score": [50, 75, 100, 25]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "score": {
+                    "type": "cell",
+                    "criteria": "greater_than",
+                    "value": 70,
+                    "format": {"bg_color": "#00FF00"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_between(self):
+        """between criteria with min_value and max_value"""
+        df = pd.DataFrame({"temp": [10, 20, 30, 40, 50]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "temp": {
+                    "type": "cell",
+                    "criteria": "between",
+                    "min_value": 20,
+                    "max_value": 40,
+                    "format": {"bg_color": "#FFFF00"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_not_between(self):
+        """not_between criteria"""
+        df = pd.DataFrame({"val": [1, 5, 10, 15]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "val": {
+                    "type": "cell",
+                    "criteria": "not_between",
+                    "min_value": 3,
+                    "max_value": 12,
+                    "format": {"font_color": "red"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_multiple_rules_list(self):
+        """Multiple rules on one column via list"""
+        df = pd.DataFrame({"severity": ["HIGH", "MEDIUM", "LOW", "HIGH"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "severity": [
+                    {"type": "cell", "criteria": "equal_to", "value": "HIGH",
+                     "format": {"bg_color": "#FF0000"}},
+                    {"type": "cell", "criteria": "equal_to", "value": "MEDIUM",
+                     "format": {"bg_color": "#FFA500"}},
+                    {"type": "cell", "criteria": "equal_to", "value": "LOW",
+                     "format": {"bg_color": "#FFFF00"}},
+                ]
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_text_containing(self):
+        """criteria='containing' for text match"""
+        df = pd.DataFrame({"desc": ["error occurred", "all good", "error found"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "desc": {
+                    "type": "cell",
+                    "criteria": "containing",
+                    "value": "error",
+                    "format": {"bg_color": "#FF0000"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_text_begins_with(self):
+        """criteria='begins_with' for text match"""
+        df = pd.DataFrame({"code": ["ERR-001", "OK-002", "ERR-003"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "code": {
+                    "type": "cell",
+                    "criteria": "begins_with",
+                    "value": "ERR",
+                    "format": {"font_color": "red"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_text_ends_with(self):
+        """criteria='ends_with' for text match"""
+        df = pd.DataFrame({"file": ["report.pdf", "data.csv", "notes.pdf"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "file": {
+                    "type": "cell",
+                    "criteria": "ends_with",
+                    "value": ".pdf",
+                    "format": {"italic": True}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_blanks(self):
+        """criteria='blanks' highlights blank cells"""
+        df = pd.DataFrame({"val": [1, None, 3, None]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "val": {
+                    "type": "cell",
+                    "criteria": "blanks",
+                    "format": {"bg_color": "#CCCCCC"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_no_blanks(self):
+        """criteria='no_blanks' highlights non-blank cells"""
+        df = pd.DataFrame({"val": [1, None, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "val": {
+                    "type": "cell",
+                    "criteria": "no_blanks",
+                    "format": {"bg_color": "#00FF00"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_backward_compat_single_dict(self):
+        """Existing single-dict format still works (backward compat)"""
+        df = pd.DataFrame({"score": [10, 50, 90]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_less_than(self):
+        """less_than criteria"""
+        df = pd.DataFrame({"price": [10.5, 20.0, 5.0]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "price": {
+                    "type": "cell",
+                    "criteria": "less_than",
+                    "value": 15,
+                    "format": {"bg_color": "#FF0000"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_with_pattern_matching(self):
+        """Cell conditional format works with wildcard patterns"""
+        df = pd.DataFrame({"score_a": [50], "score_b": [80], "name": ["x"]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "score_*": {
+                    "type": "cell",
+                    "criteria": "greater_than",
+                    "value": 60,
+                    "format": {"bold": True}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_cell_format_with_border(self):
+        """Cell conditional format can include border styling"""
+        df = pd.DataFrame({"val": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "val": {
+                    "type": "cell",
+                    "criteria": "equal_to",
+                    "value": 2,
+                    "format": {"bg_color": "#FFFF00", "border": "thin"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_invalid_criteria_raises(self):
+        """Invalid criteria raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="Unknown criteria"):
+                xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                    "A": {"type": "cell", "criteria": "invalid", "value": 1,
+                           "format": {"bold": True}}
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_missing_criteria_raises(self):
+        """Missing criteria key raises ValueError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            import pytest
+            with pytest.raises(ValueError, match="requires 'criteria'"):
+                xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                    "A": {"type": "cell", "value": 1, "format": {"bold": True}}
+                })
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_cell_with_polars(self):
+        """Cell conditional format works with polars"""
+        df = pl.DataFrame({"score": [50, 75, 100]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, conditional_formats={
+                "score": {
+                    "type": "cell",
+                    "criteria": "greater_than_or_equal_to",
+                    "value": 75,
+                    "format": {"bg_color": "#00FF00"}
+                }
+            })
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -2817,6 +3104,7 @@ if __name__ == "__main__":
         TestCells,
         TestBorderStyles,
         TestTextAlignment,
+        TestCellConditionalFormat,
     ]
 
     failed = 0

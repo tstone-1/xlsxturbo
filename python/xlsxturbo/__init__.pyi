@@ -50,8 +50,12 @@ class ConditionalFormat(TypedDict, total=False):
     - '3_color_scale': Gradient with min_color, mid_color, max_color
     - 'data_bar': In-cell bar chart
     - 'icon_set': Traffic lights, arrows, or other icons
+    - 'cell': Rule-based formatting (highlight cells matching a condition)
+
+    For 'cell' type, use 'criteria' to specify the condition and 'format' for styling.
+    Multiple rules on one column: pass a list of ConditionalFormat dicts instead of a single dict.
     """
-    type: str  # Required: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set'
+    type: str  # Required: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'
     # For color scales:
     min_color: str   # '#RRGGBB' or named color for minimum value
     mid_color: str   # '#RRGGBB' or named color for midpoint (3_color_scale only)
@@ -65,6 +69,14 @@ class ConditionalFormat(TypedDict, total=False):
     icon_type: str   # '3_arrows', '3_traffic_lights', '3_flags', '4_arrows', '5_arrows', etc. (see README for full list)
     reverse: bool    # Reverse icon order
     icons_only: bool # Show only icons, hide values
+    # For cell rules (type='cell'):
+    criteria: str    # 'equal_to', 'not_equal_to', 'greater_than', 'less_than', 'greater_than_or_equal_to',
+                     # 'less_than_or_equal_to', 'between', 'not_between', 'containing', 'not_containing',
+                     # 'begins_with', 'ends_with', 'blanks', 'no_blanks'
+    value: str | int | float  # Target value for comparison criteria
+    min_value: int | float    # Min value for 'between'/'not_between' criteria
+    max_value: int | float    # Max value for 'between'/'not_between' criteria
+    format: ColumnFormat      # Format to apply when condition is met (bg_color, font_color, bold, etc.)
 
 class CommentOptions(TypedDict, total=False):
     """Options for cell comments/notes.
@@ -133,7 +145,7 @@ class SheetOptions(TypedDict, total=False):
     table_name: str | None
     header_format: HeaderFormat | None
     column_formats: dict[str, ColumnFormat] | None  # Pattern -> format. Patterns: 'prefix*', '*suffix', '*contains*', exact
-    conditional_formats: dict[str, ConditionalFormat] | None  # Column name/pattern -> conditional format config
+    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None  # Column name/pattern -> conditional format config
     formula_columns: dict[str, str] | None  # Column name -> Excel formula template with {row} placeholder
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text) or (range, text, format)
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url) or (cell, url, display_text)
@@ -186,7 +198,7 @@ def df_to_xlsx(
     row_heights: dict[int, float] | None = None,
     constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
-    conditional_formats: dict[str, ConditionalFormat] | None = None,
+    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
     formula_columns: dict[str, str] | None = None,
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
@@ -263,7 +275,7 @@ def dfs_to_xlsx(
     row_heights: dict[int, float] | None = None,
     constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
-    conditional_formats: dict[str, ConditionalFormat] | None = None,
+    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
     formula_columns: dict[str, str] | None = None,
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
