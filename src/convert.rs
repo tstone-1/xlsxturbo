@@ -11,6 +11,7 @@ use crate::parse::{
 };
 use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
+    WriteConfig,
 };
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
@@ -334,7 +335,7 @@ pub(crate) fn write_py_value_with_format(
     let type_name = value
         .get_type()
         .name()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Failed to get type name: {}", e))?
         .to_string();
     if type_name == "NAType" || type_name == "NaTType" {
         return write_str(worksheet, row, col, "", column_format);
@@ -372,14 +373,22 @@ pub(crate) fn write_py_value_with_format(
             .and_then(|v| v.extract())
             .map_err(|e| format!("Failed to extract datetime second: {}", e))?;
 
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            if let Some(time) = chrono::NaiveTime::from_hms_opt(hour, minute, second) {
-                let dt = chrono::NaiveDateTime::new(date, time);
-                let excel_dt = naive_datetime_to_excel(dt);
-                let fmt = column_format.unwrap_or(datetime_format);
-                return write_num(worksheet, row, col, excel_dt, Some(fmt));
-            }
-        }
+        let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
+            format!(
+                "Invalid datetime date: year={}, month={}, day={}",
+                year, month, day
+            )
+        })?;
+        let time = chrono::NaiveTime::from_hms_opt(hour, minute, second).ok_or_else(|| {
+            format!(
+                "Invalid datetime time: hour={}, minute={}, second={}",
+                hour, minute, second
+            )
+        })?;
+        let dt = chrono::NaiveDateTime::new(date, time);
+        let excel_dt = naive_datetime_to_excel(dt);
+        let fmt = column_format.unwrap_or(datetime_format);
+        return write_num(worksheet, row, col, excel_dt, Some(fmt));
     }
 
     // Try date
@@ -397,11 +406,11 @@ pub(crate) fn write_py_value_with_format(
             .and_then(|v| v.extract())
             .map_err(|e| format!("Failed to extract date day: {}", e))?;
 
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            let excel_date = naive_date_to_excel(date);
-            let fmt = column_format.unwrap_or(date_format);
-            return write_num(worksheet, row, col, excel_date, Some(fmt));
-        }
+        let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .ok_or_else(|| format!("Invalid date: year={}, month={}, day={}", year, month, day))?;
+        let excel_date = naive_date_to_excel(date);
+        let fmt = column_format.unwrap_or(date_format);
+        return write_num(worksheet, row, col, excel_date, Some(fmt));
     }
 
     // Try integer
@@ -434,7 +443,10 @@ pub(crate) fn write_py_value_with_format(
     }
 
     // Fallback: convert to string
-    let s = value.str().map_err(|e| e.to_string())?.to_string();
+    let s = value
+        .str()
+        .map_err(|e| format!("Failed to convert value to string: {}", e))?
+        .to_string();
     write_str(worksheet, row, col, s, column_format)
 }
 
@@ -443,33 +455,26 @@ pub(crate) fn write_py_value_with_format(
 /// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
 /// (single-sheet) and `dfs_to_xlsx` (multi-sheet). The caller is responsible for
 /// creating the workbook/worksheet and saving.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_sheet_data(
     py: Python<'_>,
     worksheet: &mut Worksheet,
     df: &Bound<'_, PyAny>,
-    include_header: bool,
-    autofit: bool,
-    table_style: Option<&str>,
-    freeze_panes: bool,
-    table_name: Option<&str>,
-    row_heights: Option<&HashMap<u32, f64>>,
-    constant_memory: bool,
+    config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
 ) -> Result<(u32, u16), String> {
     // Warn if constant_memory is enabled with incompatible options
-    if constant_memory {
+    if config.constant_memory {
         let mut disabled: Vec<&str> = Vec::new();
-        if table_style.is_some() {
+        if config.table_style.is_some() {
             disabled.push("table_style");
         }
-        if freeze_panes {
+        if config.freeze_panes {
             disabled.push("freeze_panes");
         }
-        if autofit {
+        if config.autofit {
             disabled.push("autofit");
         }
-        if row_heights.is_some() {
+        if config.row_heights.is_some() {
             disabled.push("row_heights");
         }
         if opts.formula_columns.is_some() {
@@ -541,11 +546,11 @@ pub(crate) fn write_sheet_data(
     };
 
     // Track max content lengths for autofit+cap (only when both are active)
-    let track_widths = autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all"));
+    let track_widths = config.autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all"));
     let mut max_lens = vec![0usize; columns.len()];
 
     // Write header if requested
-    if include_header {
+    if config.include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
             let col = col_idx as u16; // safe: col_count already validated via u16::try_from
             if track_widths {
@@ -568,27 +573,34 @@ pub(crate) fn write_sheet_data(
     let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
         let shape = df
             .getattr("shape")
-            .map_err(|e: pyo3::PyErr| e.to_string())?;
-        let shape_tuple: (usize, usize) =
-            shape.extract().map_err(|e: pyo3::PyErr| e.to_string())?;
+            .map_err(|e| format!("Failed to get DataFrame shape: {}", e))?;
+        let shape_tuple: (usize, usize) = shape
+            .extract()
+            .map_err(|e| format!("Failed to extract DataFrame shape: {}", e))?;
         shape_tuple.0
     } else {
         df.call_method0("__len__")
-            .map_err(|e: pyo3::PyErr| e.to_string())?
+            .map_err(|e| format!("Failed to get DataFrame length: {}", e))?
             .extract()
-            .map_err(|e: pyo3::PyErr| e.to_string())?
+            .map_err(|e| format!("Failed to extract DataFrame length: {}", e))?
     };
 
     if is_polars {
         // Polars: iterate using rows()
-        let rows = df.call_method0("iter_rows").map_err(|e| e.to_string())?;
-        let iter = rows.try_iter().map_err(|e| e.to_string())?;
+        let rows = df
+            .call_method0("iter_rows")
+            .map_err(|e| format!("Failed to iterate polars rows: {}", e))?;
+        let iter = rows
+            .try_iter()
+            .map_err(|e| format!("Failed to create polars row iterator: {}", e))?;
         for row_result in iter {
-            let row = row_result.map_err(|e| e.to_string())?;
-            let row_iter = row.try_iter().map_err(|e| e.to_string())?;
+            let row = row_result.map_err(|e| format!("Failed to read polars row: {}", e))?;
+            let row_iter = row
+                .try_iter()
+                .map_err(|e| format!("Failed to iterate polars row values: {}", e))?;
             let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e: PyErr| e.to_string())?;
+                .map_err(|e| format!("Failed to collect polars row values: {}", e))?;
 
             for (col_idx, value) in row_tuple.iter().enumerate() {
                 let col = col_idx as u16; // safe: col_count already validated via u16::try_from
@@ -614,7 +626,9 @@ pub(crate) fn write_sheet_data(
         }
     } else {
         // Pandas: use .values for faster access
-        let values = df.getattr("values").map_err(|e| e.to_string())?;
+        let values = df
+            .getattr("values")
+            .map_err(|e| format!("Failed to access DataFrame.values: {}", e))?;
 
         for i in 0..row_count {
             let row = values
@@ -669,13 +683,7 @@ pub(crate) fn write_sheet_data(
         col_count,
         row_idx,
         row_count,
-        include_header,
-        autofit,
-        table_style,
-        freeze_panes,
-        table_name,
-        row_heights,
-        constant_memory,
+        config,
         header_fmt.as_ref(),
         &opts,
         &content_widths,
@@ -698,19 +706,13 @@ fn apply_worksheet_features(
     col_count: u16,
     last_row_idx: u32,
     row_count: usize,
-    include_header: bool,
-    autofit: bool,
-    table_style: Option<&str>,
-    freeze_panes: bool,
-    table_name: Option<&str>,
-    row_heights: Option<&HashMap<u32, f64>>,
-    constant_memory: bool,
+    config: &WriteConfig<'_>,
     header_fmt: Option<&Format>,
     opts: &EffectiveOpts<'_>,
     content_widths: &[f64],
 ) -> Result<u16, String> {
     // In constant_memory mode, only column widths (without autofit) are supported
-    if constant_memory {
+    if config.constant_memory {
         if let Some(widths) = opts.column_widths {
             apply_column_widths(worksheet, col_count, widths)?;
         }
@@ -718,12 +720,12 @@ fn apply_worksheet_features(
     }
 
     // Add Excel Table if requested (requires header + at least one data row)
-    if let Some(style_name) = table_style {
-        if row_count > 0 && include_header {
+    if let Some(style_name) = config.table_style {
+        if row_count > 0 && config.include_header {
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
-            if let Some(name) = table_name {
+            if let Some(name) = config.table_name {
                 let sanitized = sanitize_table_name(name);
                 table = table.set_name(&sanitized);
             }
@@ -737,7 +739,7 @@ fn apply_worksheet_features(
         }
     }
 
-    let data_row_start = if include_header { 1u32 } else { 0u32 };
+    let data_row_start = if config.include_header { 1u32 } else { 0u32 };
     let data_row_end = last_row_idx.saturating_sub(1);
     let has_data_rows = row_count > 0 && data_row_end >= data_row_start;
 
@@ -751,7 +753,7 @@ fn apply_worksheet_features(
                 col_count,
                 data_row_start,
                 data_row_end,
-                include_header,
+                config.include_header,
                 header_fmt,
             )?;
             total_col_count = col_count
@@ -775,7 +777,7 @@ fn apply_worksheet_features(
     }
 
     // Freeze panes (freeze header row)
-    if freeze_panes && include_header {
+    if config.freeze_panes && config.include_header {
         worksheet
             .set_freeze_panes(1, 0)
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
@@ -783,17 +785,17 @@ fn apply_worksheet_features(
 
     // Apply custom column widths and/or autofit
     if let Some(widths) = opts.column_widths {
-        if autofit && widths.contains_key("_all") {
+        if config.autofit && widths.contains_key("_all") {
             apply_column_widths_with_autofit_cap(worksheet, col_count, widths, content_widths)?;
         } else {
             apply_column_widths(worksheet, col_count, widths)?;
         }
-    } else if autofit {
+    } else if config.autofit {
         worksheet.autofit();
     }
 
     // Apply custom row heights
-    if let Some(heights) = row_heights {
+    if let Some(heights) = config.row_heights {
         for (&row_idx_h, &height) in heights.iter() {
             worksheet
                 .set_row_height(row_idx_h, height)
@@ -880,10 +882,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
         .set_name(sheet_name)
         .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
-    let result = write_sheet_data(
-        py,
-        worksheet,
-        df,
+    let config = WriteConfig {
         include_header,
         autofit,
         table_style,
@@ -891,8 +890,9 @@ pub(crate) fn convert_dataframe_to_xlsx(
         table_name,
         row_heights,
         constant_memory,
-        opts.as_effective(),
-    )?;
+    };
+
+    let result = write_sheet_data(py, worksheet, df, &config, opts.as_effective())?;
 
     // Apply defined names (workbook-level)
     if let Some(names) = defined_names {

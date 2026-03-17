@@ -14,6 +14,10 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Data validation** - dropdowns, number ranges, text length constraints
 - **Rich text** - multiple formats within a single cell
 - **Images** - embed PNG, JPEG, GIF, BMP in cells
+- **Defined names** - workbook-level named ranges for formulas and references
+- **Arbitrary cell writes** - write values to specific cells with optional formatting
+- **Border styles** - per-side borders (left, right, top, bottom) with 13 style options
+- **Text alignment** - horizontal and vertical alignment with text wrapping
 - **Auto-fit columns** - automatically adjust column widths to fit content
 - **Custom column widths** - set specific widths per column or cap all with _all
 - **Header styling** - bold, colors, font size for header row
@@ -345,6 +349,7 @@ Available per-sheet options:
 - `validations` (dict): Data validation rules (column name/pattern -> validation config)
 - `rich_text` (dict): Rich text with multiple formats (cell_ref -> list of segments)
 - `images` (dict): Embedded images (cell_ref -> path or {path, scale_width, scale_height, alt_text})
+- `cells` (dict): Arbitrary cell writes (cell_ref -> value or {value, num_format})
 
 ### Conditional Formatting
 
@@ -740,6 +745,97 @@ xlsxturbo.df_to_xlsx(df, "catalog.xlsx",
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
+### Defined Names
+
+Create workbook-level named ranges that can be referenced in formulas:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'product': ['Widget A', 'Widget B', 'Widget C'],
+    'price': [19.99, 29.99, 39.99],
+    'quantity': [100, 75, 50]
+})
+
+# Define named ranges for use in formulas or external references
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    defined_names={
+        "PriceRange": "=Sheet1!$B$2:$B$4",
+        "AllData": "=Sheet1!$A$1:$C$4"
+    }
+)
+
+# Works with multi-sheet workbooks too
+df1 = pd.DataFrame({'x': [1, 2, 3]})
+df2 = pd.DataFrame({'y': [4, 5, 6]})
+xlsxturbo.dfs_to_xlsx([
+    (df1, "Data"),
+    (df2, "Summary")
+], "multi.xlsx",
+    defined_names={
+        "DataRange": "=Data!$A$1:$A$4",
+        "SummaryRange": "=Summary!$A$1:$A$4"
+    }
+)
+```
+
+**Notes:**
+- Defined names are workbook-level (not per-sheet)
+- References must use Excel notation with sheet name: `=Sheet1!$A$1:$D$100`
+- Works with both `df_to_xlsx` and `dfs_to_xlsx`
+
+### Arbitrary Cell Writes
+
+Write values to specific cells, optionally overwriting DataFrame data:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'product': ['Widget A', 'Widget B'],
+    'price': [19.99, 29.99]
+})
+
+# Write simple values to specific cells
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    cells={
+        'D1': 'Notes',          # String
+        'D2': 'Reviewed',       # String
+        'D3': 42,               # Number
+        'E1': True              # Boolean
+    }
+)
+
+# Write with number formatting (e.g., force text format for long numbers)
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    cells={
+        'C5': 'Total',
+        'C6': {'value': '934728173849', 'num_format': '@'},  # Text format
+        'C7': {'value': 0.15, 'num_format': '0.00%'}         # Percentage
+    }
+)
+
+# Overwrite DataFrame cells (cells are written after data)
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    cells={
+        'A2': 'OVERRIDE',  # Replaces 'Widget A' in the output
+    }
+)
+```
+
+**Cell value format:**
+- Simple: `{'A1': 'text'}`, `{'B2': 42}`, `{'C3': True}`
+- With formatting: `{'A1': {'value': '...', 'num_format': '@'}}`
+- Additional format options: `align_horizontal`, `align_vertical`, `wrap_text`
+
+**Notes:**
+- Cells are written after all DataFrame data, so they can overwrite existing values
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
 ### Constant Memory Mode (Large Files)
 
 For very large files (millions of rows), use `constant_memory=True` to minimize RAM usage:
@@ -767,15 +863,16 @@ xlsxturbo.dfs_to_xlsx([
 - `table_style` (Excel tables)
 - `freeze_panes`
 - `row_heights`
+- `autofit`
 - `conditional_formats`
+- `formula_columns`
 - `merged_ranges`
 - `hyperlinks`
 - `comments`
 - `validations`
 - `rich_text`
 - `images`
-- `autofit`
-- `formula_columns`
+- `cells`
 
 Column widths still work in constant memory mode.
 

@@ -26,6 +26,7 @@ use features::{
     extract_hyperlinks, extract_images, extract_merged_ranges, extract_rich_text,
     extract_sheet_info, extract_validations,
 };
+use types::WriteConfig;
 use types::{EffectiveOpts, ExtractedOptions};
 
 use pyo3::prelude::*;
@@ -507,20 +508,18 @@ fn dfs_to_xlsx<'py>(
             ))
         })?;
 
-        let result = write_sheet_data(
-            py,
-            worksheet,
-            &df,
-            effective_header,
-            effective_autofit,
-            effective_table_style.as_deref(),
-            effective_freeze_panes,
-            effective_table_name.as_deref(),
-            effective_row_heights.as_ref(),
+        let sheet_config_write = WriteConfig {
+            include_header: effective_header,
+            autofit: effective_autofit,
+            table_style: effective_table_style.as_deref(),
+            freeze_panes: effective_freeze_panes,
+            table_name: effective_table_name.as_deref(),
+            row_heights: effective_row_heights.as_ref(),
             constant_memory,
-            effective_opts,
-        )
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        };
+
+        let result = write_sheet_data(py, worksheet, &df, &sheet_config_write, effective_opts)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         stats.push(result);
     }
@@ -596,10 +595,14 @@ mod tests {
 
     #[test]
     fn test_parse_float() {
-        if let CellValue::Float(v) = parse_value("3.14", DateOrder::Auto) {
+        let value = parse_value("3.14", DateOrder::Auto);
+        assert!(
+            matches!(value, CellValue::Float(_)),
+            "Expected CellValue::Float, got {:?}",
+            value
+        );
+        if let CellValue::Float(v) = value {
             assert!((v - 3.14).abs() < 0.001);
-        } else {
-            panic!("Expected float");
         }
     }
 

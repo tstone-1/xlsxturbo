@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-03-17
+
+### Fixed
+- **Linux x86_64 wheels now work on Python 3.9+** - Release workflow switched from `manylinux2014` (Python 3.8 only) to `manylinux_2_28` with `--find-interpreter`, producing proper `abi3` wheels instead of `cp38-cp38` wheels
+- **Invalid datetime/date values now raise errors** - Previously, invalid dates from Python objects (e.g., month=13) silently fell through to string conversion; now returns a clear error message
+- **Improved test assertion** - `test_parse_float` uses `assert!(matches!(...))` instead of bare `panic!`
+
+### Improved
+- **Reduced internal parameter counts** - Introduced `WriteConfig` struct to group scalar sheet configuration, reducing `write_sheet_data` from 11 to 5 parameters and `apply_worksheet_features` from 16 to 10
+- **Contextual error messages throughout** - All `.map_err(|e| e.to_string())` calls replaced with descriptive `format!("Context: {}", e)` messages
+- **CI cargo caching** - Added `actions/cache@v4` for Rust dependencies across all CI jobs
+- **CI pip caching** - Added `cache: 'pip'` to all `setup-python` steps
+- **CI platform coverage** - Windows and macOS now test Python 3.9 + 3.12 (was only 3.12)
+
+### Documentation
+- **README** - Added documentation for `defined_names` and `cells` parameters with usage examples
+- **README** - Updated feature list with v0.11.0+ features (defined names, arbitrary cells, borders, alignment)
+- **README/type stubs** - Added `formula_columns` and `cells` to `constant_memory` disabled features list
+- **Type stubs** - Fixed `column_widths` and `row_heights` value types from `float` to `int | float`
+- **Type stubs** - Documented validation `min`/`max` default behavior
+
+### Tests
+- **Per-sheet cells** - Added `TestCellsPerSheet` (4 tests) covering 3-tuple SheetOptions with cells
+- **Cells formatting** - Added `TestCellsFormatting` (5 tests) covering alignment and wrap_text options
+
 ## [0.12.2] - 2026-03-16
 
 ### Fixed
