@@ -201,6 +201,19 @@ pub(crate) struct SheetConfig {
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
+/// Scalar configuration for writing a single sheet.
+/// Groups the simple config fields to reduce parameter counts in write_sheet_data
+/// and apply_worksheet_features.
+pub(crate) struct WriteConfig<'a> {
+    pub(crate) include_header: bool,
+    pub(crate) autofit: bool,
+    pub(crate) table_style: Option<&'a str>,
+    pub(crate) freeze_panes: bool,
+    pub(crate) table_name: Option<&'a str>,
+    pub(crate) row_heights: Option<&'a HashMap<u32, f64>>,
+    pub(crate) constant_memory: bool,
+}
+
 /// Resolved effective options for writing a single sheet (references only, avoids cloning Py<PyAny>).
 /// Built from either ExtractedOptions (single-sheet) or SheetConfig+ExtractedOptions merge (multi-sheet).
 pub(crate) struct EffectiveOpts<'a> {
