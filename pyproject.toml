@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "0.12.2"
+version = "0.12.3"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }

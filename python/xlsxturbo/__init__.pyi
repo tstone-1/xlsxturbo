@@ -97,8 +97,8 @@ class ValidationOptions(TypedDict, total=False):
     """
     type: ValidationType  # Required: validation type
     values: list[str]  # For 'list' type: dropdown options
-    min: int | float   # For number/text_length: minimum value
-    max: int | float   # For number/text_length: maximum value
+    min: int | float   # For number/text_length: minimum value (defaults to type minimum if omitted)
+    max: int | float   # For number/text_length: maximum value (defaults to type maximum if omitted)
     input_title: str   # Title for input prompt
     input_message: str # Message for input prompt
     error_title: str   # Title for error message
@@ -140,8 +140,8 @@ class SheetOptions(TypedDict, total=False):
     autofit: bool
     table_style: str | None
     freeze_panes: bool
-    column_widths: dict[int | str, float] | None  # Keys: int index or '_all'
-    row_heights: dict[int, float] | None
+    column_widths: dict[int | str, int | float] | None  # Keys: int index or '_all'
+    row_heights: dict[int, int | float] | None
     table_name: str | None
     header_format: HeaderFormat | None
     column_formats: dict[str, ColumnFormat] | None  # Pattern -> format. Patterns: 'prefix*', '*suffix', '*contains*', exact
@@ -192,10 +192,10 @@ def df_to_xlsx(
     autofit: bool = False,
     table_style: str | None = None,
     freeze_panes: bool = False,
-    column_widths: dict[int | str, float] | None = None,
+    column_widths: dict[int | str, int | float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
-    row_heights: dict[int, float] | None = None,
+    row_heights: dict[int, int | float] | None = None,
     constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
     conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
@@ -225,8 +225,8 @@ def df_to_xlsx(
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
-            autofit, column_widths with autofit cap, conditional_formats, merged_ranges,
-            hyperlinks, comments, validations, rich_text, and images.
+            autofit, column_widths with autofit cap, conditional_formats, formula_columns,
+            merged_ranges, hyperlinks, comments, validations, rich_text, images, and cells.
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
@@ -269,10 +269,10 @@ def dfs_to_xlsx(
     autofit: bool = False,
     table_style: str | None = None,
     freeze_panes: bool = False,
-    column_widths: dict[int | str, float] | None = None,
+    column_widths: dict[int | str, int | float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
-    row_heights: dict[int, float] | None = None,
+    row_heights: dict[int, int | float] | None = None,
     constant_memory: bool = False,
     column_formats: dict[str, ColumnFormat] | None = None,
     conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
@@ -300,8 +300,8 @@ def dfs_to_xlsx(
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
-            autofit, column_widths with autofit cap, conditional_formats, merged_ranges,
-            hyperlinks, comments, validations, rich_text, and images.
+            autofit, column_widths with autofit cap, conditional_formats, formula_columns,
+            merged_ranges, hyperlinks, comments, validations, rich_text, images, and cells.
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
