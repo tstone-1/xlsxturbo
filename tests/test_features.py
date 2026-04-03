@@ -24,6 +24,11 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
+import pytest
+
+# Fail loudly if openpyxl is missing -- silent test passes without verification are worse than skips
+pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+
 
 def get_temp_path():
     """Get a temporary file path that's closed for Windows compatibility"""
@@ -3468,6 +3473,169 @@ class TestCellConditionalFormat:
                 os.unlink(path)
 
 
+class TestCsvErrorPaths:
+    """Tests for CSV conversion error handling"""
+
+    def test_csv_nonexistent_input_raises_error(self):
+        """csv_to_xlsx with nonexistent input file raises ValueError with path info"""
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="Failed to open"):
+                xlsxturbo.csv_to_xlsx("/nonexistent/file.csv", path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+
+class TestConstantMemoryWarning:
+    """Tests for constant_memory warning emission"""
+
+    def test_constant_memory_warns_on_incompatible_options(self):
+        """constant_memory=True with incompatible options emits RuntimeWarning"""
+        import warnings
+
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(
+                    df, path,
+                    constant_memory=True,
+                    table_style="Medium2",
+                    freeze_panes=True,
+                )
+                assert len(w) == 1
+                assert issubclass(w[0].category, RuntimeWarning)
+                assert "table_style" in str(w[0].message)
+                assert "freeze_panes" in str(w[0].message)
+        finally:
+            os.unlink(path)
+
+    def test_constant_memory_no_warning_when_clean(self):
+        """constant_memory=True without incompatible options emits no warning"""
+        import warnings
+
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(df, path, constant_memory=True)
+                assert len(w) == 0
+        finally:
+            os.unlink(path)
+
+
+class TestDefinedNamesVerification:
+    """Tests for defined_names with content verification"""
+
+    def test_defined_names_written(self):
+        """defined_names are written to the workbook"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path,
+                defined_names={"MyRange": "=Sheet1!$A$1:$A$4"},
+            )
+            wb = load_workbook(path)
+            assert "MyRange" in wb.defined_names
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_defined_names_multi_sheet(self):
+        """defined_names work with dfs_to_xlsx"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Data")], path,
+                defined_names={"Total": "=Data!$A$1:$A$3"},
+            )
+            wb = load_workbook(path)
+            assert "Total" in wb.defined_names
+            wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestFormulaColumnsHeaderFalse:
+    """Regression tests for formula_columns with header=False (v0.10.5 fix)"""
+
+    def test_formula_columns_header_false(self):
+        """Formula columns work correctly when header=False"""
+        df = pd.DataFrame({"A": [10, 20], "B": [1, 2]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(
+                df, path,
+                header=False,
+                formula_columns={"Sum": "=A{row}+B{row}"},
+            )
+            assert cols == 3  # 2 data + 1 formula
+            wb = load_workbook(path)
+            ws = wb.active
+            # Row 1 should have data, not headers
+            assert ws["A1"].value == 10
+            # Formula column should be in C (0-indexed col 2)
+            assert ws["C1"].value is not None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_formula_columns_header_true(self):
+        """Formula columns still work correctly when header=True"""
+        df = pd.DataFrame({"A": [10, 20], "B": [1, 2]})
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(
+                df, path,
+                header=True,
+                formula_columns={"Sum": "=A{row}+B{row}"},
+            )
+            assert cols == 3
+            wb = load_workbook(path)
+            ws = wb.active
+            # Row 1 should have headers
+            assert ws["A1"].value == "A"
+            assert ws["C1"].value == "Sum"
+            # Row 2 should have data
+            assert ws["A2"].value == 10
+            wb.close()
+        finally:
+            os.unlink(path)
+
+
+class TestPreEpochDates:
+    """Tests for dates before Excel epoch (1900-01-01)"""
+
+    def test_pre_epoch_date_csv_becomes_string(self):
+        """CSV dates before 1900 are written as strings, not invalid serial numbers"""
+        import csv
+        import tempfile
+
+        csv_path = tempfile.mktemp(suffix=".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["date", "value"])
+                writer.writerow(["1899-01-01", "old"])
+                writer.writerow(["2024-01-15", "new"])
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            wb = load_workbook(xlsx_path)
+            ws = wb.active
+            # Pre-epoch date should be a string
+            assert ws["A2"].value == "1899-01-01"
+            wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            os.unlink(xlsx_path)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -3502,6 +3670,11 @@ if __name__ == "__main__":
         TestBorderStyles,
         TestTextAlignment,
         TestCellConditionalFormat,
+        TestCsvErrorPaths,
+        TestConstantMemoryWarning,
+        TestDefinedNamesVerification,
+        TestFormulaColumnsHeaderFalse,
+        TestPreEpochDates,
     ]
 
     failed = 0

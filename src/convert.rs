@@ -1,6 +1,6 @@
 //! Core conversion functions for CSV and DataFrame to XLSX
 
-use crate::features::{
+use crate::apply::{
     apply_cells, apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
     apply_conditional_formats, apply_formula_columns, apply_hyperlinks, apply_images,
     apply_merged_ranges, apply_rich_text, apply_validations,
@@ -26,7 +26,7 @@ use std::io::BufReader;
 /// Integers beyond this range lose precision when cast to f64.
 const MAX_SAFE_INT: i64 = 1 << 53;
 
-/// Excel number format strings (shared with features::apply_cells)
+/// Excel number format strings (shared with apply::apply_cells)
 pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
 pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
 
@@ -512,8 +512,12 @@ pub(crate) fn write_sheet_data(
                 "constant_memory=True disables these features (they will be silently skipped): {}",
                 disabled.join(", ")
             );
+            let runtime_warning = py
+                .import("builtins")
+                .and_then(|b| b.getattr("RuntimeWarning"))
+                .map_err(|e| format!("Failed to get RuntimeWarning: {}", e))?;
             warnings
-                .call_method1("warn", (msg,))
+                .call_method1("warn", (msg, runtime_warning))
                 .map_err(|e| format!("Failed to emit warning: {}", e))?;
         }
     }

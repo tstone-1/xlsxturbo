@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.4] - 2026-04-03
+
+### Fixed
+- **Pre-1900 dates no longer produce invalid Excel serial numbers** - Dates before 1900-01-01 (both date and datetime) are now written as strings instead of negative serial numbers that render as `#####` in Excel
+- **`constant_memory` warning now uses `RuntimeWarning`** - Previously emitted a generic `UserWarning`; now uses `RuntimeWarning` for proper filtering with `warnings.filterwarnings()`
+
+### Refactored
+- **Split `features.rs` into `extract.rs` + `apply.rs`** - Extraction (Python-to-Rust) and application (Rust-to-Excel) logic separated into focused modules (~500 and ~940 LOC respectively), improving maintainability
+- **Added `SheetConfig::merge_with()` method** - Replaces 38 lines of repetitive per-sheet option merging in `dfs_to_xlsx` with a single method call; adding new options is now a one-place change
+- **Moved unit tests to `parse.rs`** - Tests now live alongside the code they verify, following Rust conventions
+
+### Tests
+- **7 new Rust unit tests** - `naive_datetime_to_excel` (3), `parse_icon_type` (3), `naive_date_to_excel_pre_epoch` (1)
+- **8 new Python integration tests** - CSV error paths, `constant_memory` warning emission, `defined_names` verification, `formula_columns` with `header=False` regression, pre-epoch date handling
+- **Module-level openpyxl guard** - Tests now skip loudly via `pytest.mark.skipif` instead of silently passing without content verification
+
+### Documentation
+- **CHANGELOG** - Added missing version link entries for v0.10.5 through v0.12.3
+
 ## [0.12.3] - 2026-03-17
 
 ### Fixed
@@ -383,6 +402,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.12.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.4
+[0.12.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.3
+[0.12.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.2
+[0.12.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.1
+[0.12.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.0
+[0.11.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.11.0
+[0.10.6]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.6
+[0.10.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.5
 [0.10.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.4
 [0.10.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.3
 [0.10.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.2
