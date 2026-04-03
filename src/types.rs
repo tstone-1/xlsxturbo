@@ -250,3 +250,42 @@ impl ExtractedOptions {
         }
     }
 }
+
+impl SheetConfig {
+    /// Merge per-sheet options with global defaults, returning EffectiveOpts.
+    /// Per-sheet values take priority; global defaults are used as fallback.
+    pub(crate) fn merge_with<'a>(&'a self, global: &'a ExtractedOptions) -> EffectiveOpts<'a> {
+        EffectiveOpts {
+            column_widths: self
+                .column_widths
+                .as_ref()
+                .or(global.column_widths.as_ref()),
+            header_format: self
+                .header_format
+                .as_ref()
+                .or(global.header_format.as_ref()),
+            column_formats: self
+                .column_formats
+                .as_ref()
+                .or(global.column_formats.as_ref()),
+            conditional_formats: self
+                .conditional_formats
+                .as_ref()
+                .or(global.conditional_formats.as_ref()),
+            formula_columns: self
+                .formula_columns
+                .as_ref()
+                .or(global.formula_columns.as_ref()),
+            merged_ranges: self
+                .merged_ranges
+                .as_ref()
+                .or(global.merged_ranges.as_ref()),
+            hyperlinks: self.hyperlinks.as_ref().or(global.hyperlinks.as_ref()),
+            comments: self.comments.as_ref().or(global.comments.as_ref()),
+            validations: self.validations.as_ref().or(global.validations.as_ref()),
+            rich_text: self.rich_text.as_ref().or(global.rich_text.as_ref()),
+            images: self.images.as_ref().or(global.images.as_ref()),
+            cells: self.cells.as_ref().or(global.cells.as_ref()),
+        }
+    }
+}
