@@ -20,7 +20,6 @@ use rayon::prelude::*;
 use rust_xlsxwriter::{Format, Table, Worksheet, XlsxError};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufReader;
 
 /// Maximum safe integer for lossless f64 representation (2^53).
 /// Integers beyond this range lose precision when cast to f64.
@@ -170,13 +169,13 @@ pub fn convert_csv_to_xlsx(
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), String> {
-    // Open CSV file
+    // Open CSV file (csv::ReaderBuilder handles buffering internally)
     let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
-    let reader = BufReader::with_capacity(1024 * 1024, file);
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
-        .from_reader(reader);
+        .buffer_capacity(1024 * 1024)
+        .from_reader(file);
 
     // Create workbook and worksheet
     let mut workbook = rust_xlsxwriter::Workbook::new();
@@ -229,43 +228,93 @@ pub fn convert_csv_to_xlsx(
     Ok((row_count, col_count))
 }
 
+/// Rows per chunk for parallel CSV processing. Picked so a parsed chunk's
+/// peak memory stays bounded regardless of total file size.
+const PARALLEL_CHUNK_ROWS: usize = 10_000;
+
 /// Convert a CSV file to XLSX format using parallel processing.
 ///
-/// This version reads all records into memory, parses them in parallel,
-/// then writes sequentially. Best for large files with complex type detection.
+/// Reads the CSV in chunks of `PARALLEL_CHUNK_ROWS` rows, parses each chunk in
+/// parallel across rayon's thread pool, then writes the parsed chunk before
+/// reading the next one. Peak memory is O(chunk) rather than O(file), so this
+/// scales to CSVs larger than available RAM.
 pub fn convert_csv_to_xlsx_parallel(
     input_path: &str,
     output_path: &str,
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), String> {
-    // Open CSV file
     let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
-    let reader = BufReader::with_capacity(1024 * 1024, file);
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
-        .from_reader(reader);
+        .buffer_capacity(1024 * 1024)
+        .from_reader(file);
 
-    // Read all records into memory
-    let records: Vec<Vec<String>> = csv_reader
-        .records()
-        .enumerate()
-        .map(|(row_idx, result)| {
-            result
-                .map(|record| record.iter().map(|s| s.to_string()).collect())
-                .map_err(|e| format!("CSV parse error at row {}: {}", row_idx, e))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
-    let row_count = u32::try_from(records.len())
-        .map_err(|_| format!("Row count {} exceeds u32 limit", records.len()))?;
-    let max_cols = records.iter().map(|r| r.len()).max().unwrap_or(0);
-    let col_count = u16::try_from(max_cols)
-        .map_err(|_| format!("Column count {} exceeds u16 limit", max_cols))?;
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
 
-    // Parse all values in parallel
-    let parsed_rows: Vec<Vec<CellValue>> = records
+    let mut row_count: u32 = 0;
+    let mut col_count: u16 = 0;
+    let mut chunk: Vec<Vec<String>> = Vec::with_capacity(PARALLEL_CHUNK_ROWS);
+
+    for result in csv_reader.records() {
+        let absolute_row = row_count as usize + chunk.len();
+        let record =
+            result.map_err(|e| format!("CSV parse error at row {}: {}", absolute_row, e))?;
+        let num_cols = u16::try_from(record.len())
+            .map_err(|_| format!("Column count {} exceeds u16 limit", record.len()))?;
+        if num_cols > col_count {
+            col_count = num_cols;
+        }
+        chunk.push(record.iter().map(|s| s.to_string()).collect());
+
+        if chunk.len() >= PARALLEL_CHUNK_ROWS {
+            flush_parallel_chunk(
+                worksheet,
+                &mut chunk,
+                &mut row_count,
+                date_order,
+                &date_format,
+                &datetime_format,
+            )?;
+        }
+    }
+
+    if !chunk.is_empty() {
+        flush_parallel_chunk(
+            worksheet,
+            &mut chunk,
+            &mut row_count,
+            date_order,
+            &date_format,
+            &datetime_format,
+        )?;
+    }
+
+    workbook
+        .save(output_path)
+        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+
+    Ok((row_count, col_count))
+}
+
+/// Parse the chunk in parallel, write it sequentially, clear it, and advance `row_count`.
+fn flush_parallel_chunk(
+    worksheet: &mut Worksheet,
+    chunk: &mut Vec<Vec<String>>,
+    row_count: &mut u32,
+    date_order: DateOrder,
+    date_format: &Format,
+    datetime_format: &Format,
+) -> Result<(), String> {
+    let parsed_rows: Vec<Vec<CellValue>> = chunk
         .par_iter()
         .map(|row| {
             row.iter()
@@ -274,42 +323,29 @@ pub fn convert_csv_to_xlsx_parallel(
         })
         .collect();
 
-    // Create workbook and worksheet
-    let mut workbook = rust_xlsxwriter::Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
-
-    // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
-    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
-
-    // Write parsed values sequentially
-    for (row_idx, row) in parsed_rows.into_iter().enumerate() {
-        let row_u32 = u32::try_from(row_idx)
-            .map_err(|_| format!("Row index {} exceeds u32 limit", row_idx))?;
-        for (col_idx, cell_value) in row.into_iter().enumerate() {
-            let col_u16 = u16::try_from(col_idx)
-                .map_err(|_| format!("Column index {} exceeds u16 limit", col_idx))?;
+    for (offset, parsed_row) in parsed_rows.into_iter().enumerate() {
+        let row_u32 = row_count
+            .checked_add(offset as u32)
+            .ok_or("Row count exceeds u32 limit")?;
+        for (col_idx, cell_value) in parsed_row.into_iter().enumerate() {
+            let col_u16 = col_idx as u16; // safe: column count already validated via u16::try_from
             write_cell(
                 worksheet,
                 row_u32,
                 col_u16,
                 cell_value,
-                &date_format,
-                &datetime_format,
+                date_format,
+                datetime_format,
             )
-            .map_err(|e| format!("Write error at ({}, {}): {}", row_idx, col_idx, e))?;
+            .map_err(|e| format!("Write error at ({}, {}): {}", row_u32, col_idx, e))?;
         }
     }
 
-    // Save workbook
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
-
-    Ok((row_count, col_count))
+    *row_count = row_count
+        .checked_add(chunk.len() as u32)
+        .ok_or("Row count exceeds u32 limit")?;
+    chunk.clear();
+    Ok(())
 }
 
 // ============================================================================
@@ -331,22 +367,45 @@ pub(crate) fn write_py_value_with_format(
         return write_str(worksheet, row, col, "", column_format);
     }
 
-    // Check for pandas NA/NaT
+    // Fast path: primitive Python scalars. Each of these checks is O(1) on
+    // PyObject type pointer; type_name lookup is deferred to the slow path
+    // (datetime/date/NAType/NaTType detection) so bool/int/float/str writes
+    // don't pay for a Python attribute round-trip per cell.
+
+    // Boolean first (before int, since bool is subclass of int in Python)
+    if let Ok(b) = value.cast::<PyBool>() {
+        return write_bool(worksheet, row, col, b.is_true(), column_format);
+    }
+
+    if let Ok(i) = value.cast::<PyInt>() {
+        if let Ok(val) = i.extract::<i64>() {
+            return write_int(worksheet, row, col, val, column_format);
+        }
+    }
+
+    if let Ok(f) = value.cast::<PyFloat>() {
+        if let Ok(val) = f.extract::<f64>() {
+            return write_float(worksheet, row, col, val, column_format);
+        }
+    }
+
+    if let Ok(s) = value.cast::<PyString>() {
+        return write_str(worksheet, row, col, s.to_string(), column_format);
+    }
+
+    // Slow path: datetime, date, pandas NAType/NaTType, numpy scalars, fallback.
+    // type_name is fetched once and reused.
     let type_name = value
         .get_type()
         .name()
         .map_err(|e| format!("Failed to get type name: {}", e))?
         .to_string();
+
     if type_name == "NAType" || type_name == "NaTType" {
         return write_str(worksheet, row, col, "", column_format);
     }
 
-    // Try boolean first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = value.cast::<PyBool>() {
-        return write_bool(worksheet, row, col, b.is_true(), column_format);
-    }
-
-    // Try datetime (before date, since datetime is subclass of date)
+    // Datetime (before date, since datetime is subclass of date)
     if type_name == "datetime" || type_name == "Timestamp" {
         let year: i32 = value
             .getattr("year")
@@ -391,7 +450,6 @@ pub(crate) fn write_py_value_with_format(
         return write_num(worksheet, row, col, excel_dt, Some(fmt));
     }
 
-    // Try date
     if type_name == "date" {
         let year: i32 = value
             .getattr("year")
@@ -413,33 +471,14 @@ pub(crate) fn write_py_value_with_format(
         return write_num(worksheet, row, col, excel_date, Some(fmt));
     }
 
-    // Try integer
-    if let Ok(i) = value.cast::<PyInt>() {
-        if let Ok(val) = i.extract::<i64>() {
-            return write_int(worksheet, row, col, val, column_format);
-        }
-    }
-
-    // Try float
-    if let Ok(f) = value.cast::<PyFloat>() {
-        if let Ok(val) = f.extract::<f64>() {
-            return write_float(worksheet, row, col, val, column_format);
-        }
-    }
-
-    // Try to extract as i64 first (covers numpy int types, before f64 to avoid precision loss)
+    // numpy scalar int (before f64 to avoid precision loss)
     if let Ok(val) = value.extract::<i64>() {
         return write_int(worksheet, row, col, val, column_format);
     }
 
-    // Try to extract as f64 (covers numpy float types)
+    // numpy scalar float
     if let Ok(val) = value.extract::<f64>() {
         return write_float(worksheet, row, col, val, column_format);
-    }
-
-    // Try string
-    if let Ok(s) = value.cast::<PyString>() {
-        return write_str(worksheet, row, col, s.to_string(), column_format);
     }
 
     // Fallback: convert to string
