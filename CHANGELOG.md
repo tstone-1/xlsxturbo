@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5] - 2026-04-18
+
+### Fixed
+- **Format option typos and wrong types now raise errors** - Unknown keys in `header_format`, `column_formats`, and `conditional_formats[...]['format']` dicts (e.g. `"color"` instead of `"font_color"`) now produce a clear error listing the valid options; bool/string/number fields error on wrong types instead of silently being ignored. Previously typos and type mismatches were silent no-ops that produced unformatted output.
+- **Image and validation options validate types** - `images[...]` options (`scale_width`, `scale_height`, `alt_text`) and validation `input_message`/`error_message`/`input_title`/`error_title` fields error on wrong types rather than silently dropping them. Unknown image options are rejected with a list of valid keys.
+
+### Improved
+- **CSV parallel mode peak memory reduced from O(file) to O(chunk)** - `csv_to_xlsx(parallel=True)` now streams the CSV in 10,000-row chunks (parse-in-parallel → write → drop → next chunk) instead of buffering the entire file twice in memory. Large CSVs no longer require several GB of RAM regardless of file size.
+- **DataFrame write hot-path avoids per-cell Python type lookup for primitives** - Bool/int/float/string cells skip the `value.get_type().name()` PyO3 round-trip; only date/datetime/numpy-scalar/NA paths still need it. Measurable on wide numeric DataFrames.
+
+### Refactored
+- **Split `apply_single_conditional_format` into per-type helpers** - `apply_2_color_scale`, `apply_3_color_scale`, `apply_data_bar`, `apply_icon_set`, `apply_cell_conditional`. The cell-rule dispatch flattens from a 5-level-nested match to three sequential `match`es (blanks / text / range / single-value) via `add_cell_cf!` / `add_viz_cf!` macros. Adding a new criteria is now a 1-2 line change.
+- **Rich text uses a dedicated narrow format parser** - `parse_rich_text_format` excludes `num_format` (meaningless for inline text runs) to match the `RichTextFormat` type stub contract.
+- **Removed redundant `BufReader` layer** - `csv::ReaderBuilder::buffer_capacity(1MB)` replaces a `BufReader` sitting on top of an already-buffering reader.
+
+### Dependencies
+- **Minor bumps** - `csv` 1.3 → 1.4, `clap` 4.5 → 4.6, `rayon` 1.10 → 1.12, `indexmap` 2.7 → 2.14. Transitives: `hashbrown` 0.16 → 0.17 plus 15 other patch/minor updates via `cargo update`.
+
 ## [0.12.4] - 2026-04-03
 
 ### Fixed
@@ -402,6 +420,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.12.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.5
 [0.12.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.4
 [0.12.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.3
 [0.12.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.2

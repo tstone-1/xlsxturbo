@@ -4,7 +4,8 @@ use crate::convert::{write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_F
 use crate::extract::pydict_to_hashmap;
 use crate::parse::{
     matches_pattern, parse_cell_range, parse_cell_ref, parse_color, parse_column_format,
-    parse_header_format, parse_horizontal_alignment, parse_icon_type, parse_vertical_alignment,
+    parse_header_format, parse_horizontal_alignment, parse_icon_type, parse_rich_text_format,
+    parse_vertical_alignment,
 };
 use crate::types::{
     CellWrite, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange,
@@ -206,6 +207,27 @@ pub(crate) fn apply_comments(
     Ok(())
 }
 
+/// Extract an optional string field from a validation config dict.
+/// Returns Ok(None) for missing or Python-None values. Wrong types produce an error.
+fn validation_string_field(
+    py: Python<'_>,
+    config: &ValidationConfig,
+    col_pattern: &str,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound
+        .extract::<String>()
+        .map(Some)
+        .map_err(|_| format!("validations['{}']: '{}' must be a string", col_pattern, key))
+}
+
 /// Apply data validations to worksheet
 pub(crate) fn apply_validations(
     py: Python<'_>,
@@ -319,40 +341,32 @@ pub(crate) fn apply_validations(
             };
 
             // Add optional input message
-            let validation = if let Some(msg_obj) = config.get("input_message") {
-                if let Ok(msg) = msg_obj.bind(py).extract::<String>() {
-                    let title = config
-                        .get("input_title")
-                        .and_then(|t| t.bind(py).extract::<String>().ok())
-                        .unwrap_or_default();
-                    validation
-                        .set_input_title(&title)
-                        .map_err(|e| format!("Failed to set input title: {}", e))?
-                        .set_input_message(&msg)
-                        .map_err(|e| format!("Failed to set input message: {}", e))?
-                } else {
-                    validation
-                }
+            let validation = if let Some(msg) =
+                validation_string_field(py, config, col_pattern, "input_message")?
+            {
+                let title = validation_string_field(py, config, col_pattern, "input_title")?
+                    .unwrap_or_default();
+                validation
+                    .set_input_title(&title)
+                    .map_err(|e| format!("Failed to set input title: {}", e))?
+                    .set_input_message(&msg)
+                    .map_err(|e| format!("Failed to set input message: {}", e))?
             } else {
                 validation
             };
 
             // Add optional error message
-            let validation = if let Some(msg_obj) = config.get("error_message") {
-                if let Ok(msg) = msg_obj.bind(py).extract::<String>() {
-                    let title = config
-                        .get("error_title")
-                        .and_then(|t| t.bind(py).extract::<String>().ok())
-                        .unwrap_or_default();
-                    validation
-                        .set_error_title(&title)
-                        .map_err(|e| format!("Failed to set error title: {}", e))?
-                        .set_error_message(&msg)
-                        .map_err(|e| format!("Failed to set error message: {}", e))?
-                        .set_error_style(DataValidationErrorStyle::Stop)
-                } else {
-                    validation
-                }
+            let validation = if let Some(msg) =
+                validation_string_field(py, config, col_pattern, "error_message")?
+            {
+                let title = validation_string_field(py, config, col_pattern, "error_title")?
+                    .unwrap_or_default();
+                validation
+                    .set_error_title(&title)
+                    .map_err(|e| format!("Failed to set error title: {}", e))?
+                    .set_error_message(&msg)
+                    .map_err(|e| format!("Failed to set error message: {}", e))?
+                    .set_error_style(DataValidationErrorStyle::Stop)
             } else {
                 validation
             };
@@ -381,7 +395,7 @@ pub(crate) fn apply_rich_text(
 
         for (text, format_dict) in segments {
             if let Some(fmt_dict) = format_dict {
-                let format = parse_column_format(py, fmt_dict)?;
+                let format = parse_rich_text_format(py, fmt_dict)?;
                 formats.push(format);
             } else {
                 formats.push(Format::new());
@@ -406,6 +420,46 @@ pub(crate) fn apply_rich_text(
     Ok(())
 }
 
+/// Extract an optional f64 image option. Wrong types produce an error.
+fn image_f64_field(
+    py: Python<'_>,
+    opts: &HashMap<String, Py<PyAny>>,
+    cell_ref: &str,
+    key: &str,
+) -> Result<Option<f64>, String> {
+    let Some(obj) = opts.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound
+        .extract::<f64>()
+        .map(Some)
+        .map_err(|_| format!("images['{}']: '{}' must be a number", cell_ref, key))
+}
+
+/// Extract an optional string image option. Wrong types produce an error.
+fn image_string_field(
+    py: Python<'_>,
+    opts: &HashMap<String, Py<PyAny>>,
+    cell_ref: &str,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(obj) = opts.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound
+        .extract::<String>()
+        .map(Some)
+        .map_err(|_| format!("images['{}']: '{}' must be a string", cell_ref, key))
+}
+
 /// Apply images to worksheet
 pub(crate) fn apply_images(
     py: Python<'_>,
@@ -420,20 +474,23 @@ pub(crate) fn apply_images(
 
         // Apply options if provided
         if let Some(opts) = options {
-            if let Some(scale_obj) = opts.get("scale_width") {
-                if let Ok(scale) = scale_obj.bind(py).extract::<f64>() {
-                    image = image.set_scale_width(scale);
+            const IMAGE_KEYS: &[&str] = &["path", "scale_width", "scale_height", "alt_text"];
+            for key in opts.keys() {
+                if !IMAGE_KEYS.contains(&key.as_str()) {
+                    return Err(format!(
+                        "images['{}']: unknown option '{}'. Valid: scale_width, scale_height, alt_text",
+                        cell_ref, key
+                    ));
                 }
             }
-            if let Some(scale_obj) = opts.get("scale_height") {
-                if let Ok(scale) = scale_obj.bind(py).extract::<f64>() {
-                    image = image.set_scale_height(scale);
-                }
+            if let Some(scale) = image_f64_field(py, opts, cell_ref, "scale_width")? {
+                image = image.set_scale_width(scale);
             }
-            if let Some(alt_obj) = opts.get("alt_text") {
-                if let Ok(alt) = alt_obj.bind(py).extract::<String>() {
-                    image = image.set_alt_text(&alt);
-                }
+            if let Some(scale) = image_f64_field(py, opts, cell_ref, "scale_height")? {
+                image = image.set_scale_height(scale);
+            }
+            if let Some(alt) = image_string_field(py, opts, cell_ref, "alt_text")? {
+                image = image.set_alt_text(&alt);
             }
         }
 
@@ -491,322 +548,75 @@ pub(crate) fn apply_cells(
     Ok(())
 }
 
-/// Apply a single conditional format config to a column range
-fn apply_single_conditional_format(
-    py: Python<'_>,
-    worksheet: &mut Worksheet,
-    col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
-    let format_type: String = config
-        .get("type")
-        .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
-        .bind(py)
-        .extract()
-        .map_err(|e| {
-            format!(
-                "conditional_formats['{}']: invalid 'type': {}",
-                col_pattern, e
-            )
-        })?;
-
-    match format_type.to_lowercase().as_str() {
-        "2_color_scale" | "2colorscale" | "two_color_scale" => {
-            let mut cf = ConditionalFormat2ColorScale::new();
-            if let Some(obj) = config.get("min_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_minimum_color(parse_color(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("max_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_maximum_color(parse_color(&s)?);
-                }
-            }
-            worksheet
-                .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                .map_err(|e| format!("Failed to add 2_color_scale: {}", e))?;
-        }
-
-        "3_color_scale" | "3colorscale" | "three_color_scale" => {
-            let mut cf = ConditionalFormat3ColorScale::new();
-            if let Some(obj) = config.get("min_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_minimum_color(parse_color(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("mid_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_midpoint_color(parse_color(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("max_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_maximum_color(parse_color(&s)?);
-                }
-            }
-            worksheet
-                .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                .map_err(|e| format!("Failed to add 3_color_scale: {}", e))?;
-        }
-
-        "data_bar" | "databar" => {
-            let mut cf = ConditionalFormatDataBar::new();
-            if let Some(obj) = config.get("bar_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_fill_color(parse_color(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("border_color") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_border_color(parse_color(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("solid") {
-                if let Ok(true) = obj.bind(py).extract::<bool>() {
-                    cf = cf.set_solid_fill(true);
-                }
-            }
-            if let Some(obj) = config.get("direction") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    let dir = match s.to_lowercase().as_str() {
-                        "left_to_right" | "ltr" => ConditionalFormatDataBarDirection::LeftToRight,
-                        "right_to_left" | "rtl" => ConditionalFormatDataBarDirection::RightToLeft,
-                        "context" | "" => ConditionalFormatDataBarDirection::Context,
-                        _ => {
-                            return Err(format!(
-                            "Unknown direction '{}'. Valid: left_to_right, right_to_left, context",
-                            s
-                        ))
-                        }
-                    };
-                    cf = cf.set_direction(dir);
-                }
-            }
-            worksheet
-                .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                .map_err(|e| format!("Failed to add data_bar: {}", e))?;
-        }
-
-        "icon_set" | "iconset" => {
-            let mut cf = ConditionalFormatIconSet::new();
-            if let Some(obj) = config.get("icon_type") {
-                if let Ok(s) = obj.bind(py).extract::<String>() {
-                    cf = cf.set_icon_type(parse_icon_type(&s)?);
-                }
-            }
-            if let Some(obj) = config.get("reverse") {
-                if let Ok(true) = obj.bind(py).extract::<bool>() {
-                    cf = cf.reverse_icons(true);
-                }
-            }
-            if let Some(obj) = config.get("icons_only") {
-                if let Ok(true) = obj.bind(py).extract::<bool>() {
-                    cf = cf.show_icons_only(true);
-                }
-            }
-            worksheet
-                .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                .map_err(|e| format!("Failed to add icon_set: {}", e))?;
-        }
-
-        "cell" => {
-            let criteria: String = config
-                .get("criteria")
-                .ok_or_else(|| {
-                    format!(
-                        "conditional_formats['{}']: 'cell' type requires 'criteria' key",
-                        col_pattern
-                    )
-                })?
-                .bind(py)
-                .extract()
-                .map_err(|e| {
-                    format!(
-                        "conditional_formats['{}']: invalid 'criteria': {}",
-                        col_pattern, e
-                    )
-                })?;
-
-            // Parse the format dict for the cell rule
-            let fmt = if let Some(fmt_obj) = config.get("format") {
-                if let Ok(fmt_dict) = fmt_obj.bind(py).cast::<pyo3::types::PyDict>() {
-                    let map = pydict_to_hashmap(fmt_dict)
-                        .map_err(|e| format!("conditional_formats['{}']: {}", col_pattern, e))?;
-                    Some(parse_column_format(py, &map)?)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Build the cell rule based on criteria
-            let criteria_lower = criteria.to_lowercase();
-            match criteria_lower.as_str() {
-                "blanks" | "blank" => {
-                    let mut cf = ConditionalFormatBlank::new();
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add blanks format: {}", e))?;
-                }
-                "no_blanks" | "no blanks" | "not_blank" | "not blank" => {
-                    let mut cf = ConditionalFormatBlank::new().invert();
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add no_blanks format: {}", e))?;
-                }
-                "containing" | "contains" | "text_contains" => {
-                    let value: String = extract_string_value(py, config, col_pattern, "value")?;
-                    let mut cf = ConditionalFormatText::new()
-                        .set_rule(ConditionalFormatTextRule::Contains(value));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add text contains format: {}", e))?;
-                }
-                "not_containing" | "not containing" | "does_not_contain" | "does not contain" => {
-                    let value: String = extract_string_value(py, config, col_pattern, "value")?;
-                    let mut cf = ConditionalFormatText::new()
-                        .set_rule(ConditionalFormatTextRule::DoesNotContain(value));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add text not_containing format: {}", e))?;
-                }
-                "begins_with" | "begins with" | "starts_with" | "starts with" => {
-                    let value: String = extract_string_value(py, config, col_pattern, "value")?;
-                    let mut cf = ConditionalFormatText::new()
-                        .set_rule(ConditionalFormatTextRule::BeginsWith(value));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add text begins_with format: {}", e))?;
-                }
-                "ends_with" | "ends with" => {
-                    let value: String = extract_string_value(py, config, col_pattern, "value")?;
-                    let mut cf = ConditionalFormatText::new()
-                        .set_rule(ConditionalFormatTextRule::EndsWith(value));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add text ends_with format: {}", e))?;
-                }
-                "between" => {
-                    let min_val = extract_f64_value(py, config, col_pattern, "min_value")?;
-                    let max_val = extract_f64_value(py, config, col_pattern, "max_value")?;
-                    let mut cf = ConditionalFormatCell::new()
-                        .set_rule(ConditionalFormatCellRule::Between(min_val, max_val));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add between format: {}", e))?;
-                }
-                "not_between" | "not between" => {
-                    let min_val = extract_f64_value(py, config, col_pattern, "min_value")?;
-                    let max_val = extract_f64_value(py, config, col_pattern, "max_value")?;
-                    let mut cf = ConditionalFormatCell::new()
-                        .set_rule(ConditionalFormatCellRule::NotBetween(min_val, max_val));
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add not_between format: {}", e))?;
-                }
-                _ => {
-                    // Single-value comparison rules (equal to, greater than, etc.)
-                    // Build rule with proper type to preserve numeric vs string in Excel
-                    let value_obj = config.get("value").ok_or_else(|| {
-                        format!(
-                            "conditional_formats['{}']: missing 'value' key",
-                            col_pattern
-                        )
-                    })?;
-                    let bound = value_obj.bind(py);
-
-                    macro_rules! make_rule {
-                        ($variant:ident) => {
-                            if let Ok(v) = bound.extract::<f64>() {
-                                ConditionalFormatCell::new()
-                                    .set_rule(ConditionalFormatCellRule::$variant(v))
-                            } else if let Ok(s) = bound.extract::<String>() {
-                                ConditionalFormatCell::new()
-                                    .set_rule(ConditionalFormatCellRule::$variant(s))
-                            } else {
-                                return Err(format!(
-                                    "conditional_formats['{}']: 'value' must be a string or number",
-                                    col_pattern
-                                ));
-                            }
-                        };
-                    }
-
-                    let mut cf = match criteria_lower.as_str() {
-                        "equal_to" | "equal to" | "==" | "eq" => make_rule!(EqualTo),
-                        "not_equal_to" | "not equal to" | "!=" | "ne" => make_rule!(NotEqualTo),
-                        "greater_than" | "greater than" | ">" | "gt" => make_rule!(GreaterThan),
-                        "less_than" | "less than" | "<" | "lt" => make_rule!(LessThan),
-                        "greater_than_or_equal_to" | "greater than or equal to" | ">=" | "gte" => {
-                            make_rule!(GreaterThanOrEqualTo)
-                        }
-                        "less_than_or_equal_to" | "less than or equal to" | "<=" | "lte" => {
-                            make_rule!(LessThanOrEqualTo)
-                        }
-                        _ => {
-                            return Err(format!(
-                                "Unknown criteria '{}'. Valid: equal_to, not_equal_to, \
-                                 greater_than, less_than, greater_than_or_equal_to, \
-                                 less_than_or_equal_to, between, not_between, \
-                                 containing, not_containing, begins_with, ends_with, \
-                                 blanks, no_blanks",
-                                criteria
-                            ))
-                        }
-                    };
-                    if let Some(f) = fmt {
-                        cf = cf.set_format(f);
-                    }
-                    worksheet
-                        .add_conditional_format(data_start_row, col_idx, data_end_row, col_idx, &cf)
-                        .map_err(|e| format!("Failed to add cell format: {}", e))?;
-                }
-            }
-        }
-
-        _ => {
-            return Err(format!(
-                "Unknown conditional format type '{}'. Valid types: \
-                 2_color_scale, 3_color_scale, data_bar, icon_set, cell",
-                format_type
-            ));
-        }
-    }
-
-    Ok(())
+/// Add a cell-rule conditional format (Blank/Text/Cell) with an optional `format` applied first.
+macro_rules! add_cell_cf {
+    ($ws:expr, $r0:expr, $c:expr, $r1:expr, $cf:expr, $fmt:expr, $what:literal) => {{
+        let __cf = match $fmt {
+            Some(f) => $cf.set_format(f),
+            None => $cf,
+        };
+        $ws.add_conditional_format($r0, $c, $r1, $c, &__cf)
+            .map_err(|e| format!(concat!("Failed to add ", $what, ": {}"), e))?;
+    }};
 }
 
-/// Extract a string value from a conditional format config
-fn extract_string_value(
+/// Add a visualization-style conditional format (color scale, data bar, icon set).
+/// These types don't accept a user Format — their appearance IS the format.
+macro_rules! add_viz_cf {
+    ($ws:expr, $r0:expr, $c:expr, $r1:expr, $cf:expr, $what:literal) => {{
+        $ws.add_conditional_format($r0, $c, $r1, $c, &$cf)
+            .map_err(|e| format!(concat!("Failed to add ", $what, ": {}"), e))?;
+    }};
+}
+
+/// Extract an optional color field from a conditional format config.
+/// None values are treated as unset. Wrong types error with context.
+fn cf_optional_color(
+    py: Python<'_>,
+    config: &HashMap<String, Py<PyAny>>,
+    col_pattern: &str,
+    key: &str,
+) -> Result<Option<u32>, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    let color_str = bound.extract::<String>().map_err(|_| {
+        format!(
+            "conditional_formats['{}']: '{}' must be a color string",
+            col_pattern, key
+        )
+    })?;
+    parse_color(&color_str).map(Some)
+}
+
+/// Extract an optional bool field from a conditional format config.
+fn cf_optional_bool(
+    py: Python<'_>,
+    config: &HashMap<String, Py<PyAny>>,
+    col_pattern: &str,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound.extract::<bool>().map(Some).map_err(|_| {
+        format!(
+            "conditional_formats['{}']: '{}' must be a bool",
+            col_pattern, key
+        )
+    })
+}
+
+/// Extract a required string field.
+fn cf_required_string(
     py: Python<'_>,
     config: &HashMap<String, Py<PyAny>>,
     col_pattern: &str,
@@ -830,8 +640,8 @@ fn extract_string_value(
         })
 }
 
-/// Extract an f64 value from a conditional format config
-fn extract_f64_value(
+/// Extract a required f64 field.
+fn cf_required_f64(
     py: Python<'_>,
     config: &HashMap<String, Py<PyAny>>,
     col_pattern: &str,
@@ -853,6 +663,441 @@ fn extract_f64_value(
                 col_pattern, key, e
             )
         })
+}
+
+/// Parse the optional `format` dict on a cell-rule conditional format config.
+fn parse_cf_format(
+    py: Python<'_>,
+    config: &HashMap<String, Py<PyAny>>,
+    col_pattern: &str,
+) -> Result<Option<Format>, String> {
+    let Some(obj) = config.get("format") else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    let fmt_dict = bound.cast::<pyo3::types::PyDict>().map_err(|_| {
+        format!(
+            "conditional_formats['{}']: 'format' must be a dict",
+            col_pattern
+        )
+    })?;
+    let map = pydict_to_hashmap(fmt_dict)
+        .map_err(|e| format!("conditional_formats['{}']: {}", col_pattern, e))?;
+    parse_column_format(py, &map).map(Some)
+}
+
+/// Apply a 2-color-scale conditional format.
+fn apply_2_color_scale(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let mut cf = ConditionalFormat2ColorScale::new();
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "min_color")? {
+        cf = cf.set_minimum_color(c);
+    }
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "max_color")? {
+        cf = cf.set_maximum_color(c);
+    }
+    add_viz_cf!(
+        worksheet,
+        data_start_row,
+        col_idx,
+        data_end_row,
+        cf,
+        "2_color_scale"
+    );
+    Ok(())
+}
+
+/// Apply a 3-color-scale conditional format.
+fn apply_3_color_scale(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let mut cf = ConditionalFormat3ColorScale::new();
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "min_color")? {
+        cf = cf.set_minimum_color(c);
+    }
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "mid_color")? {
+        cf = cf.set_midpoint_color(c);
+    }
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "max_color")? {
+        cf = cf.set_maximum_color(c);
+    }
+    add_viz_cf!(
+        worksheet,
+        data_start_row,
+        col_idx,
+        data_end_row,
+        cf,
+        "3_color_scale"
+    );
+    Ok(())
+}
+
+/// Apply a data-bar conditional format.
+fn apply_data_bar(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let mut cf = ConditionalFormatDataBar::new();
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "bar_color")? {
+        cf = cf.set_fill_color(c);
+    }
+    if let Some(c) = cf_optional_color(py, config, col_pattern, "border_color")? {
+        cf = cf.set_border_color(c);
+    }
+    if cf_optional_bool(py, config, col_pattern, "solid")?.unwrap_or(false) {
+        cf = cf.set_solid_fill(true);
+    }
+    if let Some(obj) = config.get("direction") {
+        let bound = obj.bind(py);
+        if !bound.is_none() {
+            let s = bound.extract::<String>().map_err(|_| {
+                format!(
+                    "conditional_formats['{}']: 'direction' must be a string",
+                    col_pattern
+                )
+            })?;
+            let dir = match s.to_lowercase().as_str() {
+                "left_to_right" | "ltr" => ConditionalFormatDataBarDirection::LeftToRight,
+                "right_to_left" | "rtl" => ConditionalFormatDataBarDirection::RightToLeft,
+                "context" | "" => ConditionalFormatDataBarDirection::Context,
+                _ => {
+                    return Err(format!(
+                        "Unknown direction '{}'. Valid: left_to_right, right_to_left, context",
+                        s
+                    ));
+                }
+            };
+            cf = cf.set_direction(dir);
+        }
+    }
+    add_viz_cf!(
+        worksheet,
+        data_start_row,
+        col_idx,
+        data_end_row,
+        cf,
+        "data_bar"
+    );
+    Ok(())
+}
+
+/// Apply an icon-set conditional format.
+fn apply_icon_set(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let mut cf = ConditionalFormatIconSet::new();
+    if let Some(obj) = config.get("icon_type") {
+        let bound = obj.bind(py);
+        if !bound.is_none() {
+            let s = bound.extract::<String>().map_err(|_| {
+                format!(
+                    "conditional_formats['{}']: 'icon_type' must be a string",
+                    col_pattern
+                )
+            })?;
+            cf = cf.set_icon_type(parse_icon_type(&s)?);
+        }
+    }
+    if cf_optional_bool(py, config, col_pattern, "reverse")?.unwrap_or(false) {
+        cf = cf.reverse_icons(true);
+    }
+    if cf_optional_bool(py, config, col_pattern, "icons_only")?.unwrap_or(false) {
+        cf = cf.show_icons_only(true);
+    }
+    add_viz_cf!(
+        worksheet,
+        data_start_row,
+        col_idx,
+        data_end_row,
+        cf,
+        "icon_set"
+    );
+    Ok(())
+}
+
+/// Apply a cell-rule conditional format, dispatching by criteria family.
+fn apply_cell_conditional(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let criteria: String = config
+        .get("criteria")
+        .ok_or_else(|| {
+            format!(
+                "conditional_formats['{}']: 'cell' type requires 'criteria' key",
+                col_pattern
+            )
+        })?
+        .bind(py)
+        .extract()
+        .map_err(|e| {
+            format!(
+                "conditional_formats['{}']: invalid 'criteria': {}",
+                col_pattern, e
+            )
+        })?;
+
+    let fmt = parse_cf_format(py, config, col_pattern)?;
+    let criteria_lower = criteria.to_lowercase();
+
+    // Blank / no-blank
+    match criteria_lower.as_str() {
+        "blanks" | "blank" => {
+            add_cell_cf!(
+                worksheet,
+                data_start_row,
+                col_idx,
+                data_end_row,
+                ConditionalFormatBlank::new(),
+                fmt,
+                "blanks format"
+            );
+            return Ok(());
+        }
+        "no_blanks" | "no blanks" | "not_blank" | "not blank" => {
+            add_cell_cf!(
+                worksheet,
+                data_start_row,
+                col_idx,
+                data_end_row,
+                ConditionalFormatBlank::new().invert(),
+                fmt,
+                "no_blanks format"
+            );
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // Text rules (require string 'value')
+    if let Some(rule) = match criteria_lower.as_str() {
+        "containing" | "contains" | "text_contains" => Some(ConditionalFormatTextRule::Contains(
+            cf_required_string(py, config, col_pattern, "value")?,
+        )),
+        "not_containing" | "not containing" | "does_not_contain" | "does not contain" => {
+            Some(ConditionalFormatTextRule::DoesNotContain(
+                cf_required_string(py, config, col_pattern, "value")?,
+            ))
+        }
+        "begins_with" | "begins with" | "starts_with" | "starts with" => {
+            Some(ConditionalFormatTextRule::BeginsWith(cf_required_string(
+                py,
+                config,
+                col_pattern,
+                "value",
+            )?))
+        }
+        "ends_with" | "ends with" => Some(ConditionalFormatTextRule::EndsWith(cf_required_string(
+            py,
+            config,
+            col_pattern,
+            "value",
+        )?)),
+        _ => None,
+    } {
+        add_cell_cf!(
+            worksheet,
+            data_start_row,
+            col_idx,
+            data_end_row,
+            ConditionalFormatText::new().set_rule(rule),
+            fmt,
+            "text rule format"
+        );
+        return Ok(());
+    }
+
+    // Range rules (require numeric min_value/max_value)
+    if let Some(rule) = match criteria_lower.as_str() {
+        "between" => Some(ConditionalFormatCellRule::Between(
+            cf_required_f64(py, config, col_pattern, "min_value")?,
+            cf_required_f64(py, config, col_pattern, "max_value")?,
+        )),
+        "not_between" | "not between" => Some(ConditionalFormatCellRule::NotBetween(
+            cf_required_f64(py, config, col_pattern, "min_value")?,
+            cf_required_f64(py, config, col_pattern, "max_value")?,
+        )),
+        _ => None,
+    } {
+        add_cell_cf!(
+            worksheet,
+            data_start_row,
+            col_idx,
+            data_end_row,
+            ConditionalFormatCell::new().set_rule(rule),
+            fmt,
+            "range rule format"
+        );
+        return Ok(());
+    }
+
+    // Single-value comparison rules. Preserve numeric vs string in the Excel rule
+    // so "ERROR" matches as text and 100 matches as number.
+    let value_obj = config.get("value").ok_or_else(|| {
+        format!(
+            "conditional_formats['{}']: missing 'value' key",
+            col_pattern
+        )
+    })?;
+    let bound = value_obj.bind(py);
+
+    macro_rules! make_rule {
+        ($variant:ident) => {
+            if let Ok(v) = bound.extract::<f64>() {
+                ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::$variant(v))
+            } else if let Ok(s) = bound.extract::<String>() {
+                ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::$variant(s))
+            } else {
+                return Err(format!(
+                    "conditional_formats['{}']: 'value' must be a string or number",
+                    col_pattern
+                ));
+            }
+        };
+    }
+
+    let cf = match criteria_lower.as_str() {
+        "equal_to" | "equal to" | "==" | "eq" => make_rule!(EqualTo),
+        "not_equal_to" | "not equal to" | "!=" | "ne" => make_rule!(NotEqualTo),
+        "greater_than" | "greater than" | ">" | "gt" => make_rule!(GreaterThan),
+        "less_than" | "less than" | "<" | "lt" => make_rule!(LessThan),
+        "greater_than_or_equal_to" | "greater than or equal to" | ">=" | "gte" => {
+            make_rule!(GreaterThanOrEqualTo)
+        }
+        "less_than_or_equal_to" | "less than or equal to" | "<=" | "lte" => {
+            make_rule!(LessThanOrEqualTo)
+        }
+        _ => {
+            return Err(format!(
+                "Unknown criteria '{}'. Valid: equal_to, not_equal_to, \
+                 greater_than, less_than, greater_than_or_equal_to, \
+                 less_than_or_equal_to, between, not_between, \
+                 containing, not_containing, begins_with, ends_with, \
+                 blanks, no_blanks",
+                criteria
+            ));
+        }
+    };
+
+    add_cell_cf!(
+        worksheet,
+        data_start_row,
+        col_idx,
+        data_end_row,
+        cf,
+        fmt,
+        "cell format"
+    );
+    Ok(())
+}
+
+/// Apply a single conditional format config to a column range.
+/// Dispatches by `type` to a family-specific helper.
+fn apply_single_conditional_format(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    col_pattern: &str,
+    config: &HashMap<String, Py<PyAny>>,
+    col_idx: u16,
+    data_start_row: u32,
+    data_end_row: u32,
+) -> Result<(), String> {
+    let format_type: String = config
+        .get("type")
+        .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
+        .bind(py)
+        .extract()
+        .map_err(|e| {
+            format!(
+                "conditional_formats['{}']: invalid 'type': {}",
+                col_pattern, e
+            )
+        })?;
+
+    match format_type.to_lowercase().as_str() {
+        "2_color_scale" | "2colorscale" | "two_color_scale" => apply_2_color_scale(
+            py,
+            worksheet,
+            col_pattern,
+            config,
+            col_idx,
+            data_start_row,
+            data_end_row,
+        ),
+        "3_color_scale" | "3colorscale" | "three_color_scale" => apply_3_color_scale(
+            py,
+            worksheet,
+            col_pattern,
+            config,
+            col_idx,
+            data_start_row,
+            data_end_row,
+        ),
+        "data_bar" | "databar" => apply_data_bar(
+            py,
+            worksheet,
+            col_pattern,
+            config,
+            col_idx,
+            data_start_row,
+            data_end_row,
+        ),
+        "icon_set" | "iconset" => apply_icon_set(
+            py,
+            worksheet,
+            col_pattern,
+            config,
+            col_idx,
+            data_start_row,
+            data_end_row,
+        ),
+        "cell" => apply_cell_conditional(
+            py,
+            worksheet,
+            col_pattern,
+            config,
+            col_idx,
+            data_start_row,
+            data_end_row,
+        ),
+        _ => Err(format!(
+            "Unknown conditional format type '{}'. Valid types: \
+             2_color_scale, 3_color_scale, data_bar, icon_set, cell",
+            format_type
+        )),
+    }
 }
 
 /// Apply conditional formats to a worksheet

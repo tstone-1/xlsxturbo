@@ -284,80 +284,203 @@ pub(crate) fn parse_header_format(
     parse_format_dict(py, fmt_dict, false)
 }
 
-/// Shared format parser for both header and column formats.
-/// When `include_column_options` is true, also handles num_format.
-/// Border keys (border, border_left/right/top/bottom, border_color) are always parsed.
+/// Parse a rich text segment format dictionary into rust_xlsxwriter Format.
+/// Rich text segments only carry font-level formatting (bold, italic, color,
+/// size, underline, bg_color). Borders/alignment/wrap/num_format are meaningless
+/// for an inline text run, so we reuse the no-column-options parser.
+pub(crate) fn parse_rich_text_format(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
+) -> Result<Format, String> {
+    parse_format_dict(py, fmt_dict, false)
+}
+
+/// Keys accepted by `parse_format_dict` regardless of context.
+const FORMAT_KEYS_BASE: &[&str] = &[
+    "bold",
+    "italic",
+    "underline",
+    "bg_color",
+    "font_color",
+    "font_size",
+    "border",
+    "border_left",
+    "border_right",
+    "border_top",
+    "border_bottom",
+    "border_color",
+    "align_horizontal",
+    "align_vertical",
+    "wrap_text",
+];
+
+/// Keys accepted only when `include_column_options` is true.
+const FORMAT_KEYS_COLUMN: &[&str] = &["num_format"];
+
+/// Extract a bool field. None values are treated as unset. Wrong types error.
+fn get_bool_field(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    let Some(obj) = fmt_dict.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound.extract::<bool>().map(Some).map_err(|_| {
+        format!(
+            "format option '{}' must be a bool, got {}",
+            key,
+            py_type_name(bound)
+        )
+    })
+}
+
+/// Extract a string field. None values are treated as unset. Wrong types error.
+fn get_string_field(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(obj) = fmt_dict.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound.extract::<String>().map(Some).map_err(|_| {
+        format!(
+            "format option '{}' must be a string, got {}",
+            key,
+            py_type_name(bound)
+        )
+    })
+}
+
+/// Extract an f64 field. None values are treated as unset. Wrong types error.
+fn get_f64_field(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
+    key: &str,
+) -> Result<Option<f64>, String> {
+    let Some(obj) = fmt_dict.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound.extract::<f64>().map(Some).map_err(|_| {
+        format!(
+            "format option '{}' must be a number, got {}",
+            key,
+            py_type_name(bound)
+        )
+    })
+}
+
+/// Extract a border field accepting bool (True=thin) or a style name string.
+/// None, missing, or `false` return Ok(None). Unknown types error.
+fn get_border_field(
+    py: Python<'_>,
+    fmt_dict: &HashMap<String, Py<PyAny>>,
+    key: &str,
+) -> Result<Option<FormatBorder>, String> {
+    let Some(obj) = fmt_dict.get(key) else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    if let Ok(style_str) = bound.extract::<String>() {
+        return Ok(Some(parse_border_style(&style_str)?));
+    }
+    if let Ok(flag) = bound.extract::<bool>() {
+        return Ok(if flag { Some(FormatBorder::Thin) } else { None });
+    }
+    Err(format!(
+        "format option '{}' must be a bool or a style name string, got {}",
+        key,
+        py_type_name(bound)
+    ))
+}
+
+/// Best-effort Python type name for error messages.
+fn py_type_name(bound: &Bound<'_, PyAny>) -> String {
+    bound
+        .get_type()
+        .name()
+        .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
+}
+
+/// Shared format parser for header, column, and rich-text formats.
+/// When `include_column_options` is true, also handles `num_format`.
+/// Unknown keys produce a clear error listing the valid options.
 fn parse_format_dict(
     py: Python<'_>,
     fmt_dict: &HashMap<String, Py<PyAny>>,
     include_column_options: bool,
 ) -> Result<Format, String> {
+    // Reject unknown keys so typos (e.g. 'color' vs 'font_color') surface
+    // immediately rather than silently producing unformatted output.
+    for key in fmt_dict.keys() {
+        let known = FORMAT_KEYS_BASE.contains(&key.as_str())
+            || (include_column_options && FORMAT_KEYS_COLUMN.contains(&key.as_str()));
+        if !known {
+            let mut valid: Vec<&str> = FORMAT_KEYS_BASE.to_vec();
+            if include_column_options {
+                valid.extend_from_slice(FORMAT_KEYS_COLUMN);
+            }
+            return Err(format!(
+                "Unknown format option '{}'. Valid options: {}",
+                key,
+                valid.join(", ")
+            ));
+        }
+    }
+
     let mut format = Format::new();
 
-    if let Some(bold_obj) = fmt_dict.get("bold") {
-        let bold: bool = bold_obj.bind(py).extract().unwrap_or(false);
-        if bold {
-            format = format.set_bold();
-        }
+    if get_bool_field(py, fmt_dict, "bold")?.unwrap_or(false) {
+        format = format.set_bold();
     }
 
-    if let Some(italic_obj) = fmt_dict.get("italic") {
-        let italic: bool = italic_obj.bind(py).extract().unwrap_or(false);
-        if italic {
-            format = format.set_italic();
-        }
+    if get_bool_field(py, fmt_dict, "italic")?.unwrap_or(false) {
+        format = format.set_italic();
     }
 
-    if let Some(bg_obj) = fmt_dict.get("bg_color") {
-        if let Ok(color_str) = bg_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_background_color(color);
-        }
+    if get_bool_field(py, fmt_dict, "underline")?.unwrap_or(false) {
+        format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
     }
 
-    if let Some(font_obj) = fmt_dict.get("font_color") {
-        if let Ok(color_str) = font_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_font_color(color);
-        }
+    if let Some(color_str) = get_string_field(py, fmt_dict, "bg_color")? {
+        format = format.set_background_color(parse_color(&color_str)?);
     }
 
-    if let Some(size_obj) = fmt_dict.get("font_size") {
-        if let Ok(size) = size_obj.bind(py).extract::<f64>() {
-            format = format.set_font_size(size);
-        }
+    if let Some(color_str) = get_string_field(py, fmt_dict, "font_color")? {
+        format = format.set_font_color(parse_color(&color_str)?);
     }
 
-    if let Some(underline_obj) = fmt_dict.get("underline") {
-        let underline: bool = underline_obj.bind(py).extract().unwrap_or(false);
-        if underline {
-            format = format.set_underline(rust_xlsxwriter::FormatUnderline::Single);
-        }
+    if let Some(size) = get_f64_field(py, fmt_dict, "font_size")? {
+        format = format.set_font_size(size);
     }
 
     if include_column_options {
-        if let Some(num_fmt_obj) = fmt_dict.get("num_format") {
-            if let Ok(num_fmt_str) = num_fmt_obj.bind(py).extract::<String>() {
-                format = format.set_num_format(&num_fmt_str);
-            }
+        if let Some(num_fmt_str) = get_string_field(py, fmt_dict, "num_format")? {
+            format = format.set_num_format(&num_fmt_str);
         }
     }
 
-    // border: bool (backward compat) or str (style name) for all 4 sides
-    if let Some(border_obj) = fmt_dict.get("border") {
-        let bound = border_obj.bind(py);
-        if let Ok(style_str) = bound.extract::<String>() {
-            let style = parse_border_style(&style_str)?;
-            format = format.set_border(style);
-        } else {
-            let border: bool = bound.extract().unwrap_or(false);
-            if border {
-                format = format.set_border(FormatBorder::Thin);
-            }
-        }
+    // Borders: `border` applies to all four sides; per-side keys override.
+    if let Some(style) = get_border_field(py, fmt_dict, "border")? {
+        format = format.set_border(style);
     }
 
-    // Per-side borders: border_left, border_right, border_top, border_bottom
     for (key, setter) in [
         (
             "border_left",
@@ -376,45 +499,25 @@ fn parse_format_dict(
             Format::set_border_bottom as fn(Format, FormatBorder) -> Format,
         ),
     ] {
-        if let Some(obj) = fmt_dict.get(key) {
-            let bound = obj.bind(py);
-            if let Ok(style_str) = bound.extract::<String>() {
-                let style = parse_border_style(&style_str)?;
-                format = setter(format, style);
-            } else if bound.extract::<bool>().unwrap_or(false) {
-                format = setter(format, FormatBorder::Thin);
-            }
+        if let Some(style) = get_border_field(py, fmt_dict, key)? {
+            format = setter(format, style);
         }
     }
 
-    // border_color: color for all borders (requires a border to be set to have visible effect)
-    if let Some(color_obj) = fmt_dict.get("border_color") {
-        if let Ok(color_str) = color_obj.bind(py).extract::<String>() {
-            let color = parse_color(&color_str)?;
-            format = format.set_border_color(color);
-        }
+    if let Some(color_str) = get_string_field(py, fmt_dict, "border_color")? {
+        format = format.set_border_color(parse_color(&color_str)?);
     }
 
-    // Text alignment
-    if let Some(align_obj) = fmt_dict.get("align_horizontal") {
-        if let Ok(align_str) = align_obj.bind(py).extract::<String>() {
-            let align = parse_horizontal_alignment(&align_str)?;
-            format = format.set_align(align);
-        }
+    if let Some(align_str) = get_string_field(py, fmt_dict, "align_horizontal")? {
+        format = format.set_align(parse_horizontal_alignment(&align_str)?);
     }
 
-    if let Some(align_obj) = fmt_dict.get("align_vertical") {
-        if let Ok(align_str) = align_obj.bind(py).extract::<String>() {
-            let align = parse_vertical_alignment(&align_str)?;
-            format = format.set_align(align);
-        }
+    if let Some(align_str) = get_string_field(py, fmt_dict, "align_vertical")? {
+        format = format.set_align(parse_vertical_alignment(&align_str)?);
     }
 
-    if let Some(wrap_obj) = fmt_dict.get("wrap_text") {
-        let wrap: bool = wrap_obj.bind(py).extract().unwrap_or(false);
-        if wrap {
-            format = format.set_text_wrap();
-        }
+    if get_bool_field(py, fmt_dict, "wrap_text")?.unwrap_or(false) {
+        format = format.set_text_wrap();
     }
 
     Ok(format)

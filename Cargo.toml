@@ -1,6 +1,6 @@
 [package]
 name = "xlsxturbo"
-version = "0.12.4"
+version = "0.12.5"
 edition = "2021"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 license = "MIT"
@@ -23,12 +23,12 @@ required-features = ["cli"]
 
 [dependencies]
 rust_xlsxwriter = { version = "0.94", features = ["constant_memory"] }
-csv = "1.3"
-clap = { version = "4.5", features = ["derive"], optional = true }
+csv = "1.4"
+clap = { version = "4.6", features = ["derive"], optional = true }
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py39"] }
 chrono = "0.4"
-rayon = "1.10"
-indexmap = "2.7"
+rayon = "1.12"
+indexmap = "2.14"
 
 [profile.release]
 opt-level = 3
