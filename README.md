@@ -35,7 +35,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
   - Datetimes (ISO 8601) → Excel datetimes
   - `NaN`/`Inf` → Empty cells (graceful handling)
   - Everything else → Text
-- **~6x faster** than pandas + openpyxl (see [benchmarks](#performance))
+- **~7x faster** than pandas + openpyxl (see [benchmarks](#performance))
 - **Memory efficient** - streams data with 1MB buffer
 - Available as both **Python library** and **CLI tool**
 
@@ -214,9 +214,11 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - wrap_text (bool): Enable text wrapping within cell
 ```
 
+> **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, and `validations`.
+
 ### Column Formatting
 
-Apply formatting to data columns using pattern matching:
+Apply formatting to data columns using pattern matching. Unknown keys raise errors (see [Header Styling](#header-styling)).
 
 ```python
 import xlsxturbo
@@ -353,7 +355,7 @@ Available per-sheet options:
 
 ### Conditional Formatting
 
-Apply visual formatting based on cell values:
+Apply visual formatting based on cell values. Unknown keys in the nested `format` dict raise errors (see [Header Styling](#header-styling)).
 
 ```python
 import xlsxturbo
@@ -593,7 +595,7 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 
 ### Data Validation
 
-Add dropdowns and input constraints:
+Add dropdowns and input constraints. Unknown keys raise errors (see [Header Styling](#header-styling)).
 
 ```python
 import xlsxturbo
@@ -703,7 +705,7 @@ xlsxturbo.df_to_xlsx(df, "rich.xlsx",
 
 ### Images
 
-Embed images in cells:
+Embed images in cells. Unknown keys raise errors (see [Header Styling](#header-styling)).
 
 ```python
 import xlsxturbo
@@ -933,14 +935,16 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 *Reference benchmark on 100,000 rows x 50 columns with mixed data types. Your results will vary by system - run the benchmark yourself (see [Benchmarking](#benchmarking)).*
 
+*All libraries use default settings; outputs differ in styling (e.g. polars auto-sizes columns and bolds headers by default, while xlsxturbo writes bare cells unless asked).*
+
 | Library | Time (s) | Rows/sec | vs xlsxturbo |
 |---------|----------|----------|--------------|
-| **xlsxturbo** | **6.65** | **15,033** | **1.0x** |
-| polars | 25.07 | 3,988 | 3.8x |
-| pandas + xlsxwriter | 35.60 | 2,809 | 5.4x |
-| pandas + openpyxl | 38.85 | 2,574 | 5.8x |
+| **xlsxturbo** | **4.76** | **21,010** | **1.0x** |
+| polars | 18.33 | 5,455 | 3.9x |
+| pandas + xlsxwriter | 27.66 | 3,615 | 5.8x |
+| pandas + openpyxl | 35.36 | 2,828 | 7.4x |
 
-*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads)*
+*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads). Median of 3 runs after warmup. Re-run with `--markdown` to regenerate this table with current variance figures.*
 
 ## Type Detection Examples
 

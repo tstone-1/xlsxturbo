@@ -5,6 +5,7 @@ Compares single-threaded vs multi-threaded CSV to XLSX conversion.
 """
 
 import os
+import statistics
 import sys
 import time
 import tempfile
@@ -12,9 +13,10 @@ import random
 import string
 from datetime import date, datetime, timedelta
 
-def generate_test_csv(filepath: str, rows: int, cols: int):
+def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42):
     """Generate a test CSV with mixed data types."""
     print(f"Generating test CSV: {rows:,} rows x {cols} columns...")
+    random.seed(seed)
 
     start = time.perf_counter()
     with open(filepath, 'w', encoding='utf-8') as f:
@@ -63,22 +65,29 @@ def generate_test_csv(filepath: str, rows: int, cols: int):
     print(f"  Generated in {elapsed:.2f}s ({file_size:.1f} MB)")
     return filepath
 
-def benchmark_conversion(csv_path: str, parallel: bool, runs: int = 3):
+def benchmark_conversion(csv_path: str, parallel: bool, runs: int = 3, warmup: bool = True):
     """Benchmark CSV to XLSX conversion."""
     import xlsxturbo
 
     mode = "parallel" if parallel else "single-threaded"
     times = []
 
-    for run in range(runs):
+    total_runs = runs + (1 if warmup else 0)
+    for run in range(total_runs):
         with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
             xlsx_path = tmp.name
 
         try:
+            is_warmup = warmup and run == 0
+            if is_warmup:
+                print(f"  warmup ({mode})...", flush=True)
+
             start = time.perf_counter()
             rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, parallel=parallel)
             elapsed = time.perf_counter() - start
-            times.append(elapsed)
+
+            if not is_warmup:
+                times.append(elapsed)
 
             if run == 0:
                 xlsx_size = os.path.getsize(xlsx_path) / (1024 * 1024)
@@ -87,9 +96,9 @@ def benchmark_conversion(csv_path: str, parallel: bool, runs: int = 3):
             if os.path.exists(xlsx_path):
                 os.unlink(xlsx_path)
 
-    avg_time = sum(times) / len(times)
-    min_time = min(times)
-    return avg_time, min_time
+    median_time = statistics.median(times)
+    stdev_time = statistics.stdev(times) if len(times) > 1 else 0.0
+    return median_time, stdev_time
 
 def main():
     import argparse
@@ -116,30 +125,29 @@ def main():
         generate_test_csv(csv_path, args.rows, args.cols)
         print()
 
-        # Benchmark single-threaded
-        print(f"Benchmarking single-threaded ({args.runs} runs)...")
-        single_avg, single_min = benchmark_conversion(csv_path, parallel=False, runs=args.runs)
-        print(f"  Average: {single_avg:.2f}s, Best: {single_min:.2f}s")
+        # Benchmark single-threaded (warmup + runs)
+        print(f"Benchmarking single-threaded ({args.runs} runs + warmup)...")
+        single_med, single_std = benchmark_conversion(csv_path, parallel=False, runs=args.runs)
+        print(f"  Median: {single_med:.2f}s (stdev {single_std:.2f}s)")
         print()
 
-        # Benchmark parallel
-        print(f"Benchmarking parallel ({args.runs} runs)...")
-        parallel_avg, parallel_min = benchmark_conversion(csv_path, parallel=True, runs=args.runs)
-        print(f"  Average: {parallel_avg:.2f}s, Best: {parallel_min:.2f}s")
+        # Benchmark parallel (warmup + runs)
+        print(f"Benchmarking parallel ({args.runs} runs + warmup)...")
+        parallel_med, parallel_std = benchmark_conversion(csv_path, parallel=True, runs=args.runs)
+        print(f"  Median: {parallel_med:.2f}s (stdev {parallel_std:.2f}s)")
         print()
 
         # Results
         print("=" * 60)
         print("Results:")
         print("=" * 60)
-        speedup_avg = single_avg / parallel_avg
-        speedup_min = single_min / parallel_min
-        print(f"Single-threaded: {single_avg:.2f}s (avg), {single_min:.2f}s (best)")
-        print(f"Parallel:        {parallel_avg:.2f}s (avg), {parallel_min:.2f}s (best)")
-        print(f"Speedup:         {speedup_avg:.2f}x (avg), {speedup_min:.2f}x (best)")
+        speedup = single_med / parallel_med
+        print(f"Single-threaded: {single_med:.2f}s (stdev {single_std:.2f}s)")
+        print(f"Parallel:        {parallel_med:.2f}s (stdev {parallel_std:.2f}s)")
+        print(f"Speedup:         {speedup:.2f}x")
 
-        if speedup_avg > 1:
-            print(f"\n[OK] Parallel processing is {speedup_avg:.2f}x faster!")
+        if speedup > 1:
+            print(f"\n[OK] Parallel processing is {speedup:.2f}x faster!")
         else:
             print(f"\n[INFO] Parallel processing is slower for this dataset size.")
             print("       Try with larger files (1M+ rows) for better results.")

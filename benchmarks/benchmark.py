@@ -30,7 +30,6 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import date, timedelta
 
 # Number of data type categories for column generation:
 # 0,1 = integers (25%), 2,3 = floats (25%), 4,5 = strings (25%), 6 = dates (12.5%), 7 = booleans (12.5%)
@@ -53,6 +52,7 @@ class BenchmarkSummary:
     """Summary of multiple runs for a library."""
     library: str
     median_time: float
+    stdev_time: float
     rows_per_second: float
     file_size_mb: float
     speedup_vs_xlsxturbo: float
@@ -77,44 +77,41 @@ def get_system_info() -> dict:
     return info
 
 
-def generate_test_data(rows: int, cols: int):
+def generate_test_data(rows: int, cols: int, seed: int = 42):
     """
     Generate test DataFrame with realistic mixed types:
     - 25% integers
     - 25% floats
     - 25% strings (5-20 chars)
-    - 12.5% dates
+    - 12.5% dates (datetime64[ns] — fair path for pandas)
     - 12.5% booleans
     """
     import numpy as np
     import pandas as pd
 
+    rng = np.random.default_rng(seed)
     data = {}
-    base_date = date(2020, 1, 1)
+    base_date = np.datetime64("2020-01-01", "ns")
 
     for i in range(cols):
         col_type = i % NUM_TYPE_CATEGORIES
 
         if col_type in (0, 1):
-            # Integer column (25%)
-            data[f"int_{i}"] = np.random.randint(0, 1_000_000, rows)
+            data[f"int_{i}"] = rng.integers(0, 1_000_000, rows)
         elif col_type in (2, 3):
-            # Float column (25%)
-            data[f"float_{i}"] = np.random.random(rows) * 10000
+            data[f"float_{i}"] = rng.random(rows) * 10000
         elif col_type in (4, 5):
-            # String column (25%) - variable length 5-20 chars
-            lengths = np.random.randint(5, 21, rows)
+            lengths = rng.integers(5, 21, rows)
+            alphabet = np.array(list("abcdefghijklmnopqrstuvwxyz"))
             data[f"str_{i}"] = [
-                "".join(np.random.choice(list("abcdefghijklmnopqrstuvwxyz"), length))
+                "".join(rng.choice(alphabet, length))
                 for length in lengths
             ]
         elif col_type == 6:
-            # Date column (12.5%)
-            days_offset = np.random.randint(0, 1000, rows)
-            data[f"date_{i}"] = [base_date + timedelta(days=int(d)) for d in days_offset]
+            days_offset = rng.integers(0, 1000, rows).astype("timedelta64[D]")
+            data[f"date_{i}"] = base_date + days_offset.astype("timedelta64[ns]")
         else:
-            # Boolean column (12.5%)
-            data[f"bool_{i}"] = np.random.choice([True, False], rows)
+            data[f"bool_{i}"] = rng.integers(0, 2, rows).astype(bool)
 
     return pd.DataFrame(data)
 
@@ -353,6 +350,7 @@ def run_benchmarks(
 
         times = [r.time_seconds for r in successful]
         median_time = statistics.median(times)
+        stdev_time = statistics.stdev(times) if len(times) > 1 else 0.0
         median_rps = rows / median_time
         avg_size = statistics.mean([r.file_size_mb for r in successful])
 
@@ -362,6 +360,7 @@ def run_benchmarks(
         summaries[name] = BenchmarkSummary(
             library=name,
             median_time=median_time,
+            stdev_time=stdev_time,
             rows_per_second=median_rps,
             file_size_mb=avg_size,
             speedup_vs_xlsxturbo=1.0,  # Will update below
@@ -401,8 +400,8 @@ def format_console_output(
     sorted_summaries = sorted(summaries.values(), key=lambda s: s.median_time)
 
     # Header
-    lines.append(f"{'Library':<22} {'Time (s)':>10} {'Rows/sec':>12} {'Size (MB)':>10} {'vs xlsxturbo':>13}")
-    lines.append("-" * 75)
+    lines.append(f"{'Library':<22} {'Time (s)':>10} {'Stdev':>8} {'Rows/sec':>12} {'Size (MB)':>10} {'vs xlsxturbo':>13}")
+    lines.append("-" * 84)
 
     for summary in sorted_summaries:
         speedup_str = f"{summary.speedup_vs_xlsxturbo:.1f}x"
@@ -412,6 +411,7 @@ def format_console_output(
         lines.append(
             f"{summary.library:<22} "
             f"{summary.median_time:>10.2f} "
+            f"{summary.stdev_time:>8.3f} "
             f"{summary.rows_per_second:>12,.0f} "
             f"{summary.file_size_mb:>10.1f} "
             f"{speedup_str:>13}"
@@ -454,8 +454,12 @@ def format_markdown_output(
     # Sort by time (fastest first)
     sorted_summaries = sorted(summaries.values(), key=lambda s: s.median_time)
 
-    lines.append("| Library | Time (s) | Rows/sec | Size (MB) | vs xlsxturbo |")
-    lines.append("|---------|----------|----------|-----------|--------------|")
+    lines.append("| Library | Time (s) | Stdev | Rows/sec | Size (MB) | vs xlsxturbo |")
+    lines.append("|---------|----------|-------|----------|-----------|--------------|")
+
+    max_stdev_pct = max(
+        (s.stdev_time / s.median_time * 100) for s in sorted_summaries if s.median_time > 0
+    )
 
     for summary in sorted_summaries:
         speedup_str = f"{summary.speedup_vs_xlsxturbo:.1f}x"
@@ -467,9 +471,15 @@ def format_markdown_output(
             name = "**xlsxturbo**"
 
         lines.append(
-            f"| {name} | {summary.median_time:.2f} | {summary.rows_per_second:,.0f} | "
-            f"{summary.file_size_mb:.1f} | {speedup_str} |"
+            f"| {name} | {summary.median_time:.2f} | {summary.stdev_time:.3f} | "
+            f"{summary.rows_per_second:,.0f} | {summary.file_size_mb:.1f} | {speedup_str} |"
         )
+
+    lines.append("")
+    lines.append(
+        f"*Median of {runs} runs after warmup; "
+        f"max stdev across libraries: {max_stdev_pct:.1f}% of median.*"
+    )
 
     return "\n".join(lines)
 
@@ -500,6 +510,7 @@ def format_json_output(
             {
                 "library": s.library,
                 "median_time_seconds": round(s.median_time, 3),
+                "stdev_time_seconds": round(s.stdev_time, 3),
                 "rows_per_second": round(s.rows_per_second, 0),
                 "file_size_mb": round(s.file_size_mb, 2),
                 "speedup_vs_xlsxturbo": round(s.speedup_vs_xlsxturbo, 2),
