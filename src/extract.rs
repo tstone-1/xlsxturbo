@@ -3,7 +3,7 @@
 use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::{
     pytype_name, CellWrite, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink,
-    ImageConfig, MergedRange, RichTextSegment, SheetConfig, ValidationConfig,
+    ImageConfig, MergedRange, RichTextSegment, SheetConfig, TextboxConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -147,6 +147,7 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_dict_field!(opts, config, "rich_text", rich_text, extract_rich_text);
         extract_dict_field!(opts, config, "images", images, extract_images);
         extract_dict_field!(opts, config, "checkboxes", checkboxes, extract_checkboxes);
+        extract_dict_field!(opts, config, "textboxes", textboxes, extract_textboxes);
 
         // Extract cells
         if let Ok(val) = opts.get_item("cells") {
@@ -537,6 +538,44 @@ pub(crate) fn extract_checkboxes(
     }
 
     Ok(checkboxes)
+}
+
+/// Extract textboxes from Python dict (cell_ref -> text or config dict)
+/// Simple form: {'A1': 'Some text'}
+/// Dict form: {'A1': {'text': 'Some text', 'width': 200, 'height': 100, 'font': {...}, ...}}
+pub(crate) fn extract_textboxes(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, TextboxConfig>> {
+    let mut textboxes: HashMap<String, TextboxConfig> = HashMap::new();
+
+    for (cell_ref, value) in py_dict.iter() {
+        let cell_str: String = cell_ref.extract()?;
+
+        if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
+            let text: String = inner_dict
+                .get_item("text")?
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "textboxes['{}'] dict missing 'text' key",
+                        cell_str
+                    ))
+                })?
+                .extract()?;
+            let mut options = pydict_to_hashmap(inner_dict)?;
+            options.remove("text");
+            textboxes.insert(cell_str, (text, Some(options)));
+        } else if let Ok(text) = value.extract::<String>() {
+            textboxes.insert(cell_str, (text, None));
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "textboxes['{}']: expected str or dict, got {}",
+                cell_str,
+                pytype_name(&value)
+            )));
+        }
+    }
+
+    Ok(textboxes)
 }
 
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})

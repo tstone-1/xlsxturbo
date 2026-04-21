@@ -67,12 +67,13 @@ Niche features for specific use cases.
   - Supports: bare bool or dict with `checked` + optional `format`
   - API: `checkboxes={'A1': True}` or `{'A1': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}`
 
-- [ ] **Textboxes** - Floating text annotations
-  - rust_xlsxwriter: supported
-  - Enables: callouts, annotations outside cell grid
+- [x] **Textboxes** - Floating text annotations (v0.14.0)
+  - Supports: bare string or dict with `text` + optional `width`/`height`/offsets/`font`/`fill_color`/`line_color`/`alt_text`
+  - API: `textboxes={'B2': 'note'}` or `{'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True, 'color': '#FF0000'}}}`
 
 ## Completed
 
+- [x] Textboxes via `textboxes` parameter (v0.14.0)
 - [x] Checkboxes via `checkboxes` parameter (v0.13.0)
 - [x] Data validation via `validations` parameter (v0.10.0)
 - [x] Images via `images` parameter (v0.10.0)

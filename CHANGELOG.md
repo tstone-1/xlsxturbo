@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - Unreleased
+## [0.14.0] - 2026-04-21
+
+### Added
+- **Textboxes** - Floating text shapes via the new `textboxes` parameter. Simple form `{"B2": "text"}` for a bare string, dict form with `text` + `width`/`height` (pixels), `x_offset`/`y_offset` (pixels), `font` (sub-dict with `name`/`size`/`bold`/`italic`/`underline`/`color`), `fill_color`, `line_color`, and `alt_text`. Works in both `df_to_xlsx` and `dfs_to_xlsx` (including per-sheet options). Unknown top-level and font keys produce errors listing the valid options.
+- **`parse_color_enum` helper** - Internal helper in `parse.rs` returning a `rust_xlsxwriter::Color` (wraps existing `parse_color`). Used by shapes; will be reused by sparklines and charts in upcoming releases.
+
+## [0.13.0] - 2026-04-21
 
 ### Added
 - **Checkboxes** - Interactive cell checkboxes via the new `checkboxes` parameter. Accepts `{"A1": True}` for a bare bool or `{"A3": {"checked": True, "format": {"bg_color": "#C6EFCE"}}}` for a checkbox with an attached cell format. Works in both `df_to_xlsx` and `dfs_to_xlsx` (including per-sheet options).

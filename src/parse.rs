@@ -5,7 +5,9 @@ use chrono::Timelike;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::Py;
-use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatAlign, FormatBorder, TableStyle};
+use rust_xlsxwriter::{
+    Color, ConditionalFormatIconType, Format, FormatAlign, FormatBorder, TableStyle,
+};
 use std::collections::HashMap;
 
 /// Generate a table style lookup match from a list of (string, variant) pairs.
@@ -273,6 +275,13 @@ pub(crate) fn parse_color(color_str: &str) -> Result<u32, String> {
             _ => Err(format!("Unknown color: {}", color)),
         }
     }
+}
+
+/// Parse color string into a rust_xlsxwriter `Color` enum.
+/// Wraps `parse_color` — used by features whose setters take `impl Into<Color>`
+/// rather than a raw `u32` (shapes, charts, sparklines).
+pub(crate) fn parse_color_enum(color_str: &str) -> Result<Color, String> {
+    parse_color(color_str).map(Color::RGB)
 }
 
 /// Parse header format dictionary into rust_xlsxwriter Format

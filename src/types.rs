@@ -106,6 +106,9 @@ pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (
 /// Type alias for checkbox config: cell_ref -> (checked, optional format dict)
 pub(crate) type CheckboxConfig = (bool, Option<HashMap<String, Py<PyAny>>>);
 
+/// Type alias for textbox config: cell_ref -> (text, optional options dict)
+pub(crate) type TextboxConfig = (String, Option<HashMap<String, Py<PyAny>>>);
+
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
@@ -186,6 +189,7 @@ pub(crate) struct ExtractedOptions {
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<HashMap<String, ImageConfig>>,
     pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
+    pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -210,6 +214,7 @@ pub(crate) struct SheetConfig {
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
     pub(crate) images: Option<HashMap<String, ImageConfig>>, // cell_ref -> (path, options)
     pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>, // cell_ref -> (checked, format)
+    pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>, // cell_ref -> (text, options)
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -241,6 +246,7 @@ pub(crate) struct EffectiveOpts<'a> {
     pub(crate) rich_text: Option<&'a HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<&'a HashMap<String, ImageConfig>>,
     pub(crate) checkboxes: Option<&'a HashMap<String, CheckboxConfig>>,
+    pub(crate) textboxes: Option<&'a HashMap<String, TextboxConfig>>,
     pub(crate) cells: Option<&'a Vec<CellWrite>>,
 }
 
@@ -260,6 +266,7 @@ impl ExtractedOptions {
             rich_text: self.rich_text.as_ref(),
             images: self.images.as_ref(),
             checkboxes: self.checkboxes.as_ref(),
+            textboxes: self.textboxes.as_ref(),
             cells: self.cells.as_ref(),
         }
     }
@@ -300,6 +307,7 @@ impl SheetConfig {
             rich_text: self.rich_text.as_ref().or(global.rich_text.as_ref()),
             images: self.images.as_ref().or(global.images.as_ref()),
             checkboxes: self.checkboxes.as_ref().or(global.checkboxes.as_ref()),
+            textboxes: self.textboxes.as_ref().or(global.textboxes.as_ref()),
             cells: self.cells.as_ref().or(global.cells.as_ref()),
         }
     }

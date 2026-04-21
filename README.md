@@ -15,6 +15,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Rich text** - multiple formats within a single cell
 - **Images** - embed PNG, JPEG, GIF, BMP in cells
 - **Checkboxes** - interactive cell checkboxes (Excel for Microsoft 365, Sept 2024+)
+- **Textboxes** - floating text shapes with configurable font, fill, and line colors
 - **Defined names** - workbook-level named ranges for formulas and references
 - **Arbitrary cell writes** - write values to specific cells with optional formatting
 - **Border styles** - per-side borders (left, right, top, bottom) with 13 style options
@@ -781,6 +782,61 @@ xlsxturbo.df_to_xlsx(df, "checklist.xlsx",
 **Notes:**
 - Checkboxes are written AFTER DataFrame data — use cell refs that don't collide with data rows
 - Requires Excel for Microsoft 365 (Sept 2024 or later); older versions will display the underlying boolean value instead
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
+### Textboxes
+
+Add floating text shapes (callouts, annotations) that sit on top of cells. Unknown keys raise errors (both at the top level and inside `font`).
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'Region': ['North', 'South'], 'Sales': [120, 95]})
+
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    textboxes={
+        # Bare string - simplest form, default size/style
+        'D2': 'Simple note',
+        # Dict form with full options
+        'E5': {
+            'text': 'Q4 target met for all regions',
+            'width': 220,
+            'height': 80,
+            'x_offset': 10,
+            'y_offset': 5,
+            'font': {
+                'name': 'Arial',
+                'size': 12,
+                'bold': True,
+                'italic': False,
+                'underline': False,
+                'color': '#2C3E50',
+            },
+            'fill_color': '#ECF0F1',
+            'line_color': '#34495E',
+            'alt_text': 'Q4 summary callout',
+        },
+    }
+)
+```
+
+**Textbox format:**
+- Simple: `{'D2': 'Some text'}`
+- With options: `{'D2': {'text': '...', 'width': 200, 'font': {'bold': True}, ...}}`
+
+**Available options (dict form):**
+- `text` (str, required): Textbox contents
+- `width`, `height` (int pixels): Shape size. Defaults are 192 × 120 pixels
+- `x_offset`, `y_offset` (int pixels): Shift within the anchor cell
+- `font` (dict): Font options — `name`, `size` (points), `bold`, `italic`, `underline`, `color` (hex or named)
+- `fill_color` (str): Background fill — hex `#RRGGBB` or named color
+- `line_color` (str): Border line — hex `#RRGGBB` or named color
+- `alt_text` (str): Alternative text for accessibility
+
+**Notes:**
+- Textboxes are floating shapes anchored to a cell, not cell-content — they overlay cells without overwriting them
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
