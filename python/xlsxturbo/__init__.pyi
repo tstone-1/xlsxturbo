@@ -131,6 +131,30 @@ class CheckboxOptions(TypedDict, total=False):
     checked: bool            # Initial state: True (checked) or False (unchecked) - required at runtime
     format: ColumnFormat     # Optional cell format (bg_color, font_color, border, etc.)
 
+class TextboxFont(TypedDict, total=False):
+    """Font options for textbox text."""
+    name: str           # Font family name (e.g. 'Arial', 'Calibri')
+    size: float         # Font size in points
+    bold: bool
+    italic: bool
+    underline: bool
+    color: str          # '#RRGGBB' or named color
+
+class TextboxOptions(TypedDict, total=False):
+    """Options for floating text shapes (textboxes).
+
+    Note: 'text' is required at runtime but TypedDict doesn't enforce this.
+    """
+    text: str               # Textbox contents (required at runtime)
+    width: int              # Width in pixels (default 192)
+    height: int             # Height in pixels (default 120)
+    x_offset: int           # Horizontal offset within the anchor cell (pixels)
+    y_offset: int           # Vertical offset within the anchor cell (pixels)
+    font: TextboxFont       # Font properties
+    fill_color: str         # Background fill color ('#RRGGBB' or named)
+    line_color: str         # Border line color ('#RRGGBB' or named)
+    alt_text: str           # Alternative text for accessibility
+
 class CellValueOptions(TypedDict, total=False):
     """Options for a cell write with custom formatting.
 
@@ -162,6 +186,7 @@ class SheetOptions(TypedDict, total=False):
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> list of (text, format) or plain text
     images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
     checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
+    textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
     cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
@@ -216,6 +241,7 @@ def df_to_xlsx(
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
     checkboxes: dict[str, bool | CheckboxOptions] | None = None,
+    textboxes: dict[str, str | TextboxOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> tuple[int, int]:
@@ -266,6 +292,13 @@ def df_to_xlsx(
         checkboxes: Dict mapping cell refs to interactive checkboxes.
             Simple form: {'A1': True, 'A2': False}
             Dict form: {'A3': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}
+        textboxes: Dict mapping cell refs to floating text shapes.
+            Simple form: {'B2': 'Some text'}
+            Dict form: {'B2': {'text': 'Note', 'width': 200, 'height': 100,
+                        'x_offset': 10, 'y_offset': 5,
+                        'font': {'name': 'Arial', 'size': 14, 'bold': True, 'color': '#FF0000'},
+                        'fill_color': '#F0F0F0', 'line_color': '#000000',
+                        'alt_text': 'Descriptive alt text'}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -297,6 +330,7 @@ def dfs_to_xlsx(
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
     checkboxes: dict[str, bool | CheckboxOptions] | None = None,
+    textboxes: dict[str, str | TextboxOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> list[tuple[int, int]]:
@@ -335,6 +369,9 @@ def dfs_to_xlsx(
         checkboxes: Dict mapping cell refs to interactive checkboxes.
             Simple form: {'A1': True}
             Dict form: {'A1': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}
+        textboxes: Dict mapping cell refs to floating text shapes.
+            Simple form: {'B2': 'text'}
+            Dict form: {'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True}}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
