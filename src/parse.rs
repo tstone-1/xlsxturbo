@@ -1,6 +1,6 @@
 //! Parsing and utility functions
 
-use crate::types::{CellValue, DateOrder, DATETIME_PATTERNS};
+use crate::types::{pytype_name, CellValue, DateOrder, DATETIME_PATTERNS};
 use chrono::Timelike;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -334,7 +334,7 @@ fn get_bool_field(
         format!(
             "format option '{}' must be a bool, got {}",
             key,
-            py_type_name(bound)
+            pytype_name(bound)
         )
     })
 }
@@ -356,7 +356,7 @@ fn get_string_field(
         format!(
             "format option '{}' must be a string, got {}",
             key,
-            py_type_name(bound)
+            pytype_name(bound)
         )
     })
 }
@@ -378,7 +378,7 @@ fn get_f64_field(
         format!(
             "format option '{}' must be a number, got {}",
             key,
-            py_type_name(bound)
+            pytype_name(bound)
         )
     })
 }
@@ -406,16 +406,8 @@ fn get_border_field(
     Err(format!(
         "format option '{}' must be a bool or a style name string, got {}",
         key,
-        py_type_name(bound)
+        pytype_name(bound)
     ))
-}
-
-/// Best-effort Python type name for error messages.
-fn py_type_name(bound: &Bound<'_, PyAny>) -> String {
-    bound
-        .get_type()
-        .name()
-        .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
 }
 
 /// Shared format parser for header, column, and rich-text formats.

@@ -103,6 +103,9 @@ pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 /// Type alias for image config: cell_ref -> image path or config dict
 pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
 
+/// Type alias for checkbox config: cell_ref -> (checked, optional format dict)
+pub(crate) type CheckboxConfig = (bool, Option<HashMap<String, Py<PyAny>>>);
+
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
@@ -116,6 +119,15 @@ pub(crate) struct CellWrite {
     pub(crate) align_horizontal: Option<String>,
     pub(crate) align_vertical: Option<String>,
     pub(crate) wrap_text: bool,
+}
+
+/// Infallible variant of `PyAny::get_type().name()` returning "unknown" on failure.
+/// Used for error-message construction where we must produce a String even if the
+/// name lookup itself errors (e.g., during another exception's formatting).
+pub(crate) fn pytype_name(v: &Bound<'_, PyAny>) -> String {
+    v.get_type()
+        .name()
+        .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
 }
 
 /// Detect whether a Python object is a Polars or Pandas DataFrame.
@@ -138,9 +150,7 @@ pub(crate) fn is_polars_dataframe(df: &Bound<'_, PyAny>) -> Result<bool, String>
         Err(format!(
             "Unsupported DataFrame type: {}.{}. Expected pandas or polars DataFrame.",
             module,
-            df.get_type()
-                .name()
-                .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
+            pytype_name(df)
         ))
     }
 }
@@ -175,6 +185,7 @@ pub(crate) struct ExtractedOptions {
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>,
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<HashMap<String, ImageConfig>>,
+    pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -198,6 +209,7 @@ pub(crate) struct SheetConfig {
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>, // column name/pattern -> validation config
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
     pub(crate) images: Option<HashMap<String, ImageConfig>>, // cell_ref -> (path, options)
+    pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>, // cell_ref -> (checked, format)
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -228,6 +240,7 @@ pub(crate) struct EffectiveOpts<'a> {
     pub(crate) validations: Option<&'a IndexMap<String, ValidationConfig>>,
     pub(crate) rich_text: Option<&'a HashMap<String, Vec<RichTextSegment>>>,
     pub(crate) images: Option<&'a HashMap<String, ImageConfig>>,
+    pub(crate) checkboxes: Option<&'a HashMap<String, CheckboxConfig>>,
     pub(crate) cells: Option<&'a Vec<CellWrite>>,
 }
 
@@ -246,6 +259,7 @@ impl ExtractedOptions {
             validations: self.validations.as_ref(),
             rich_text: self.rich_text.as_ref(),
             images: self.images.as_ref(),
+            checkboxes: self.checkboxes.as_ref(),
             cells: self.cells.as_ref(),
         }
     }
@@ -285,6 +299,7 @@ impl SheetConfig {
             validations: self.validations.as_ref().or(global.validations.as_ref()),
             rich_text: self.rich_text.as_ref().or(global.rich_text.as_ref()),
             images: self.images.as_ref().or(global.images.as_ref()),
+            checkboxes: self.checkboxes.as_ref().or(global.checkboxes.as_ref()),
             cells: self.cells.as_ref().or(global.cells.as_ref()),
         }
     }
