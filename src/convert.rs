@@ -1,9 +1,9 @@
 //! Core conversion functions for CSV and DataFrame to XLSX
 
 use crate::apply::{
-    apply_cells, apply_column_widths, apply_column_widths_with_autofit_cap, apply_comments,
-    apply_conditional_formats, apply_formula_columns, apply_hyperlinks, apply_images,
-    apply_merged_ranges, apply_rich_text, apply_validations,
+    apply_cells, apply_checkboxes, apply_column_widths, apply_column_widths_with_autofit_cap,
+    apply_comments, apply_conditional_formats, apply_formula_columns, apply_hyperlinks,
+    apply_images, apply_merged_ranges, apply_rich_text, apply_validations,
 };
 use crate::parse::{
     build_column_formats, naive_date_to_excel, naive_datetime_to_excel, parse_header_format,
@@ -540,6 +540,9 @@ pub(crate) fn write_sheet_data(
         if opts.images.is_some() {
             disabled.push("images");
         }
+        if opts.checkboxes.is_some() {
+            disabled.push("checkboxes");
+        }
         if opts.cells.is_some() {
             disabled.push("cells");
         }
@@ -885,6 +888,13 @@ fn apply_worksheet_features(
     if let Some(imgs) = opts.images {
         if !imgs.is_empty() {
             apply_images(py, worksheet, imgs)?;
+        }
+    }
+
+    // Apply checkboxes
+    if let Some(cbxs) = opts.checkboxes {
+        if !cbxs.is_empty() {
+            apply_checkboxes(py, worksheet, cbxs)?;
         }
     }
 

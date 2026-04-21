@@ -22,11 +22,12 @@ pub use types::DateOrder;
 
 use convert::{convert_dataframe_to_xlsx, write_sheet_data};
 use extract::{
-    extract_cells, extract_column_formats, extract_column_widths, extract_comments,
-    extract_conditional_formats, extract_formula_columns, extract_header_format,
+    extract_cells, extract_checkboxes, extract_column_formats, extract_column_widths,
+    extract_comments, extract_conditional_formats, extract_formula_columns, extract_header_format,
     extract_hyperlinks, extract_images, extract_merged_ranges, extract_rich_text,
     extract_sheet_info, extract_validations,
 };
+use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
 
@@ -40,13 +41,10 @@ fn require_dict<'py>(
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
     value.cast::<pyo3::types::PyDict>().cloned().map_err(|_| {
-        let type_name = value
-            .get_type()
-            .name()
-            .map_or_else(|_| "unknown".to_string(), |n| n.to_string());
         pyo3::exceptions::PyTypeError::new_err(format!(
             "expected dict for '{}', got {}",
-            param_name, type_name
+            param_name,
+            pytype_name(value)
         ))
     })
 }
@@ -57,13 +55,10 @@ fn require_list<'py>(
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyList>> {
     value.cast::<pyo3::types::PyList>().cloned().map_err(|_| {
-        let type_name = value
-            .get_type()
-            .name()
-            .map_or_else(|_| "unknown".to_string(), |n| n.to_string());
         pyo3::exceptions::PyTypeError::new_err(format!(
             "expected list for '{}', got {}",
-            param_name, type_name
+            param_name,
+            pytype_name(value)
         ))
     })
 }
@@ -82,6 +77,7 @@ fn extract_options<'py>(
     validations: Option<&Bound<'py, PyAny>>,
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
+    checkboxes: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<ExtractedOptions> {
     Ok(ExtractedOptions {
@@ -119,6 +115,9 @@ fn extract_options<'py>(
             .transpose()?,
         images: images
             .map(|v| require_dict(v, "images").and_then(|d| extract_images(&d)))
+            .transpose()?,
+        checkboxes: checkboxes
+            .map(|v| require_dict(v, "checkboxes").and_then(|d| extract_checkboxes(&d)))
             .transpose()?,
         cells: cells
             .map(|v| require_dict(v, "cells").and_then(|d| extract_cells(&d)))
@@ -232,6 +231,9 @@ fn csv_to_xlsx(
 ///                Example: {"A1": [("Bold text", {"bold": True}), (" normal text",)]}
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
 ///             Example: {"A1": "logo.png"} or {"A1": {"path": "logo.png", "scale_width": 0.5}}
+///     checkboxes: Dict mapping cell refs to checkbox state (default: None).
+///                 Simple form: {"A1": True, "A2": False}
+///                 Dict form with optional cell format: {"A3": {"checked": True, "format": {"bg_color": "#C6EFCE"}}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -258,7 +260,32 @@ fn csv_to_xlsx(
 ///     >>> # For very large files, use constant_memory mode:
 ///     >>> xlsxturbo.df_to_xlsx(large_df, "big.xlsx", constant_memory=True)
 #[pyfunction]
-#[pyo3(signature = (df, output_path, sheet_name = "Sheet1", header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None, defined_names = None, cells = None))]
+#[pyo3(signature = (
+    df,
+    output_path,
+    sheet_name = "Sheet1",
+    header = true,
+    autofit = false,
+    table_style = None,
+    freeze_panes = false,
+    column_widths = None,
+    table_name = None,
+    header_format = None,
+    row_heights = None,
+    constant_memory = false,
+    column_formats = None,
+    conditional_formats = None,
+    formula_columns = None,
+    merged_ranges = None,
+    hyperlinks = None,
+    comments = None,
+    validations = None,
+    rich_text = None,
+    images = None,
+    checkboxes = None,
+    defined_names = None,
+    cells = None,
+))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
     py: Python<'py>,
@@ -283,6 +310,7 @@ fn df_to_xlsx<'py>(
     validations: Option<&Bound<'py, PyAny>>,
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
+    checkboxes: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
@@ -298,6 +326,7 @@ fn df_to_xlsx<'py>(
         validations,
         rich_text,
         images,
+        checkboxes,
         cells,
     )?;
 
@@ -338,7 +367,7 @@ fn version() -> &'static str {
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
-///             comments, validations, rich_text, images, cells
+///             comments, validations, rich_text, images, checkboxes, cells
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -369,6 +398,8 @@ fn version() -> &'static str {
 ///                  Types: list, whole_number, decimal, text_length.
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
+///     checkboxes: Dict mapping cell refs to checkbox state (bool) or config dict (default: None).
+///                 Example: {"A1": True} or {"A1": {"checked": True, "format": {"bg_color": "#C6EFCE"}}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -396,7 +427,31 @@ fn version() -> &'static str {
 ///     ...     (df2, "Instructions", {"header": False})
 ///     ... ], "report.xlsx", autofit=True)
 #[pyfunction]
-#[pyo3(signature = (sheets, output_path, header = true, autofit = false, table_style = None, freeze_panes = false, column_widths = None, table_name = None, header_format = None, row_heights = None, constant_memory = false, column_formats = None, conditional_formats = None, formula_columns = None, merged_ranges = None, hyperlinks = None, comments = None, validations = None, rich_text = None, images = None, defined_names = None, cells = None))]
+#[pyo3(signature = (
+    sheets,
+    output_path,
+    header = true,
+    autofit = false,
+    table_style = None,
+    freeze_panes = false,
+    column_widths = None,
+    table_name = None,
+    header_format = None,
+    row_heights = None,
+    constant_memory = false,
+    column_formats = None,
+    conditional_formats = None,
+    formula_columns = None,
+    merged_ranges = None,
+    hyperlinks = None,
+    comments = None,
+    validations = None,
+    rich_text = None,
+    images = None,
+    checkboxes = None,
+    defined_names = None,
+    cells = None,
+))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
@@ -420,6 +475,7 @@ fn dfs_to_xlsx<'py>(
     validations: Option<&Bound<'py, PyAny>>,
     rich_text: Option<&Bound<'py, PyAny>>,
     images: Option<&Bound<'py, PyAny>>,
+    checkboxes: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
@@ -438,6 +494,7 @@ fn dfs_to_xlsx<'py>(
         validations,
         rich_text,
         images,
+        checkboxes,
         cells,
     )?;
 

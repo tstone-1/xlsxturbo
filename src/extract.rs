@@ -2,8 +2,8 @@
 
 use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::{
-    CellWrite, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange,
-    RichTextSegment, SheetConfig, ValidationConfig,
+    pytype_name, CellWrite, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink,
+    ImageConfig, MergedRange, RichTextSegment, SheetConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -146,6 +146,7 @@ pub(crate) fn extract_sheet_info<'py>(
         );
         extract_dict_field!(opts, config, "rich_text", rich_text, extract_rich_text);
         extract_dict_field!(opts, config, "images", images, extract_images);
+        extract_dict_field!(opts, config, "checkboxes", checkboxes, extract_checkboxes);
 
         // Extract cells
         if let Ok(val) = opts.get_item("cells") {
@@ -484,6 +485,58 @@ pub(crate) fn extract_images(
     }
 
     Ok(images)
+}
+
+/// Extract checkboxes from Python dict (cell_ref -> bool or config dict)
+/// Simple form: {'A1': True}
+/// Dict form: {'A1': {'checked': True, 'format': {...}}}
+pub(crate) fn extract_checkboxes(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, CheckboxConfig>> {
+    let mut checkboxes: HashMap<String, CheckboxConfig> = HashMap::new();
+
+    for (cell_ref, value) in py_dict.iter() {
+        let cell_str: String = cell_ref.extract()?;
+
+        // Dict form must be tried before bool, since a dict would extract as False for bool otherwise.
+        if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
+            let checked: bool = inner_dict
+                .get_item("checked")?
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "checkboxes['{}'] dict missing 'checked' key",
+                        cell_str
+                    ))
+                })?
+                .extract()?;
+            let format_dict = if let Ok(Some(fmt)) = inner_dict.get_item("format") {
+                if fmt.is_none() {
+                    None
+                } else if let Ok(d) = fmt.cast::<pyo3::types::PyDict>() {
+                    Some(pydict_to_hashmap(d)?)
+                } else {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "checkboxes['{}']: 'format' must be a dict",
+                        cell_str
+                    )));
+                }
+            } else {
+                None
+            };
+            checkboxes.insert(cell_str, (checked, format_dict));
+        } else {
+            let checked: bool = value.extract().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(format!(
+                    "checkboxes['{}']: expected bool or dict, got {}",
+                    cell_str,
+                    pytype_name(&value)
+                ))
+            })?;
+            checkboxes.insert(cell_str, (checked, None));
+        }
+    }
+
+    Ok(checkboxes)
 }
 
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})

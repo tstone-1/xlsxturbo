@@ -63,9 +63,9 @@ Niche features for specific use cases.
   - rust_xlsxwriter: not supported (write-only by design)
   - Would require openpyxl hybrid approach
 
-- [ ] **Checkboxes** - Interactive checkboxes in cells
-  - rust_xlsxwriter: supported
-  - Enables: todo lists, selection interfaces
+- [x] **Checkboxes** - Interactive checkboxes in cells (v0.13.0)
+  - Supports: bare bool or dict with `checked` + optional `format`
+  - API: `checkboxes={'A1': True}` or `{'A1': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}`
 
 - [ ] **Textboxes** - Floating text annotations
   - rust_xlsxwriter: supported
@@ -73,6 +73,7 @@ Niche features for specific use cases.
 
 ## Completed
 
+- [x] Checkboxes via `checkboxes` parameter (v0.13.0)
 - [x] Data validation via `validations` parameter (v0.10.0)
 - [x] Images via `images` parameter (v0.10.0)
 - [x] Comments/notes via `comments` parameter (v0.10.0)

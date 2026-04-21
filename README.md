@@ -14,6 +14,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Data validation** - dropdowns, number ranges, text length constraints
 - **Rich text** - multiple formats within a single cell
 - **Images** - embed PNG, JPEG, GIF, BMP in cells
+- **Checkboxes** - interactive cell checkboxes (Excel for Microsoft 365, Sept 2024+)
 - **Defined names** - workbook-level named ranges for formulas and references
 - **Arbitrary cell writes** - write values to specific cells with optional formatting
 - **Border styles** - per-side borders (left, right, top, bottom) with 13 style options
@@ -744,6 +745,42 @@ xlsxturbo.df_to_xlsx(df, "catalog.xlsx",
 **Notes:**
 - Images are positioned at the specified cell (overlays any existing content)
 - Image file must exist; non-existent files will raise an error
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
+### Checkboxes
+
+Add interactive checkboxes to cells (Excel for Microsoft 365, Sept 2024+). Renders as `TRUE` or `FALSE` that can be toggled in Excel:
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({'Task': ['Write docs', 'Run tests', 'Ship release']})
+
+xlsxturbo.df_to_xlsx(df, "checklist.xlsx",
+    checkboxes={
+        # Bare bool - simplest form
+        'B2': True,
+        'B3': False,
+        'B4': False,
+        # Dict form with cell format
+        'C2': {'checked': True, 'format': {'bg_color': '#C6EFCE', 'bold': True}},
+    }
+)
+```
+
+**Checkbox format:**
+- Simple: `{'A1': True}` or `{'A1': False}`
+- With format: `{'A1': {'checked': True, 'format': {...}}}`
+
+**Available options (dict form):**
+- `checked` (bool, required): Initial state
+- `format` (dict): Optional cell format. Accepts the same keys as [Column Formatting](#column-formatting) (bg_color, font_color, border, bold, etc.)
+
+**Notes:**
+- Checkboxes are written AFTER DataFrame data — use cell refs that don't collide with data rows
+- Requires Excel for Microsoft 365 (Sept 2024 or later); older versions will display the underlying boolean value instead
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 

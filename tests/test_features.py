@@ -1443,6 +1443,163 @@ class TestImages:
                 os.unlink(img_path)
 
 
+class TestCheckboxes:
+    """Tests for checkboxes feature (v0.13.0)"""
+
+    def test_checkbox_simple_bool(self):
+        """Checkboxes with plain bool values"""
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, checkboxes={"D1": True, "D2": False})
+            assert os.path.exists(path)
+            wb = load_workbook(path)
+            ws = wb.active
+            # Checkboxes render as boolean TRUE/FALSE in cells
+            assert ws["D1"].value is True
+            assert ws["D2"].value is False
+        finally:
+            os.unlink(path)
+
+    def test_checkbox_dict_form(self):
+        """Checkbox with dict specifying checked state"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, checkboxes={"B2": {"checked": True}})
+            assert os.path.exists(path)
+            wb = load_workbook(path)
+            ws = wb.active
+            assert ws["B2"].value is True
+        finally:
+            os.unlink(path)
+
+    def test_checkbox_with_format(self):
+        """Checkbox with optional cell format"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                checkboxes={"C3": {"checked": True, "format": {"bg_color": "#C6EFCE", "bold": True}}},
+            )
+            assert os.path.exists(path)
+            wb = load_workbook(path)
+            ws = wb.active
+            assert ws["C3"].value is True
+        finally:
+            os.unlink(path)
+
+    def test_checkbox_missing_checked_key_raises(self):
+        """Dict form without 'checked' raises a clear error"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, checkboxes={"B2": {"format": {"bold": True}}})
+            assert False, "Should have raised"
+        except ValueError as e:
+            assert "checked" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_checkbox_format_not_dict_raises(self):
+        """'format' field present but not a dict raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df, path, checkboxes={"B2": {"checked": True, "format": "not a dict"}}
+            )
+            assert False, "Should have raised"
+        except TypeError as e:
+            assert "format" in str(e) and "dict" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_checkbox_invalid_cell_ref_raises(self):
+        """Invalid cell reference raises"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, checkboxes={"not_a_ref": True})
+            assert False, "Should have raised"
+        except ValueError:
+            pass
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_checkbox_wrong_value_type_raises(self):
+        """Non-bool, non-dict value raises TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path, checkboxes={"B2": "not_a_bool"})
+            assert False, "Should have raised"
+        except TypeError as e:
+            assert "checkboxes" in str(e)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_checkbox_with_dfs_to_xlsx_per_sheet(self):
+        """Checkboxes work via per-sheet options in dfs_to_xlsx"""
+        df1 = pd.DataFrame({"A": [1, 2]})
+        df2 = pd.DataFrame({"B": [3, 4]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (df1, "S1", {"checkboxes": {"D1": True}}),
+                    (df2, "S2", {"checkboxes": {"D1": False}}),
+                ],
+                path,
+            )
+            assert os.path.exists(path)
+            wb = load_workbook(path)
+            assert wb["S1"]["D1"].value is True
+            assert wb["S2"]["D1"].value is False
+        finally:
+            os.unlink(path)
+
+    def test_checkbox_combined_with_other_features(self):
+        """Checkboxes coexist with other features on the same sheet"""
+        df = pd.DataFrame({"Name": ["Alice", "Bob"], "Active": [True, False]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                checkboxes={"D1": True, "D2": False},
+                comments={"A1": "Names"},
+                validations={"Name": {"type": "text_length", "min": 1, "max": 100}},
+            )
+            assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+    def test_checkbox_constant_memory_warns(self):
+        """constant_memory=True with checkboxes emits RuntimeWarning"""
+        import warnings
+
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(
+                    df, path, constant_memory=True, checkboxes={"B2": True}
+                )
+                assert len(w) == 1
+                assert issubclass(w[0].category, RuntimeWarning)
+                assert "checkboxes" in str(w[0].message)
+        finally:
+            os.unlink(path)
+
+
 class TestV10AllFeatures:
     """Tests combining v0.10.0 features"""
 

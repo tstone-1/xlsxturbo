@@ -123,6 +123,14 @@ class ImageOptions(TypedDict, total=False):
     scale_height: float  # Scale factor for height (1.0 = original)
     alt_text: str        # Alternative text for accessibility
 
+class CheckboxOptions(TypedDict, total=False):
+    """Options for interactive cell checkboxes.
+
+    Note: 'checked' is required at runtime but TypedDict doesn't enforce this.
+    """
+    checked: bool            # Initial state: True (checked) or False (unchecked) - required at runtime
+    format: ColumnFormat     # Optional cell format (bg_color, font_color, border, etc.)
+
 class CellValueOptions(TypedDict, total=False):
     """Options for a cell write with custom formatting.
 
@@ -153,6 +161,7 @@ class SheetOptions(TypedDict, total=False):
     validations: dict[str, ValidationOptions] | None  # Column name/pattern -> validation options
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> list of (text, format) or plain text
     images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
+    checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
     cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
@@ -206,6 +215,7 @@ def df_to_xlsx(
     validations: dict[str, ValidationOptions] | None = None,
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
+    checkboxes: dict[str, bool | CheckboxOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> tuple[int, int]:
@@ -253,6 +263,9 @@ def df_to_xlsx(
             Example: {'A1': [('Bold', {'bold': True}), ' normal text']}
         images: Dict mapping cell refs to image path or ImageOptions.
             Example: {'B5': 'logo.png'} or {'B5': {'path': 'logo.png', 'scale_width': 0.5}}
+        checkboxes: Dict mapping cell refs to interactive checkboxes.
+            Simple form: {'A1': True, 'A2': False}
+            Dict form: {'A3': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -283,6 +296,7 @@ def dfs_to_xlsx(
     validations: dict[str, ValidationOptions] | None = None,
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
     images: dict[str, str | ImageOptions] | None = None,
+    checkboxes: dict[str, bool | CheckboxOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> list[tuple[int, int]]:
@@ -318,6 +332,9 @@ def dfs_to_xlsx(
         validations: Dict mapping column name/pattern to data validation config.
         rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
         images: Dict mapping cell refs to image path or ImageOptions.
+        checkboxes: Dict mapping cell refs to interactive checkboxes.
+            Simple form: {'A1': True}
+            Dict form: {'A1': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

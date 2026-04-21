@@ -8,8 +8,8 @@ use crate::parse::{
     parse_vertical_alignment,
 };
 use crate::types::{
-    CellWrite, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange,
-    RichTextSegment, ValidationConfig,
+    CellWrite, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig,
+    MergedRange, RichTextSegment, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -497,6 +497,31 @@ pub(crate) fn apply_images(
         worksheet
             .insert_image(row, col, &image)
             .map_err(|e| format!("Failed to insert image at '{}': {}", cell_ref, e))?;
+    }
+
+    Ok(())
+}
+
+/// Apply checkboxes to worksheet
+pub(crate) fn apply_checkboxes(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    checkboxes: &HashMap<String, CheckboxConfig>,
+) -> Result<(), String> {
+    for (cell_ref, (checked, format_dict)) in checkboxes {
+        let (row, col) = parse_cell_ref(cell_ref)?;
+
+        if let Some(fmt_dict) = format_dict {
+            let fmt = parse_column_format(py, fmt_dict)
+                .map_err(|e| format!("checkboxes['{}']: {}", cell_ref, e))?;
+            worksheet
+                .insert_checkbox_with_format(row, col, *checked, &fmt)
+                .map_err(|e| format!("checkboxes['{}']: {}", cell_ref, e))?;
+        } else {
+            worksheet
+                .insert_checkbox(row, col, *checked)
+                .map_err(|e| format!("checkboxes['{}']: {}", cell_ref, e))?;
+        }
     }
 
     Ok(())
