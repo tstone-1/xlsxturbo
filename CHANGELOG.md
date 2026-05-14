@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-05-14
+
+### Fixed
+- **`cargo test` works outside maturin builds** - `pyo3/extension-module` is now enabled by maturin instead of the default Cargo dependency path, fixing normal Rust test linking on macOS.
+- **Validation configs now fail loudly on typos and wrong range types** - `validations` rejects unknown keys and present-but-invalid `min`/`max` values instead of silently defaulting to unbounded ranges.
+- **Nested format containers now reject wrong types** - `column_formats`, `merged_ranges` formats, and `rich_text` tuple formats now raise clear errors when a format value is not a dict.
+- **Per-sheet option extraction is strict** - `dfs_to_xlsx` per-sheet options now reject wrong container types instead of silently ignoring them.
+- **`cells.wrap_text` validates types** - Wrong-type values now raise a clear `TypeError`.
+
+### Refactored
+- **Split feature application modules** - `src/apply.rs` is now a facade over focused `apply/` modules for annotations, cells, conditional formats, dimensions, formulas, media, rich text, and validations.
+- **Split parser utilities** - `src/parse.rs` is now a facade over focused parser modules for cell refs, colors, formats, patterns, tables, and values.
+- **Split Python integration tests by feature family** - The monolithic test file is now organized into focused test modules with shared helpers.
+
+### Dependencies
+- **Updated `rust_xlsxwriter`** - Bumped from `0.94` to `0.95`.
+- **Refreshed development lockfile** - Updated Python dev dependency lock entries.
+
 ## [0.14.0] - 2026-04-21
 
 ### Added
