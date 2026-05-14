@@ -100,14 +100,26 @@ pub(crate) type ValidationConfig = HashMap<String, Py<PyAny>>;
 /// Type alias for rich text segment: (text, optional format_dict) or just text
 pub(crate) type RichTextSegment = (String, Option<HashMap<String, Py<PyAny>>>);
 
-/// Type alias for image config: cell_ref -> image path or config dict
-pub(crate) type ImageConfig = (String, Option<HashMap<String, Py<PyAny>>>); // (path, options)
+/// Image insertion config extracted from the Python API.
+#[derive(Debug)]
+pub(crate) struct ImageConfig {
+    pub(crate) path: String,
+    pub(crate) options: Option<HashMap<String, Py<PyAny>>>,
+}
 
-/// Type alias for checkbox config: cell_ref -> (checked, optional format dict)
-pub(crate) type CheckboxConfig = (bool, Option<HashMap<String, Py<PyAny>>>);
+/// Checkbox insertion config extracted from the Python API.
+#[derive(Debug)]
+pub(crate) struct CheckboxConfig {
+    pub(crate) checked: bool,
+    pub(crate) format: Option<HashMap<String, Py<PyAny>>>,
+}
 
-/// Type alias for textbox config: cell_ref -> (text, optional options dict)
-pub(crate) type TextboxConfig = (String, Option<HashMap<String, Py<PyAny>>>);
+/// Textbox insertion config extracted from the Python API.
+#[derive(Debug)]
+pub(crate) struct TextboxConfig {
+    pub(crate) text: String,
+    pub(crate) options: Option<HashMap<String, Py<PyAny>>>,
+}
 
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
@@ -212,9 +224,9 @@ pub(crate) struct SheetConfig {
     pub(crate) comments: Option<HashMap<String, Comment>>, // cell_ref -> (text, author)
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>, // column name/pattern -> validation config
     pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
-    pub(crate) images: Option<HashMap<String, ImageConfig>>, // cell_ref -> (path, options)
-    pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>, // cell_ref -> (checked, format)
-    pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>, // cell_ref -> (text, options)
+    pub(crate) images: Option<HashMap<String, ImageConfig>>,
+    pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
+    pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
