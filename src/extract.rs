@@ -36,11 +36,16 @@ macro_rules! extract_dict_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
         if let Ok(val) = $opts.get_item($key) {
             if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = $extractor(dict)?;
-                    if !extracted.is_empty() {
-                        $config.$field = Some(extracted);
-                    }
+                let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "sheet option '{}' must be a dict, got {}",
+                        $key,
+                        pytype_name(&val)
+                    ))
+                })?;
+                let extracted = $extractor(dict)?;
+                if !extracted.is_empty() {
+                    $config.$field = Some(extracted);
                 }
             }
         }
@@ -52,11 +57,16 @@ macro_rules! extract_list_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
         if let Ok(val) = $opts.get_item($key) {
             if !val.is_none() {
-                if let Ok(list) = val.cast::<pyo3::types::PyList>() {
-                    let extracted = $extractor(list)?;
-                    if !extracted.is_empty() {
-                        $config.$field = Some(extracted);
-                    }
+                let list = val.cast::<pyo3::types::PyList>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "sheet option '{}' must be a list, got {}",
+                        $key,
+                        pytype_name(&val)
+                    ))
+                })?;
+                let extracted = $extractor(list)?;
+                if !extracted.is_empty() {
+                    $config.$field = Some(extracted);
                 }
             }
         }
@@ -82,6 +92,15 @@ pub(crate) fn extract_sheet_info<'py>(
 
     let config = if len >= 3 {
         let opts = sheet_tuple.get_item(2)?;
+        if opts.is_none() {
+            return Ok((df, sheet_name, SheetConfig::default()));
+        }
+        opts.cast::<pyo3::types::PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "Sheet options must be a dict, got {}",
+                pytype_name(&opts)
+            ))
+        })?;
         let mut config = SheetConfig::default();
 
         // Extract scalar fields
@@ -152,11 +171,15 @@ pub(crate) fn extract_sheet_info<'py>(
         // Extract cells
         if let Ok(val) = opts.get_item("cells") {
             if !val.is_none() {
-                if let Ok(dict) = val.cast::<pyo3::types::PyDict>() {
-                    let extracted = extract_cells(dict)?;
-                    if !extracted.is_empty() {
-                        config.cells = Some(extracted);
-                    }
+                let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "sheet option 'cells' must be a dict, got {}",
+                        pytype_name(&val)
+                    ))
+                })?;
+                let extracted = extract_cells(dict)?;
+                if !extracted.is_empty() {
+                    config.cells = Some(extracted);
                 }
             }
         }
@@ -477,11 +500,23 @@ pub(crate) fn extract_images(
                 .extract()?;
             let mut options = pydict_to_hashmap(inner_dict)?;
             options.remove("path");
-            images.insert(cell_str, (path, Some(options)));
+            images.insert(
+                cell_str,
+                ImageConfig {
+                    path,
+                    options: Some(options),
+                },
+            );
         } else {
             // Simple string format (just path)
             let path: String = value.extract()?;
-            images.insert(cell_str, (path, None));
+            images.insert(
+                cell_str,
+                ImageConfig {
+                    path,
+                    options: None,
+                },
+            );
         }
     }
 
@@ -524,7 +559,13 @@ pub(crate) fn extract_checkboxes(
             } else {
                 None
             };
-            checkboxes.insert(cell_str, (checked, format_dict));
+            checkboxes.insert(
+                cell_str,
+                CheckboxConfig {
+                    checked,
+                    format: format_dict,
+                },
+            );
         } else {
             let checked: bool = value.extract().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err(format!(
@@ -533,7 +574,13 @@ pub(crate) fn extract_checkboxes(
                     pytype_name(&value)
                 ))
             })?;
-            checkboxes.insert(cell_str, (checked, None));
+            checkboxes.insert(
+                cell_str,
+                CheckboxConfig {
+                    checked,
+                    format: None,
+                },
+            );
         }
     }
 
@@ -563,9 +610,21 @@ pub(crate) fn extract_textboxes(
                 .extract()?;
             let mut options = pydict_to_hashmap(inner_dict)?;
             options.remove("text");
-            textboxes.insert(cell_str, (text, Some(options)));
+            textboxes.insert(
+                cell_str,
+                TextboxConfig {
+                    text,
+                    options: Some(options),
+                },
+            );
         } else if let Ok(text) = value.extract::<String>() {
-            textboxes.insert(cell_str, (text, None));
+            textboxes.insert(
+                cell_str,
+                TextboxConfig {
+                    text,
+                    options: None,
+                },
+            );
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "textboxes['{}']: expected str or dict, got {}",
@@ -614,7 +673,16 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
             }
             let wrap: bool = d
                 .get_item("wrap_text")?
-                .map(|v| v.extract::<bool>().unwrap_or(false))
+                .map(|v| {
+                    v.extract::<bool>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(format!(
+                            "cells['{}']: 'wrap_text' must be a bool, got {}",
+                            cell_ref,
+                            pytype_name(&v)
+                        ))
+                    })
+                })
+                .transpose()?
                 .unwrap_or(false);
             cells.push(CellWrite {
                 row,

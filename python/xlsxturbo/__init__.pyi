@@ -262,7 +262,8 @@ def df_to_xlsx(
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
             autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images, and cells.
+            merged_ranges, hyperlinks, comments, validations, rich_text, images,
+            checkboxes, textboxes, and cells.
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
@@ -349,7 +350,8 @@ def dfs_to_xlsx(
         constant_memory: Use streaming mode (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
             autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images, and cells.
+            merged_ranges, hyperlinks, comments, validations, rich_text, images,
+            checkboxes, textboxes, and cells.
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.

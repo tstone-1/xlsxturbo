@@ -353,6 +353,8 @@ Available per-sheet options:
 - `validations` (dict): Data validation rules (column name/pattern -> validation config)
 - `rich_text` (dict): Rich text with multiple formats (cell_ref -> list of segments)
 - `images` (dict): Embedded images (cell_ref -> path or {path, scale_width, scale_height, alt_text})
+- `checkboxes` (dict): Interactive cell checkboxes (cell_ref -> bool or {checked, format})
+- `textboxes` (dict): Floating text shapes (cell_ref -> text or {text, width, height, font, ...})
 - `cells` (dict): Arbitrary cell writes (cell_ref -> value or {value, num_format})
 
 ### Conditional Formatting
@@ -967,6 +969,8 @@ xlsxturbo.dfs_to_xlsx([
 - `validations`
 - `rich_text`
 - `images`
+- `checkboxes`
+- `textboxes`
 - `cells`
 
 Column widths still work in constant memory mode.

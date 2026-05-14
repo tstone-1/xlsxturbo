@@ -2015,6 +2015,69 @@ class TestErrorPaths:
             if os.path.exists(path):
                 os.unlink(path)
 
+    def test_dfs_to_xlsx_per_sheet_invalid_dict_option_raises(self):
+        """Per-sheet dict options reject wrong container types"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(TypeError, match="validations.*dict"):
+                xlsxturbo.dfs_to_xlsx(
+                    [(df, "Sheet1", {"validations": "not_a_dict"})], path
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_dfs_to_xlsx_per_sheet_invalid_list_option_raises(self):
+        """Per-sheet list options reject wrong container types"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(TypeError, match="merged_ranges.*list"):
+                xlsxturbo.dfs_to_xlsx(
+                    [(df, "Sheet1", {"merged_ranges": {"A1:B1": "Title"}})], path
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_dfs_to_xlsx_per_sheet_invalid_cells_option_raises(self):
+        """Per-sheet cells option rejects wrong container types"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(TypeError, match="cells.*dict"):
+                xlsxturbo.dfs_to_xlsx(
+                    [(df, "Sheet1", {"cells": "not_a_dict"})], path
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_dfs_to_xlsx_per_sheet_options_must_be_dict(self):
+        """Third sheet tuple item must be an options dict or None"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(TypeError, match="Sheet options must be a dict"):
+                xlsxturbo.dfs_to_xlsx([(df, "Sheet1", "not_a_dict")], path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_cells_wrap_text_wrong_type_raises(self):
+        """Invalid cells wrap_text type raises a clear TypeError"""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(TypeError, match="wrap_text.*bool"):
+                xlsxturbo.df_to_xlsx(
+                    df, path, cells={"B1": {"value": "x", "wrap_text": "yes"}}
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
 
 class TestConditionalFormatting:
     """Tests for conditional formatting feature (v0.8.0)"""
