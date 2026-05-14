@@ -28,9 +28,6 @@ maturin develop --release
 cargo test
 
 # Python integration tests
-python tests/test_features.py
-
-# Or with pytest
 pytest tests/
 ```
 
@@ -65,7 +62,7 @@ cargo test
 maturin develop --release
 
 # 5. Python tests
-python tests/test_features.py
+pytest tests/
 ```
 
 All 5 steps must succeed before pushing.

@@ -233,9 +233,14 @@ pub(crate) fn extract_column_formats(
     let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
     for (pattern, fmt_dict) in py_dict.iter() {
         let pattern_str: String = pattern.extract()?;
-        if let Ok(inner_dict) = fmt_dict.cast::<pyo3::types::PyDict>() {
-            col_fmts.insert(pattern_str, pydict_to_hashmap(inner_dict)?);
-        }
+        let inner_dict = fmt_dict.cast::<pyo3::types::PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "column_formats['{}']: expected dict, got {}",
+                pattern_str,
+                pytype_name(&fmt_dict)
+            ))
+        })?;
+        col_fmts.insert(pattern_str, pydict_to_hashmap(inner_dict)?);
     }
     Ok(col_fmts)
 }
@@ -308,11 +313,14 @@ pub(crate) fn extract_merged_ranges(
         let format_dict = if tuple_len >= 3 {
             let fmt_item = item.get_item(2)?;
             if !fmt_item.is_none() {
-                if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                    Some(pydict_to_hashmap(dict)?)
-                } else {
-                    None
-                }
+                let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "merged_ranges['{}']: format must be a dict, got {}",
+                        range_str,
+                        pytype_name(&fmt_item)
+                    ))
+                })?;
+                Some(pydict_to_hashmap(dict)?)
             } else {
                 None
             }
@@ -440,10 +448,18 @@ pub(crate) fn extract_rich_text(
                     let text: String = tuple.get_item(0)?.extract()?;
                     let format_dict = if tuple.len() >= 2 {
                         let fmt_item = tuple.get_item(1)?;
-                        if let Ok(dict) = fmt_item.cast::<pyo3::types::PyDict>() {
-                            Some(pydict_to_hashmap(dict)?)
-                        } else {
+                        if fmt_item.is_none() {
                             None
+                        } else {
+                            let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
+                                pyo3::exceptions::PyTypeError::new_err(format!(
+                                    "rich_text['{}']: segment {} format must be a dict, got {}",
+                                    cell_str,
+                                    idx,
+                                    pytype_name(&fmt_item)
+                                ))
+                            })?;
+                            Some(pydict_to_hashmap(dict)?)
                         }
                     } else {
                         None

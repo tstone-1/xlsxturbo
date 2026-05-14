@@ -1,7 +1,7 @@
 //! Data validation application helpers.
 
 use crate::parse::matches_pattern;
-use crate::types::ValidationConfig;
+use crate::types::{pytype_name, ValidationConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{DataValidation, DataValidationErrorStyle, Worksheet};
@@ -25,6 +25,96 @@ fn validation_string_field(
         .extract::<String>()
         .map(Some)
         .map_err(|_| format!("validations['{}']: '{}' must be a string", col_pattern, key))
+}
+
+fn reject_unknown_keys(
+    config: &ValidationConfig,
+    col_pattern: &str,
+    allowed: &[&str],
+) -> Result<(), String> {
+    for key in config.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(format!(
+                "validations['{}']: unknown option '{}'. Valid: {}",
+                col_pattern,
+                key,
+                allowed.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validation_i32_field(
+    py: Python<'_>,
+    config: &ValidationConfig,
+    col_pattern: &str,
+    key: &str,
+    default: i32,
+) -> Result<i32, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(default);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(default);
+    }
+    bound.extract::<i32>().map_err(|_| {
+        format!(
+            "validations['{}']: '{}' must be an integer, got {}",
+            col_pattern,
+            key,
+            pytype_name(bound)
+        )
+    })
+}
+
+fn validation_u32_field(
+    py: Python<'_>,
+    config: &ValidationConfig,
+    col_pattern: &str,
+    key: &str,
+    default: u32,
+) -> Result<u32, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(default);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(default);
+    }
+    bound.extract::<u32>().map_err(|_| {
+        format!(
+            "validations['{}']: '{}' must be a non-negative integer, got {}",
+            col_pattern,
+            key,
+            pytype_name(bound)
+        )
+    })
+}
+
+fn validation_f64_field(
+    py: Python<'_>,
+    config: &ValidationConfig,
+    col_pattern: &str,
+    key: &str,
+    default: f64,
+) -> Result<f64, String> {
+    let Some(obj) = config.get(key) else {
+        return Ok(default);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(default);
+    }
+    bound.extract::<f64>().map_err(|_| {
+        format!(
+            "validations['{}']: '{}' must be a number, got {}",
+            col_pattern,
+            key,
+            pytype_name(bound)
+        )
+    })
 }
 
 /// Apply data validations to worksheet
@@ -58,8 +148,28 @@ pub(crate) fn apply_validations(
             .map_err(|e| format!("validations['{}']: invalid 'type': {}", col_pattern, e))?;
 
         for col_idx in col_indices {
+            const MESSAGE_KEYS: &[&str] = &[
+                "type",
+                "input_title",
+                "input_message",
+                "error_title",
+                "error_message",
+            ];
+
             let validation = match val_type.to_lowercase().as_str() {
                 "list" => {
+                    reject_unknown_keys(
+                        config,
+                        col_pattern,
+                        &[
+                            MESSAGE_KEYS[0],
+                            "values",
+                            MESSAGE_KEYS[1],
+                            MESSAGE_KEYS[2],
+                            MESSAGE_KEYS[3],
+                            MESSAGE_KEYS[4],
+                        ],
+                    )?;
                     // List validation: dropdown with values
                     let values: Vec<String> = config
                         .get("values")
@@ -92,42 +202,63 @@ pub(crate) fn apply_validations(
                         .map_err(|e| format!("Failed to create list validation: {}", e))?
                 }
                 "whole_number" | "whole" | "integer" => {
+                    reject_unknown_keys(
+                        config,
+                        col_pattern,
+                        &[
+                            MESSAGE_KEYS[0],
+                            "min",
+                            "max",
+                            MESSAGE_KEYS[1],
+                            MESSAGE_KEYS[2],
+                            MESSAGE_KEYS[3],
+                            MESSAGE_KEYS[4],
+                        ],
+                    )?;
                     // Whole number validation with between rule
-                    let min: i32 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(i32::MIN);
-                    let max: i32 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(i32::MAX);
+                    let min = validation_i32_field(py, config, col_pattern, "min", i32::MIN)?;
+                    let max = validation_i32_field(py, config, col_pattern, "max", i32::MAX)?;
                     DataValidation::new()
                         .allow_whole_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
                 }
                 "decimal" | "number" => {
+                    reject_unknown_keys(
+                        config,
+                        col_pattern,
+                        &[
+                            MESSAGE_KEYS[0],
+                            "min",
+                            "max",
+                            MESSAGE_KEYS[1],
+                            MESSAGE_KEYS[2],
+                            MESSAGE_KEYS[3],
+                            MESSAGE_KEYS[4],
+                        ],
+                    )?;
                     // Decimal validation with between rule
-                    let min: f64 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(f64::MIN);
-                    let max: f64 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(f64::MAX);
+                    let min = validation_f64_field(py, config, col_pattern, "min", f64::MIN)?;
+                    let max = validation_f64_field(py, config, col_pattern, "max", f64::MAX)?;
                     DataValidation::new().allow_decimal_number(
                         rust_xlsxwriter::DataValidationRule::Between(min, max),
                     )
                 }
                 "text_length" | "textlength" | "length" => {
+                    reject_unknown_keys(
+                        config,
+                        col_pattern,
+                        &[
+                            MESSAGE_KEYS[0],
+                            "min",
+                            "max",
+                            MESSAGE_KEYS[1],
+                            MESSAGE_KEYS[2],
+                            MESSAGE_KEYS[3],
+                            MESSAGE_KEYS[4],
+                        ],
+                    )?;
                     // Text length validation with between rule
-                    let min: u32 = config
-                        .get("min")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(0);
-                    let max: u32 = config
-                        .get("max")
-                        .and_then(|v| v.bind(py).extract().ok())
-                        .unwrap_or(u32::MAX);
+                    let min = validation_u32_field(py, config, col_pattern, "min", 0)?;
+                    let max = validation_u32_field(py, config, col_pattern, "max", u32::MAX)?;
                     DataValidation::new()
                         .allow_text_length(rust_xlsxwriter::DataValidationRule::Between(min, max))
                 }
