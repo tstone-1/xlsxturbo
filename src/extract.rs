@@ -2,8 +2,9 @@
 
 use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::{
-    pytype_name, CellWrite, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink,
-    ImageConfig, MergedRange, RichTextSegment, SheetConfig, TextboxConfig, ValidationConfig,
+    pytype_name, CellWrite, ChartConfig, CheckboxConfig, Comment, ConditionalFormatConfigs,
+    Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig, TextboxConfig,
+    ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -167,6 +168,7 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_dict_field!(opts, config, "images", images, extract_images);
         extract_dict_field!(opts, config, "checkboxes", checkboxes, extract_checkboxes);
         extract_dict_field!(opts, config, "textboxes", textboxes, extract_textboxes);
+        extract_dict_field!(opts, config, "charts", charts, extract_charts);
 
         // Extract cells
         if let Ok(val) = opts.get_item("cells") {
@@ -651,6 +653,27 @@ pub(crate) fn extract_textboxes(
     }
 
     Ok(textboxes)
+}
+
+/// Extract charts from Python dict (cell_ref -> chart options dict)
+pub(crate) fn extract_charts(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, ChartConfig>> {
+    let mut charts: HashMap<String, ChartConfig> = HashMap::new();
+
+    for (cell_ref, value) in py_dict.iter() {
+        let cell_str: String = cell_ref.extract()?;
+        let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "charts['{}']: expected dict, got {}",
+                cell_str,
+                pytype_name(&value)
+            ))
+        })?;
+        charts.insert(cell_str, pydict_to_hashmap(inner_dict)?);
+    }
+
+    Ok(charts)
 }
 
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})

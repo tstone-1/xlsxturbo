@@ -49,10 +49,10 @@ Power user features for richer Excel output.
 
 Niche features for specific use cases.
 
-- [ ] **Charts** - Bar, line, pie, scatter, etc.
+- [x] **Charts** - Bar, line, pie, scatter, etc.
   - rust_xlsxwriter: supported (all standard chart types)
   - Enables: visual data representation within Excel
-  - Complex API, may be better served by matplotlib → image
+  - API: `charts={'D2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10', 'categories_range': 'Sheet1!$A$2:$A$10'}}`
 
 - [ ] **Sparklines** - Mini inline charts
   - rust_xlsxwriter: supported

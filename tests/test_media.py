@@ -1,3 +1,5 @@
+import zipfile
+
 from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
 
 
@@ -223,6 +225,155 @@ class TestTextboxes:
         try:
             xlsxturbo.df_to_xlsx(df, path, textboxes={"C2": "Simple note"})
             assert os.path.exists(path)
+        finally:
+            os.unlink(path)
+
+
+class TestCharts:
+    """Tests for native Excel charts"""
+
+    def test_single_series_chart(self):
+        """Charts create native chart XML with title and data table"""
+        df = pd.DataFrame({"Month": ["Jan", "Feb", "Mar"], "Sales": [120, 145, 160]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                charts={
+                    "D2": {
+                        "type": "bar",
+                        "data_range": "Sheet1!$B$2:$B$4",
+                        "categories_range": "Sheet1!$A$2:$A$4",
+                        "title": "Monthly Sales",
+                        "width": 720,
+                        "height": 480,
+                        "show_data_table": True,
+                        "legend_position": "bottom",
+                    }
+                },
+            )
+            with zipfile.ZipFile(path) as zf:
+                names = zf.namelist()
+                assert "xl/charts/chart1.xml" in names
+                chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
+                assert "Monthly Sales" in chart_xml
+                assert "<c:dTable>" in chart_xml
+                assert "<c:barChart>" in chart_xml
+        finally:
+            os.unlink(path)
+
+    def test_multi_series_chart(self):
+        """Charts support explicit multiple series"""
+        df = pd.DataFrame(
+            {
+                "Month": ["Jan", "Feb", "Mar"],
+                "Sales": [120, 145, 160],
+                "Margin": [32, 41, 48],
+            }
+        )
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                charts={
+                    "E2": {
+                        "type": "column",
+                        "series": [
+                            {"name": "Sales", "values_range": "Sheet1!$B$2:$B$4"},
+                            {"name": "Margin", "values_range": "Sheet1!$C$2:$C$4"},
+                        ],
+                        "categories_range": "Sheet1!$A$2:$A$4",
+                        "title": "Quarter Results",
+                        "show_legend": False,
+                    }
+                },
+            )
+            with zipfile.ZipFile(path) as zf:
+                chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
+                assert chart_xml.count("<c:ser>") == 2
+                assert "Quarter Results" in chart_xml
+                assert "<c:legend>" not in chart_xml
+        finally:
+            os.unlink(path)
+
+    def test_charts_with_dfs_to_xlsx_per_sheet(self):
+        """Charts work via per-sheet options in dfs_to_xlsx"""
+        df1 = pd.DataFrame({"Month": ["Jan", "Feb"], "Sales": [10, 20]})
+        df2 = pd.DataFrame({"Month": ["Jan", "Feb"], "Sales": [30, 40]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (
+                        df1,
+                        "North",
+                        {
+                            "charts": {
+                                "D2": {
+                                    "type": "line",
+                                    "data_range": "North!$B$2:$B$3",
+                                    "categories_range": "North!$A$2:$A$3",
+                                }
+                            }
+                        },
+                    ),
+                    (
+                        df2,
+                        "South",
+                        {
+                            "charts": {
+                                "D2": {
+                                    "type": "line",
+                                    "data_range": "South!$B$2:$B$3",
+                                    "categories_range": "South!$A$2:$A$3",
+                                }
+                            }
+                        },
+                    ),
+                ],
+                path,
+            )
+            with zipfile.ZipFile(path) as zf:
+                assert "xl/charts/chart1.xml" in zf.namelist()
+                assert "xl/charts/chart2.xml" in zf.namelist()
+        finally:
+            os.unlink(path)
+
+    def test_chart_invalid_type_raises_error(self):
+        """Invalid chart types raise a clear error"""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="Unknown chart type"):
+                xlsxturbo.df_to_xlsx(
+                    df,
+                    path,
+                    charts={"D2": {"type": "not_a_chart", "data_range": "Sheet1!$A$2:$A$3"}},
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_chart_constant_memory_warns(self):
+        """constant_memory=True with charts emits RuntimeWarning"""
+        import warnings
+
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(
+                    df,
+                    path,
+                    constant_memory=True,
+                    charts={"D2": {"type": "bar", "data_range": "Sheet1!$A$2:$A$3"}},
+                )
+                assert len(w) == 1
+                assert issubclass(w[0].category, RuntimeWarning)
+                assert "charts" in str(w[0].message)
         finally:
             os.unlink(path)
 

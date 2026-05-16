@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-05-16
+
+### Added
+- **Native Excel charts** - Embedded editable Excel charts via the new `charts` parameter. Supports common chart types (`bar`, `column`, `line`, `area`, `pie`, `doughnut`, `radar`, `scatter`, `stock` and stacked variants), single-series `data_range`/`values_range`, multi-series `series`, categories, title, axis names, size, offsets, style, data tables, and legend controls. Works in both `df_to_xlsx` and `dfs_to_xlsx` (including per-sheet options).
+
 ## [0.14.1] - 2026-05-14
 
 ### Fixed

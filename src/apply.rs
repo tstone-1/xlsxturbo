@@ -17,6 +17,6 @@ pub(crate) use cells::apply_cells;
 pub(crate) use conditional_formats::apply_conditional_formats;
 pub(crate) use dimensions::{apply_column_widths, apply_column_widths_with_autofit_cap};
 pub(crate) use formulas::apply_formula_columns;
-pub(crate) use media::{apply_checkboxes, apply_images, apply_textboxes};
+pub(crate) use media::{apply_charts, apply_checkboxes, apply_images, apply_textboxes};
 pub(crate) use rich_text::apply_rich_text;
 pub(crate) use validations::apply_validations;
