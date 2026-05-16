@@ -30,3 +30,7 @@ Thumbs.db
 *.xlsx
 !tests/*.xlsx
 .claude/
+
+# Local-only agent artifacts — must NOT leak into this public repo
+docs/reviews/
+agent-memory-audit*.csv
