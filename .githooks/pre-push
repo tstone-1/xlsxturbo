@@ -1,7 +1,7 @@
 #!/bin/sh
 # pre-push hook for public repositories.
 # Blocks pushes that would leak internal-only content into GitHub by calling
-# the public-safe audit in xlsxturbo/scripts/audit-agent-memory.ps1.
+# the public-safe audit in agent-memory/bin/audit-agent-memory.ps1.
 #
 # Activate per-clone with: git config core.hooksPath .githooks
 # Skip a single push (rare, use with care): SKIP_AGENT_MEMORY_AUDIT=1 git push
@@ -16,11 +16,13 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 AUDIT=""
 
-# Search known clone locations across the three machines.
+# Search the canonical agent-memory clone locations.
+# Windows flat layout: $USERPROFILE/agent-memory/
+# macOS hierarchical:  $HOME/Developer/github.com/tstone-1/agent-memory/
 for candidate in \
-    "${USERPROFILE:-}/xlsxturbo/scripts/audit-agent-memory.ps1" \
-    "$HOME/xlsxturbo/scripts/audit-agent-memory.ps1" \
-    "$HOME/Developer/github.com/tstone-1/xlsxturbo/scripts/audit-agent-memory.ps1"; do
+    "${USERPROFILE:-}/agent-memory/bin/audit-agent-memory.ps1" \
+    "$HOME/agent-memory/bin/audit-agent-memory.ps1" \
+    "$HOME/Developer/github.com/tstone-1/agent-memory/bin/audit-agent-memory.ps1"; do
     case "$candidate" in /*|*:*) ;; *) continue ;; esac
     if [ -f "$candidate" ]; then
         AUDIT="$candidate"
@@ -30,9 +32,9 @@ done
 
 if [ -z "$AUDIT" ]; then
     echo "[pre-push] ERROR: audit script not found in any known location."
-    echo "[pre-push] Looked for xlsxturbo/scripts/audit-agent-memory.ps1 under:"
+    echo "[pre-push] Looked for agent-memory/bin/audit-agent-memory.ps1 under:"
     echo "[pre-push]   \$USERPROFILE, \$HOME, \$HOME/Developer/github.com/tstone-1"
-    echo "[pre-push] Push BLOCKED. Clone xlsxturbo or override with SKIP_AGENT_MEMORY_AUDIT=1."
+    echo "[pre-push] Push BLOCKED. Clone agent-memory or override with SKIP_AGENT_MEMORY_AUDIT=1."
     exit 1
 fi
 
