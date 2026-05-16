@@ -22,10 +22,10 @@ pub use types::DateOrder;
 
 use convert::{convert_dataframe_to_xlsx, write_sheet_data};
 use extract::{
-    extract_cells, extract_checkboxes, extract_column_formats, extract_column_widths,
-    extract_comments, extract_conditional_formats, extract_formula_columns, extract_header_format,
-    extract_hyperlinks, extract_images, extract_merged_ranges, extract_rich_text,
-    extract_sheet_info, extract_textboxes, extract_validations,
+    extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
+    extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
+    extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
+    extract_rich_text, extract_sheet_info, extract_textboxes, extract_validations,
 };
 use types::pytype_name;
 use types::ExtractedOptions;
@@ -79,6 +79,7 @@ fn extract_options<'py>(
     images: Option<&Bound<'py, PyAny>>,
     checkboxes: Option<&Bound<'py, PyAny>>,
     textboxes: Option<&Bound<'py, PyAny>>,
+    charts: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<ExtractedOptions> {
     Ok(ExtractedOptions {
@@ -122,6 +123,9 @@ fn extract_options<'py>(
             .transpose()?,
         textboxes: textboxes
             .map(|v| require_dict(v, "textboxes").and_then(|d| extract_textboxes(&d)))
+            .transpose()?,
+        charts: charts
+            .map(|v| require_dict(v, "charts").and_then(|d| extract_charts(&d)))
             .transpose()?,
         cells: cells
             .map(|v| require_dict(v, "cells").and_then(|d| extract_cells(&d)))
@@ -245,6 +249,9 @@ fn csv_to_xlsx(
 ///                            "font": {"name": "Arial", "size": 14, "bold": True, "color": "#FF0000"},
 ///                            "fill_color": "#F0F0F0", "line_color": "#000000",
 ///                            "alt_text": "Descriptive alt text"}}
+///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
+///             Example: {"D2": {"type": "bar", "data_range": "Sheet1!$B$2:$B$10",
+///                       "categories_range": "Sheet1!$A$2:$A$10", "title": "Monthly Activity"}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -295,6 +302,7 @@ fn csv_to_xlsx(
     images = None,
     checkboxes = None,
     textboxes = None,
+    charts = None,
     defined_names = None,
     cells = None,
 ))]
@@ -324,6 +332,7 @@ fn df_to_xlsx<'py>(
     images: Option<&Bound<'py, PyAny>>,
     checkboxes: Option<&Bound<'py, PyAny>>,
     textboxes: Option<&Bound<'py, PyAny>>,
+    charts: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
@@ -341,6 +350,7 @@ fn df_to_xlsx<'py>(
         images,
         checkboxes,
         textboxes,
+        charts,
         cells,
     )?;
 
@@ -381,7 +391,7 @@ fn version() -> &'static str {
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
-///             comments, validations, rich_text, images, checkboxes, textboxes, cells
+///             comments, validations, rich_text, images, checkboxes, textboxes, charts, cells
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -416,6 +426,7 @@ fn version() -> &'static str {
 ///                 Example: {"A1": True} or {"A1": {"checked": True, "format": {"bg_color": "#C6EFCE"}}}
 ///     textboxes: Dict mapping cell refs to floating text shapes (default: None).
 ///                Example: {"B2": "text"} or {"B2": {"text": "Note", "width": 200, "font": {"bold": True}}}
+///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -466,6 +477,7 @@ fn version() -> &'static str {
     images = None,
     checkboxes = None,
     textboxes = None,
+    charts = None,
     defined_names = None,
     cells = None,
 ))]
@@ -494,6 +506,7 @@ fn dfs_to_xlsx<'py>(
     images: Option<&Bound<'py, PyAny>>,
     checkboxes: Option<&Bound<'py, PyAny>>,
     textboxes: Option<&Bound<'py, PyAny>>,
+    charts: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
@@ -514,6 +527,7 @@ fn dfs_to_xlsx<'py>(
         images,
         checkboxes,
         textboxes,
+        charts,
         cells,
     )?;
 

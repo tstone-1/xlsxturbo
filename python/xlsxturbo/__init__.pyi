@@ -155,6 +155,52 @@ class TextboxOptions(TypedDict, total=False):
     line_color: str         # Border line color ('#RRGGBB' or named)
     alt_text: str           # Alternative text for accessibility
 
+ChartType = Literal[
+    "area", "area_stacked", "area_percent_stacked",
+    "bar", "bar_stacked", "bar_percent_stacked",
+    "column", "column_stacked", "column_percent_stacked",
+    "doughnut", "line", "line_stacked", "line_percent_stacked",
+    "pie", "radar", "radar_with_markers", "radar_filled",
+    "scatter", "scatter_straight", "scatter_straight_with_markers",
+    "scatter_smooth", "scatter_smooth_with_markers", "stock",
+]
+
+class ChartSeriesOptions(TypedDict, total=False):
+    """Options for one chart data series."""
+    data_range: str          # Alias for values_range
+    values_range: str        # Excel range for series values, e.g. 'Sheet1!$B$2:$B$10'
+    values: str              # Alias for values_range
+    categories_range: str    # Excel range for categories/X values
+    categories: str          # Alias for categories_range
+    name: str                # Series name or formula reference
+    series_name: str         # Alias for name
+
+class ChartOptions(TypedDict, total=False):
+    """Options for native Excel charts.
+
+    Note: 'type' and either 'data_range'/'values_range' or 'series' are required at runtime.
+    """
+    type: ChartType
+    data_range: str          # Alias for values_range
+    values_range: str        # Excel range for a single series values
+    values: str              # Alias for values_range
+    categories_range: str    # Excel range for categories/X values
+    categories: str          # Alias for categories_range
+    series: list[ChartSeriesOptions]  # Multiple series
+    name: str                # Single-series name or formula reference
+    series_name: str         # Alias for name
+    title: str               # Chart title
+    x_axis_name: str         # X/category axis title
+    y_axis_name: str         # Y/value axis title
+    width: int               # Width in pixels
+    height: int              # Height in pixels
+    x_offset: int            # Horizontal offset within the anchor cell (pixels)
+    y_offset: int            # Vertical offset within the anchor cell (pixels)
+    style: int               # Excel chart style id, 1-48
+    show_data_table: bool    # Show data table under the chart
+    show_legend: bool        # Show chart legend (default True)
+    legend_position: Literal["right", "left", "top", "bottom", "top_right"]
+
 class CellValueOptions(TypedDict, total=False):
     """Options for a cell write with custom formatting.
 
@@ -187,6 +233,7 @@ class SheetOptions(TypedDict, total=False):
     images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
     checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
     textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
+    charts: dict[str, ChartOptions] | None  # Cell ref -> native Excel chart options
     cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
@@ -242,6 +289,7 @@ def df_to_xlsx(
     images: dict[str, str | ImageOptions] | None = None,
     checkboxes: dict[str, bool | CheckboxOptions] | None = None,
     textboxes: dict[str, str | TextboxOptions] | None = None,
+    charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> tuple[int, int]:
@@ -262,8 +310,8 @@ def df_to_xlsx(
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
             autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images,
-            checkboxes, textboxes, and cells.
+            merged_ranges, hyperlinks, comments, validations, rich_text, images, checkboxes,
+            textboxes, charts, and cells.
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
@@ -300,6 +348,9 @@ def df_to_xlsx(
                         'font': {'name': 'Arial', 'size': 14, 'bold': True, 'color': '#FF0000'},
                         'fill_color': '#F0F0F0', 'line_color': '#000000',
                         'alt_text': 'Descriptive alt text'}}
+        charts: Dict mapping cell refs to native Excel chart configs.
+            Example: {'D2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10',
+                      'categories_range': 'Sheet1!$A$2:$A$10', 'title': 'Monthly Activity'}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -332,6 +383,7 @@ def dfs_to_xlsx(
     images: dict[str, str | ImageOptions] | None = None,
     checkboxes: dict[str, bool | CheckboxOptions] | None = None,
     textboxes: dict[str, str | TextboxOptions] | None = None,
+    charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
 ) -> list[tuple[int, int]]:
@@ -350,8 +402,8 @@ def dfs_to_xlsx(
         constant_memory: Use streaming mode (default: False).
             When enabled, silently disables: table_style, freeze_panes, row_heights,
             autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images,
-            checkboxes, textboxes, and cells.
+            merged_ranges, hyperlinks, comments, validations, rich_text, images, checkboxes,
+            textboxes, charts, and cells.
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
@@ -374,6 +426,7 @@ def dfs_to_xlsx(
         textboxes: Dict mapping cell refs to floating text shapes.
             Simple form: {'B2': 'text'}
             Dict form: {'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True}}}
+        charts: Dict mapping cell refs to native Excel chart configs.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

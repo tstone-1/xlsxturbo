@@ -16,6 +16,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 - **Images** - embed PNG, JPEG, GIF, BMP in cells
 - **Checkboxes** - interactive cell checkboxes (Excel for Microsoft 365, Sept 2024+)
 - **Textboxes** - floating text shapes with configurable font, fill, and line colors
+- **Native Excel charts** - editable bar, column, line, pie, scatter, and other chart types
 - **Defined names** - workbook-level named ranges for formulas and references
 - **Arbitrary cell writes** - write values to specific cells with optional formatting
 - **Border styles** - per-side borders (left, right, top, bottom) with 13 style options
@@ -216,7 +217,7 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - wrap_text (bool): Enable text wrapping within cell
 ```
 
-> **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, and `validations`.
+> **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, and `charts`.
 
 ### Column Formatting
 
@@ -354,7 +355,8 @@ Available per-sheet options:
 - `rich_text` (dict): Rich text with multiple formats (cell_ref -> list of segments)
 - `images` (dict): Embedded images (cell_ref -> path or {path, scale_width, scale_height, alt_text})
 - `checkboxes` (dict): Interactive cell checkboxes (cell_ref -> bool or {checked, format})
-- `textboxes` (dict): Floating text shapes (cell_ref -> text or {text, width, height, font, ...})
+- `textboxes` (dict): Floating text shapes (cell_ref -> text or textbox options)
+- `charts` (dict): Native Excel charts (cell_ref -> chart options)
 - `cells` (dict): Arbitrary cell writes (cell_ref -> value or {value, num_format})
 
 ### Conditional Formatting
@@ -842,6 +844,63 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
+### Native Excel Charts
+
+Add editable Excel charts anchored to cells. Use `data_range`/`values_range` for a single series, or `series` for multiple series.
+
+```python
+import xlsxturbo
+import pandas as pd
+
+df = pd.DataFrame({
+    'month': ['Jan', 'Feb', 'Mar'],
+    'sales': [120, 145, 160],
+    'margin': [32, 41, 48],
+})
+
+xlsxturbo.df_to_xlsx(df, "charts.xlsx",
+    charts={
+        'E2': {
+            'type': 'column',
+            'series': [
+                {'name': 'Sales', 'values_range': 'Sheet1!$B$2:$B$4'},
+                {'name': 'Margin', 'values_range': 'Sheet1!$C$2:$C$4'},
+            ],
+            'categories_range': 'Sheet1!$A$2:$A$4',
+            'title': 'Quarter Results',
+            'x_axis_name': 'Month',
+            'y_axis_name': 'Amount',
+            'width': 720,
+            'height': 480,
+            'show_data_table': True,
+            'legend_position': 'bottom',
+        }
+    }
+)
+```
+
+**Chart format:**
+- `{'E2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10'}}`
+- `{'E2': {'type': 'line', 'series': [{'values_range': 'Sheet1!$B$2:$B$10', 'name': 'Sales'}]}}`
+
+**Available options:**
+- `type` (str, required): `area`, `bar`, `column`, `doughnut`, `line`, `pie`, `radar`, `scatter`, `stock`, plus stacked variants
+- `data_range`, `values_range`, `values` (str): Range for a single data series
+- `categories_range`, `categories` (str): Category/X-axis range
+- `series` (list): Multiple series, each with `values_range`/`data_range`, optional `categories_range`, and optional `name`
+- `title`, `x_axis_name`, `y_axis_name` (str): Chart and axis titles
+- `width`, `height`, `x_offset`, `y_offset` (int pixels): Size and position
+- `style` (int): Excel chart style ID, 1-48
+- `show_data_table` (bool): Show data table below the chart
+- `show_legend` (bool): Show or hide legend
+- `legend_position` (str): `right`, `left`, `top`, `bottom`, `top_right`
+
+**Notes:**
+- Charts are native Excel chart objects, not static images
+- Ranges must use Excel notation, including the sheet name when needed
+- Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Not available in constant memory mode
+
 ### Defined Names
 
 Create workbook-level named ranges that can be referenced in formulas:
@@ -971,6 +1030,7 @@ xlsxturbo.dfs_to_xlsx([
 - `images`
 - `checkboxes`
 - `textboxes`
+- `charts`
 - `cells`
 
 Column widths still work in constant memory mode.

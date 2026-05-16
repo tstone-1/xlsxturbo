@@ -121,6 +121,9 @@ pub(crate) struct TextboxConfig {
     pub(crate) options: Option<HashMap<String, Py<PyAny>>>,
 }
 
+/// Type alias for native Excel chart config: cell_ref -> chart options dict
+pub(crate) type ChartConfig = HashMap<String, Py<PyAny>>;
+
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
@@ -202,6 +205,7 @@ pub(crate) struct ExtractedOptions {
     pub(crate) images: Option<HashMap<String, ImageConfig>>,
     pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
     pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
+    pub(crate) charts: Option<HashMap<String, ChartConfig>>,
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -227,6 +231,7 @@ pub(crate) struct SheetConfig {
     pub(crate) images: Option<HashMap<String, ImageConfig>>,
     pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
     pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
+    pub(crate) charts: Option<HashMap<String, ChartConfig>>, // cell_ref -> chart options
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -259,6 +264,7 @@ pub(crate) struct EffectiveOpts<'a> {
     pub(crate) images: Option<&'a HashMap<String, ImageConfig>>,
     pub(crate) checkboxes: Option<&'a HashMap<String, CheckboxConfig>>,
     pub(crate) textboxes: Option<&'a HashMap<String, TextboxConfig>>,
+    pub(crate) charts: Option<&'a HashMap<String, ChartConfig>>,
     pub(crate) cells: Option<&'a Vec<CellWrite>>,
 }
 
@@ -279,6 +285,7 @@ impl ExtractedOptions {
             images: self.images.as_ref(),
             checkboxes: self.checkboxes.as_ref(),
             textboxes: self.textboxes.as_ref(),
+            charts: self.charts.as_ref(),
             cells: self.cells.as_ref(),
         }
     }
@@ -320,6 +327,7 @@ impl SheetConfig {
             images: self.images.as_ref().or(global.images.as_ref()),
             checkboxes: self.checkboxes.as_ref().or(global.checkboxes.as_ref()),
             textboxes: self.textboxes.as_ref().or(global.textboxes.as_ref()),
+            charts: self.charts.as_ref().or(global.charts.as_ref()),
             cells: self.cells.as_ref().or(global.cells.as_ref()),
         }
     }
