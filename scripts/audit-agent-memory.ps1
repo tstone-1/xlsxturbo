@@ -268,7 +268,12 @@ function Invoke-Inventory {
     Write-Host "[inventory] Machine: $Label   Root: $ResolvedRoot"
 
     $gitDirs = Get-ChildItem -LiteralPath $ResolvedRoot -Directory -Force -Recurse -Filter ".git" -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch "\\(\.venv|node_modules|target|\.cargo|\.rustup)\\" }
+        Where-Object {
+        # Skip non-user repos: deps caches, browser profiles, app-data clones,
+        # OS-managed locations, vendored builds. These show up as .git dirs
+        # under recursive scans of $HOME and aren't actually user projects.
+        $_.FullName -notmatch "\\(\.venv|venv|node_modules|target|\.cargo|\.rustup|AppData|Library|Extensions|browser-profile-test|edge-test|cache|Cache|\.local|\.cache|\.gradle|\.m2|\.npm|\.pnpm-store|dist|build|site-packages)\\"
+    }
 
     $rows = foreach ($gitDir in $gitDirs) {
         $repo = Split-Path -Parent $gitDir.FullName
@@ -318,7 +323,12 @@ if ($Inventory) {
     exit 0
 }
 $gitDirs = Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force -Recurse -Filter ".git" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch "\\(\.venv|node_modules|target|\.cargo|\.rustup)\\" }
+    Where-Object {
+        # Skip non-user repos: deps caches, browser profiles, app-data clones,
+        # OS-managed locations, vendored builds. These show up as .git dirs
+        # under recursive scans of $HOME and aren't actually user projects.
+        $_.FullName -notmatch "\\(\.venv|venv|node_modules|target|\.cargo|\.rustup|AppData|Library|Extensions|browser-profile-test|edge-test|cache|Cache|\.local|\.cache|\.gradle|\.m2|\.npm|\.pnpm-store|dist|build|site-packages)\\"
+    }
 
 $rows = foreach ($gitDir in $gitDirs) {
     $repo = Split-Path -Parent $gitDir.FullName
