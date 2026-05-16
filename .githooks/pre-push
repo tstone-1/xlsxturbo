@@ -1,0 +1,47 @@
+#!/bin/sh
+# pre-push hook for public repositories.
+# Blocks pushes that would leak internal-only content into GitHub by calling
+# the public-safe audit in xlsxturbo/scripts/audit-agent-memory.ps1.
+#
+# Activate per-clone with: git config core.hooksPath .githooks
+# Skip a single push (rare, use with care): SKIP_AGENT_MEMORY_AUDIT=1 git push
+
+set -u
+
+if [ "${SKIP_AGENT_MEMORY_AUDIT:-}" = "1" ]; then
+    echo "[pre-push] SKIP_AGENT_MEMORY_AUDIT=1 -- skipping public-safe audit."
+    exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+AUDIT=""
+
+# Search known clone locations across the three machines.
+for candidate in \
+    "${USERPROFILE:-}/xlsxturbo/scripts/audit-agent-memory.ps1" \
+    "$HOME/xlsxturbo/scripts/audit-agent-memory.ps1" \
+    "$HOME/Developer/github.com/tstone-1/xlsxturbo/scripts/audit-agent-memory.ps1"; do
+    case "$candidate" in /*|*:*) ;; *) continue ;; esac
+    if [ -f "$candidate" ]; then
+        AUDIT="$candidate"
+        break
+    fi
+done
+
+if [ -z "$AUDIT" ]; then
+    echo "[pre-push] ERROR: audit script not found in any known location."
+    echo "[pre-push] Looked for xlsxturbo/scripts/audit-agent-memory.ps1 under:"
+    echo "[pre-push]   \$USERPROFILE, \$HOME, \$HOME/Developer/github.com/tstone-1"
+    echo "[pre-push] Push BLOCKED. Clone xlsxturbo or override with SKIP_AGENT_MEMORY_AUDIT=1."
+    exit 1
+fi
+
+if ! command -v pwsh >/dev/null 2>&1; then
+    echo "[pre-push] ERROR: pwsh (PowerShell 7+) not found in PATH."
+    echo "[pre-push] Cannot run audit. Push BLOCKED."
+    echo "[pre-push] Install PowerShell 7+ or override with SKIP_AGENT_MEMORY_AUDIT=1."
+    exit 1
+fi
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$AUDIT" -CheckPublicSafe -CheckRepoPath "$REPO_ROOT"
+exit $?
