@@ -74,6 +74,8 @@ pub(crate) fn naive_date_to_excel(date: chrono::NaiveDate) -> f64 {
 pub(crate) fn naive_datetime_to_excel(dt: chrono::NaiveDateTime) -> f64 {
     let date_part = naive_date_to_excel(dt.date());
     let time = dt.time();
-    let time_fraction = (time.num_seconds_from_midnight() as f64) / 86400.0;
+    let seconds = time.num_seconds_from_midnight() as f64;
+    let fractional_seconds = time.nanosecond() as f64 / 1_000_000_000.0;
+    let time_fraction = (seconds + fractional_seconds) / 86400.0;
     date_part + time_fraction
 }

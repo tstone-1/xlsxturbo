@@ -13,9 +13,24 @@
 - Only commit and push when explicitly asked by the user.
 - Do not include Claude-related or AI-generated footers in commit messages.
 - Before commit or push, run `cargo update` to check for Rust dependency updates.
+- Follow `BUILD.md` before release or push-ready work.
 
 ## Account Enforcement
 
 - Before any commit, run: `git config user.email "48162401+tstone-1@users.noreply.github.com"` and `git config user.name "tstone-1"`.
 - Before any push, run: `gh auth switch --user tstone-1`.
 - Do not use unrelated work or organization accounts in this repository.
+
+## Build, Test, and Release
+
+- Use `uv` for Python dependency and command execution.
+- Standard local checks: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `maturin develop --release`, then `pytest tests/`.
+- Plain `cargo test` must work outside maturin. Keep `pyo3/extension-module` enabled through `pyproject.toml` / maturin, not directly in `Cargo.toml`.
+- Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
+- Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
+
+## Benchmarks
+
+- The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the README performance table and `--json` for machine-readable output.
+- The parallel CSV conversion suite is `benchmarks/benchmark_parallel.py`.
+- README performance numbers are system-specific and should identify the machine, OS, Python version, and run methodology.

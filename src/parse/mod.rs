@@ -110,6 +110,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_datetime_preserves_fractional_seconds() {
+        let value = parse_value("2024-01-15T10:30:00.250", DateOrder::Auto);
+        let CellValue::DateTime(serial) = value else {
+            panic!("expected datetime");
+        };
+        let expected = super::naive_datetime_to_excel(
+            chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .and_hms_milli_opt(10, 30, 0, 250)
+                .unwrap(),
+        );
+        assert!((serial - expected).abs() < 0.000000001);
+    }
+
+    #[test]
     fn test_parse_string() {
         assert!(matches!(
             parse_value("hello", DateOrder::Auto),
@@ -491,6 +506,16 @@ mod tests {
             .unwrap();
         let result = super::naive_datetime_to_excel(dt);
         assert!((result - 45307.0).abs() < 0.001); // just under next day
+    }
+
+    #[test]
+    fn test_naive_datetime_to_excel_fractional_seconds() {
+        let dt = chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
+            .unwrap()
+            .and_hms_micro_opt(12, 0, 0, 500_000)
+            .unwrap();
+        let result = super::naive_datetime_to_excel(dt);
+        assert!((result - 45306.50000578704).abs() < 0.000000001);
     }
 
     // --- parse_icon_type tests ---

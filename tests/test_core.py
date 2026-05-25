@@ -416,6 +416,34 @@ class TestCsvConversion:
             if os.path.exists(xlsx_path):
                 os.unlink(xlsx_path)
 
+    def test_csv_datetime_fractional_seconds(self):
+        """CSV datetime values preserve fractional seconds in Excel serials"""
+        import csv
+        from datetime import datetime
+
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp"])
+                writer.writerow(["2024-01-01T12:34:56.789"])
+
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                value = ws["A2"].value
+                assert isinstance(value, datetime)
+                assert value == datetime(2024, 1, 1, 12, 34, 56, 789000)
+                wb.close()
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)
+            if os.path.exists(xlsx_path):
+                os.unlink(xlsx_path)
+
+
     def test_csv_special_values(self):
         """CSV with NaN, Inf, empty cells"""
         import csv
@@ -585,7 +613,37 @@ class TestUnicodeAndSpecialData:
                 # None/NA cells should be empty
                 assert ws["A3"].value is None or ws["A3"].value == ""
                 assert ws["B3"].value is None or ws["B3"].value == ""
+                assert ws["C2"].value.year == 2024
+                assert ws["C2"].value.month == 1
+                assert ws["C2"].value.day == 1
                 assert ws["C3"].value is None or ws["C3"].value == ""
+                assert ws["C4"].value.year == 2024
+                assert ws["C4"].value.month == 3
+                assert ws["C4"].value.day == 1
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_pandas_datetime64_preserves_datetime_and_fractional_seconds(self):
+        """pandas datetime64[ns] columns write as datetimes, not strings"""
+        from datetime import datetime
+
+        df = pd.DataFrame({
+            "timestamp": pd.to_datetime([
+                "2024-01-01 12:34:56.789",
+                pd.NaT,
+            ])
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 3
+            assert cols == 1
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == datetime(2024, 1, 1, 12, 34, 56, 789000)
+                assert ws["A3"].value is None or ws["A3"].value == ""
                 wb.close()
         finally:
             os.unlink(path)

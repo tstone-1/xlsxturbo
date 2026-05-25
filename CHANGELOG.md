@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-05-25
+
+### Documentation
+- **Added README benchmarks for macOS** - Added a second 100,000 row x 50 column performance table from a MacBook run while preserving the existing Windows/AMD Ryzen reference table.
+- **Updated datetime precision notes** - Documented that stored datetime serials preserve sub-second precision while the default display format shows whole seconds.
+
+### Fixed
+- **Preserved pandas `datetime64[ns]` columns** - Normal pandas datetime columns now write as Excel datetime cells, and `NaT` values remain empty, instead of falling back to strings from NumPy scalars.
+- **Preserved fractional seconds in datetime serials** - CSV, Python, pandas, and polars datetimes now include sub-second precision in the stored Excel serial value.
+
+### Dependencies
+- **Completed benchmark dev dependencies** - Added `xlsxwriter` and `pyarrow` to the `dev` extra so the documented pandas+xlsxwriter and polars benchmark paths run after `uv sync --extra dev`.
+- **Added maturin to dev dependencies** - `uv run maturin develop --release` now works after syncing the dev extra.
+
 ## [0.15.0] - 2026-05-16
 
 ### Added

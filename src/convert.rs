@@ -406,6 +406,27 @@ pub(crate) fn write_py_value_with_format(
         return write_str(worksheet, row, col, "", column_format);
     }
 
+    if type_name == "datetime64" {
+        let ns_since_epoch: i64 = value
+            .call_method1("astype", ("datetime64[ns]",))
+            .and_then(|v| v.call_method1("astype", ("int64",)))
+            .and_then(|v| v.call_method0("item"))
+            .and_then(|v| v.extract())
+            .map_err(|e| format!("Failed to convert numpy datetime64 scalar: {}", e))?;
+        if ns_since_epoch == i64::MIN {
+            return write_str(worksheet, row, col, "", column_format);
+        }
+
+        let seconds = ns_since_epoch.div_euclid(1_000_000_000);
+        let nanosecond = ns_since_epoch.rem_euclid(1_000_000_000) as u32;
+        let dt = chrono::DateTime::from_timestamp(seconds, nanosecond)
+            .ok_or_else(|| format!("Invalid numpy datetime64 timestamp: {}", ns_since_epoch))?
+            .naive_utc();
+        let excel_dt = naive_datetime_to_excel(dt);
+        let fmt = column_format.unwrap_or(datetime_format);
+        return write_num(worksheet, row, col, excel_dt, Some(fmt));
+    }
+
     // Datetime (before date, since datetime is subclass of date)
     if type_name == "datetime" || type_name == "Timestamp" {
         let year: i32 = value
@@ -432,6 +453,18 @@ pub(crate) fn write_py_value_with_format(
             .getattr("second")
             .and_then(|v| v.extract())
             .map_err(|e| format!("Failed to extract datetime second: {}", e))?;
+        let microsecond: u32 = value
+            .getattr("microsecond")
+            .and_then(|v| v.extract())
+            .unwrap_or(0);
+        let nanosecond_remainder: u32 = value
+            .getattr("nanosecond")
+            .and_then(|v| v.extract())
+            .unwrap_or(0);
+        let nanosecond = microsecond
+            .checked_mul(1_000)
+            .and_then(|v| v.checked_add(nanosecond_remainder))
+            .ok_or("Datetime fractional seconds exceed nanosecond range")?;
 
         let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
             format!(
@@ -439,12 +472,13 @@ pub(crate) fn write_py_value_with_format(
                 year, month, day
             )
         })?;
-        let time = chrono::NaiveTime::from_hms_opt(hour, minute, second).ok_or_else(|| {
-            format!(
-                "Invalid datetime time: hour={}, minute={}, second={}",
-                hour, minute, second
-            )
-        })?;
+        let time = chrono::NaiveTime::from_hms_nano_opt(hour, minute, second, nanosecond)
+            .ok_or_else(|| {
+                format!(
+                    "Invalid datetime time: hour={}, minute={}, second={}, nanosecond={}",
+                    hour, minute, second, nanosecond
+                )
+            })?;
         let dt = chrono::NaiveDateTime::new(date, time);
         let excel_dt = naive_datetime_to_excel(dt);
         let fmt = column_format.unwrap_or(datetime_format);

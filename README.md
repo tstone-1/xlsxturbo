@@ -38,7 +38,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
   - Datetimes (ISO 8601) → Excel datetimes
   - `NaN`/`Inf` → Empty cells (graceful handling)
   - Everything else → Text
-- **~7x faster** than pandas + openpyxl (see [benchmarks](#performance))
+- **~7-9x faster** than pandas + openpyxl on reference systems (see [benchmarks](#performance))
 - **Memory efficient** - streams data with 1MB buffer
 - Available as both **Python library** and **CLI tool**
 
@@ -1094,6 +1094,8 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 *All libraries use default settings; outputs differ in styling (e.g. polars auto-sizes columns and bolds headers by default, while xlsxturbo writes bare cells unless asked).*
 
+### Windows 11 / AMD Ryzen 9
+
 | Library | Time (s) | Rows/sec | vs xlsxturbo |
 |---------|----------|----------|--------------|
 | **xlsxturbo** | **4.76** | **21,010** | **1.0x** |
@@ -1101,7 +1103,18 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 | pandas + xlsxwriter | 27.66 | 3,615 | 5.8x |
 | pandas + openpyxl | 35.36 | 2,828 | 7.4x |
 
-*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads). Median of 3 runs after warmup. Re-run with `--markdown` to regenerate this table with current variance figures.*
+*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads). Median of 3 runs after warmup.*
+
+### macOS / MacBook
+
+| Library | Time (s) | Stdev | Rows/sec | Size (MB) | vs xlsxturbo |
+|---------|----------|-------|----------|-----------|--------------|
+| **xlsxturbo** | **3.19** | 0.028 | **31,396** | 47.6 | **1.0x** |
+| polars | 14.61 | 0.069 | 6,845 | 48.4 | 4.6x |
+| pandas + xlsxwriter | 22.41 | 0.134 | 4,463 | 50.0 | 7.0x |
+| pandas + openpyxl | 29.54 | 0.267 | 3,386 | 50.3 | 9.3x |
+
+*Test system: macOS (Darwin 25.5.0), Python 3.14.5, 10 CPUs. Median of 3 runs after warmup; max stdev across libraries: 0.9% of median. Re-run with `--markdown` to regenerate the current-system table.*
 
 ## Type Detection Examples
 
@@ -1119,7 +1132,7 @@ Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, 
 
 ## Known Limitations
 
-- **Datetime precision**: Sub-second precision (microseconds) is not preserved. Datetimes are written with second-level granularity, matching Excel's practical display precision.
+- **Datetime display precision**: Sub-second precision is preserved in the stored Excel datetime serial, but the default display format shows whole seconds.
 - **Large integers**: Integers exceeding 2^53 (9,007,199,254,740,992) are written as strings to prevent silent precision loss in Excel's floating-point representation.
 - **Validation lists**: Limited to 255 total characters (Excel limitation).
 

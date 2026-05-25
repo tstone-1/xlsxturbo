@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "0.15.0"
+version = "0.15.1"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,7 +35,15 @@ Repository = "https://github.com/tstone-1/xlsxturbo"
 Issues = "https://github.com/tstone-1/xlsxturbo/issues"
 
 [project.optional-dependencies]
-dev = ["pytest", "pandas", "polars", "openpyxl"]
+dev = [
+    "pytest",
+    "pandas",
+    "polars",
+    "openpyxl",
+    "xlsxwriter>=3.2.9",
+    "pyarrow>=21.0.0",
+    "maturin>=1.13.3",
+]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
