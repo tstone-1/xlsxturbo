@@ -1,7 +1,7 @@
 #!/bin/sh
 # pre-push hook for public repositories.
-# Blocks pushes that would leak internal-only content into GitHub by calling
-# the public-safe audit in agent-memory/bin/audit-agent-memory.ps1.
+# Blocks pushes that would leak internal-only content into GitHub.
+# Uses the PowerShell audit when available, with a POSIX fallback for macOS/Linux.
 #
 # Activate per-clone with: git config core.hooksPath .githooks
 # Skip a single push (rare, use with care): SKIP_AGENT_MEMORY_AUDIT=1 git push
@@ -38,12 +38,51 @@ if [ -z "$AUDIT" ]; then
     exit 1
 fi
 
-if ! command -v pwsh >/dev/null 2>&1; then
-    echo "[pre-push] ERROR: pwsh (PowerShell 7+) not found in PATH."
-    echo "[pre-push] Cannot run audit. Push BLOCKED."
-    echo "[pre-push] Install PowerShell 7+ or override with SKIP_AGENT_MEMORY_AUDIT=1."
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "$AUDIT" -CheckPublicSafe -CheckRepoPath "$REPO_ROOT"
+    exit $?
+fi
+
+echo "[pre-push] pwsh not found; running POSIX public-safe fallback."
+echo "[pre-push] Scanning tracked text files for tokens that must not appear in a public repo..."
+
+PATTERNS_FILE="$(mktemp "${TMPDIR:-/tmp}/public-safe-patterns.XXXXXX")"
+trap 'rm -f "$PATTERNS_FILE"' EXIT HUP INT TERM
+
+awk "
+/^[[:space:]]*\\\$ForbiddenPatterns[[:space:]]*=[[:space:]]*@\\(/ { in_list=1; next }
+in_list && /^[[:space:]]*\\)/ { exit }
+in_list {
+    line = \$0
+    sub(/^[[:space:]]*/, \"\", line)
+    if (line ~ /^'/) {
+        sub(/^'/, \"\", line)
+        sub(/'[[:space:]]*,?[[:space:]]*(#.*)?$/, \"\", line)
+        gsub(/''/, \"'\", line)
+        print line
+    }
+}
+" "$AUDIT" > "$PATTERNS_FILE"
+
+if [ ! -s "$PATTERNS_FILE" ]; then
+    echo "[pre-push] ERROR: fallback could not read public-safe patterns from audit script."
     exit 1
 fi
 
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$AUDIT" -CheckPublicSafe -CheckRepoPath "$REPO_ROOT"
-exit $?
+git grep -n -I -i -E -f "$PATTERNS_FILE" -- . ':!scripts/audit-agent-memory.ps1'
+rc=$?
+
+if [ "$rc" -eq 0 ]; then
+    echo ""
+    echo "[pre-push] FAIL - forbidden tokens found."
+    echo "[pre-push] Remove/rephrase the content before pushing, or use SKIP_AGENT_MEMORY_AUDIT=1 only for a documented false positive."
+    exit 1
+fi
+
+if [ "$rc" -eq 1 ]; then
+    echo "[pre-push] OK - no forbidden tokens found."
+    exit 0
+fi
+
+echo "[pre-push] ERROR: fallback scan failed with exit code $rc."
+exit "$rc"
