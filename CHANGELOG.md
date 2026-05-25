@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+- Added README trust signals with CI, PyPI, Python version, and license badges.
+- Added a project status section that summarizes tested platforms, versioning expectations, and API scope.
+- Updated the roadmap so completed chart, checkbox, and textbox work no longer appears in planned sections.
+- Clarified benchmark artifact output and the append-mode limitation in the README.
+
+### Changed
+- Updated the package classifier from Beta to Production/Stable to match the documented and tested API surface.
+- Added changelog and roadmap project URLs to package metadata.
+
 ## [0.15.1] - 2026-05-25
 
 ### Documentation

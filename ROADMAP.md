@@ -1,12 +1,25 @@
 # Roadmap
 
-Planned features for xlsxturbo, ordered by priority.
+xlsxturbo's niche is **high-performance DataFrame and CSV export** with a simple Python API.
+Most commonly requested Excel features are now implemented; this roadmap tracks the remaining
+feature gaps first, then records completed milestones.
 
-xlsxturbo's niche is **high-performance DataFrame export** with a simple API. The underlying
-rust_xlsxwriter library already supports most advanced Excel features—they just need Python
-bindings exposed.
+## Remaining
 
-## High Priority
+Niche features for specific use cases.
+
+- [ ] **Sparklines** - Mini inline charts
+  - rust_xlsxwriter: supported
+  - Enables: trend indicators in cells
+  - API: `sparklines={'D2:D10': {'range': 'A2:C10', 'type': 'line'}}`
+
+- [ ] **Append mode** - Add sheets to existing workbook
+  - rust_xlsxwriter: not supported (write-only by design)
+  - Would require openpyxl hybrid approach
+
+## Completed
+
+### Common Export Features
 
 Features that close the gap with XlsxWriter/openpyxl for common use cases.
 
@@ -25,7 +38,7 @@ Features that close the gap with XlsxWriter/openpyxl for common use cases.
   - API: `hyperlinks=[('A1', 'https://example.com'), ('B1', 'https://google.com', 'Google')]`
   - Optional display text (defaults to URL if omitted)
 
-## Medium Priority
+### Rich Workbook Features
 
 Power user features for richer Excel output.
 
@@ -45,34 +58,9 @@ Power user features for richer Excel output.
   - Supports: bold, italic, font_color, bg_color, font_size, underline
   - API: `rich_text={'A1': [('Bold part', {'bold': True}), ' normal']}`
 
-## Lower Priority
+### Recent Milestones
 
-Niche features for specific use cases.
-
-- [x] **Charts** - Bar, line, pie, scatter, etc.
-  - rust_xlsxwriter: supported (all standard chart types)
-  - Enables: visual data representation within Excel
-  - API: `charts={'D2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10', 'categories_range': 'Sheet1!$A$2:$A$10'}}`
-
-- [ ] **Sparklines** - Mini inline charts
-  - rust_xlsxwriter: supported
-  - Enables: trend indicators in cells
-  - API: `sparklines={'D2:D10': {'range': 'A2:C10', 'type': 'line'}}`
-
-- [ ] **Append mode** - Add sheets to existing workbook
-  - rust_xlsxwriter: not supported (write-only by design)
-  - Would require openpyxl hybrid approach
-
-- [x] **Checkboxes** - Interactive checkboxes in cells (v0.13.0)
-  - Supports: bare bool or dict with `checked` + optional `format`
-  - API: `checkboxes={'A1': True}` or `{'A1': {'checked': True, 'format': {'bg_color': '#C6EFCE'}}}`
-
-- [x] **Textboxes** - Floating text annotations (v0.14.0)
-  - Supports: bare string or dict with `text` + optional `width`/`height`/offsets/`font`/`fill_color`/`line_color`/`alt_text`
-  - API: `textboxes={'B2': 'note'}` or `{'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True, 'color': '#FF0000'}}}`
-
-## Completed
-
+- [x] Native Excel charts via `charts` parameter (v0.15.0)
 - [x] Textboxes via `textboxes` parameter (v0.14.0)
 - [x] Checkboxes via `checkboxes` parameter (v0.13.0)
 - [x] Data validation via `validations` parameter (v0.10.0)

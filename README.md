@@ -2,6 +2,20 @@
 
 High-performance Excel writer with automatic type detection. Written in Rust, usable from Python.
 
+[![CI](https://github.com/tstone-1/xlsxturbo/actions/workflows/ci.yml/badge.svg)](https://github.com/tstone-1/xlsxturbo/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/xlsxturbo.svg)](https://pypi.org/project/xlsxturbo/)
+[![Python](https://img.shields.io/pypi/pyversions/xlsxturbo.svg)](https://pypi.org/project/xlsxturbo/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+xlsxturbo is built for Python users who need fast `.xlsx` exports without giving up common Excel features. It focuses on DataFrame and CSV export, uses Rust for the hot path, and keeps the Python API small enough to use directly in scripts, reports, and batch jobs.
+
+## Project Status
+
+- Production-ready for documented DataFrame and CSV export workflows.
+- Tested across Linux, Windows, and macOS on Python 3.9, 3.12, and 3.14 in CI.
+- Versioned with SemVer; breaking API changes require a major version bump.
+- Advanced Excel features are supported through focused parameters rather than a full workbook object model.
+
 ## Features
 
 - **Direct DataFrame support** for pandas and polars
@@ -1116,6 +1130,8 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 *Test system: macOS (Darwin 25.5.0), Python 3.14.5, 10 CPUs. Median of 3 runs after warmup; max stdev across libraries: 0.9% of median. Re-run with `--markdown` to regenerate the current-system table.*
 
+Benchmark scripts can also emit markdown or JSON, which makes it easy to attach benchmark output to issues, release notes, or CI artifacts.
+
 ## Type Detection Examples
 
 | CSV Value | Excel Type | Notes |
@@ -1135,6 +1151,7 @@ Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, 
 - **Datetime display precision**: Sub-second precision is preserved in the stored Excel datetime serial, but the default display format shows whole seconds.
 - **Large integers**: Integers exceeding 2^53 (9,007,199,254,740,992) are written as strings to prevent silent precision loss in Excel's floating-point representation.
 - **Validation lists**: Limited to 255 total characters (Excel limitation).
+- **Append mode**: Existing workbook mutation is not supported because the Rust writer is write-only. Create a new workbook instead.
 
 ## Building from Source
 
