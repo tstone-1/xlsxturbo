@@ -64,6 +64,27 @@ class TestPolarsSupport:
         finally:
             os.unlink(path)
 
+    def test_polars_datetime_fractional_seconds(self):
+        """Polars datetime columns write as Excel datetimes.
+
+        Polars `iter_rows` yields Python `datetime.datetime` objects, so this
+        hits the "datetime" branch of write_py_value_with_format — a distinct
+        path from the pandas datetime64/Timestamp branches.
+        """
+        from datetime import datetime
+
+        df = pl.DataFrame({"t": [datetime(2024, 1, 1, 12, 34, 56, 789000)]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == datetime(2024, 1, 1, 12, 34, 56, 789000)
+                wb.close()
+        finally:
+            os.unlink(path)
+
     def test_polars_table_name(self):
         df = pl.DataFrame({"A": [1, 2, 3]})
         path = get_temp_path()
@@ -644,6 +665,55 @@ class TestUnicodeAndSpecialData:
                 ws = wb.active
                 assert ws["A2"].value == datetime(2024, 1, 1, 12, 34, 56, 789000)
                 assert ws["A3"].value is None or ws["A3"].value == ""
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_object_timestamp_fractional_seconds(self):
+        """Object-dtype pandas Timestamps go through the attribute branch and
+        preserve fractional seconds (microsecond*1000 + nanosecond fold).
+
+        This is a distinct code path from the datetime64[ns] numpy-scalar branch:
+        an object-dtype column yields the Python Timestamp object, exercising the
+        `.microsecond`/`.nanosecond` extraction in write_py_value_with_format.
+        (True sub-microsecond precision cannot survive Excel's f64 serial at
+        real-world date magnitudes, so millisecond precision is the meaningful
+        assertion here.)
+        """
+        from datetime import datetime
+
+        ts = pd.Timestamp("2024-01-01 12:34:56.789")
+        df = pd.DataFrame({"t": pd.Series([ts], dtype=object)})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == datetime(2024, 1, 1, 12, 34, 56, 789000)
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_timezone_aware_datetime_writes_wall_clock(self):
+        """Timezone-aware datetimes are written as their local wall-clock value;
+        the UTC offset is intentionally dropped (Excel has no timezone concept).
+
+        Characterization test pinning the documented contract: 12:00 US/Eastern
+        is stored as 12:00, NOT converted to its 17:00 UTC equivalent.
+        """
+        from datetime import datetime
+
+        df = pd.DataFrame(
+            {"t": pd.to_datetime(["2024-01-01 12:00:00"]).tz_localize("US/Eastern")}
+        )
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == datetime(2024, 1, 1, 12, 0, 0)
                 wb.close()
         finally:
             os.unlink(path)

@@ -2,24 +2,13 @@
 
 use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::{
-    pytype_name, CellWrite, ChartConfig, CheckboxConfig, Comment, ConditionalFormatConfigs,
-    Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig, TextboxConfig,
-    ValidationConfig,
+    pydict_to_hashmap, pytype_name, CellWrite, ChartConfig, CheckboxConfig, Comment,
+    ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig,
+    TextboxConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use std::collections::HashMap;
-
-/// Convert a Python dict to a Rust HashMap<String, Py<PyAny>>
-pub(crate) fn pydict_to_hashmap(
-    dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Py<PyAny>>> {
-    let mut map = HashMap::new();
-    for (k, v) in dict.iter() {
-        map.insert(k.extract()?, v.unbind());
-    }
-    Ok(map)
-}
 
 /// Helper: extract an optional scalar field from a Python dict into a SheetConfig field
 macro_rules! extract_scalar {

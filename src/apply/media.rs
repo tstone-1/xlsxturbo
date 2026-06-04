@@ -1,8 +1,9 @@
 //! Image, checkbox, and textbox application helpers.
 
-use crate::extract::pydict_to_hashmap;
 use crate::parse::{parse_cell_ref, parse_color_enum, parse_column_format};
-use crate::types::{extract_opt, ChartConfig, CheckboxConfig, ImageConfig, TextboxConfig};
+use crate::types::{
+    extract_opt, pydict_to_hashmap, ChartConfig, CheckboxConfig, ImageConfig, TextboxConfig,
+};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     Chart, ChartDataTable, ChartLegendPosition, ChartType, Color, Image, Shape, ShapeFont,

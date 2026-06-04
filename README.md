@@ -1149,6 +1149,7 @@ Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, 
 ## Known Limitations
 
 - **Datetime display precision**: Sub-second precision is preserved in the stored Excel datetime serial, but the default display format shows whole seconds.
+- **Timezone-aware datetimes**: Written as their local wall-clock value; the UTC offset is **not** preserved (Excel has no timezone concept). A `2024-01-01 12:00 US/Eastern` value is stored as `12:00`, not converted to UTC. Normalize to UTC beforehand (e.g. `df["ts"].dt.tz_convert("UTC").dt.tz_localize(None)`) if you need UTC.
 - **Large integers**: Integers exceeding 2^53 (9,007,199,254,740,992) are written as strings to prevent silent precision loss in Excel's floating-point representation.
 - **Validation lists**: Limited to 255 total characters (Excel limitation).
 - **Append mode**: Existing workbook mutation is not supported because the Rust writer is write-only. Create a new workbook instead.

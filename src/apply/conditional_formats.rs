@@ -1,8 +1,7 @@
 //! Conditional formatting application helpers.
 
-use crate::extract::pydict_to_hashmap;
 use crate::parse::{matches_pattern, parse_color, parse_column_format, parse_icon_type};
-use crate::types::{extract_opt, ConditionalFormatConfigs};
+use crate::types::{extract_opt, pydict_to_hashmap, ConditionalFormatConfigs};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,

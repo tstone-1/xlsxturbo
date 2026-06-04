@@ -41,14 +41,14 @@ mod tests {
 
     #[test]
     fn test_parse_float() {
-        let value = parse_value("3.14", DateOrder::Auto);
+        let value = parse_value("3.25", DateOrder::Auto);
         assert!(
             matches!(value, CellValue::Float(_)),
             "Expected CellValue::Float, got {:?}",
             value
         );
         if let CellValue::Float(v) = value {
-            assert!((v - 3.14).abs() < 0.001);
+            assert!((v - 3.25).abs() < 0.001);
         }
     }
 

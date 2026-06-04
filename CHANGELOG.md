@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.3] - 2026-06-04
+
+### Documentation
+- **Timezone-aware datetimes**: Documented that tz-aware datetimes are written as their local wall-clock value with the UTC offset dropped (Excel has no timezone concept), including a normalization workaround.
+
+### Tested
+- Added behaviour tests for the datetime paths: object-dtype `Timestamp` fractional seconds, timezone-aware wall-clock (characterization), and polars datetime columns.
+
+### Refactored
+- **Single-sourced the write-option structs** - A `define_options!` macro generates `ExtractedOptions`, `EffectiveOpts`, `as_effective`, and `merge_with` from one field list, removing ~70 lines of hand-maintained boilerplate where a transposed field name was an invisible bug.
+- **`constant_memory` skip warning is now derived, not hand-listed** - The disabled-feature list comes from the generated option set minus an explicit safe-options list, and a guard test forces a deliberate safe-vs-skipped decision whenever a feature option is added.
+- **Removed the last inward dependency arrow** - `pydict_to_hashmap` moved from `extract` to `types` so the `apply/` modules no longer depend back up on `extract`.
+
 ## [0.15.2] - 2026-06-04
 
 ### Fixed

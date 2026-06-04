@@ -710,16 +710,23 @@ pub(crate) fn write_sheet_data(
     Ok((row_idx, total_col_count))
 }
 
+/// Complex feature options that still work under `constant_memory` because they
+/// are applied during the data-write phase (in `write_sheet_data`), not in
+/// `apply_worksheet_features`. Every other present complex option is skipped.
+const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &["column_widths", "header_format", "column_formats"];
+
 /// Emit a `RuntimeWarning` listing the features that `constant_memory` mode
-/// silently skips. Kept adjacent to `apply_worksheet_features` (which performs
-/// the actual skip) so the warned-about set and the skipped set stay in sync —
-/// the only place a missed feature would otherwise fail silently.
+/// silently skips. The complex-feature list is derived from
+/// `EffectiveOpts::present_complex_options` (single source of truth, generated
+/// with the option fields), so adding a feature can never silently drop it from
+/// this warning — only the handful of scalar flags are listed by hand.
 fn warn_constant_memory_skips(
     py: Python<'_>,
     config: &WriteConfig<'_>,
     opts: &EffectiveOpts<'_>,
 ) -> Result<(), String> {
     let mut disabled: Vec<&str> = Vec::new();
+    // Scalar config flags disabled by constant_memory.
     if config.table_style.is_some() {
         disabled.push("table_style");
     }
@@ -732,41 +739,13 @@ fn warn_constant_memory_skips(
     if config.row_heights.is_some() {
         disabled.push("row_heights");
     }
-    if opts.formula_columns.is_some() {
-        disabled.push("formula_columns");
-    }
-    if opts.conditional_formats.is_some() {
-        disabled.push("conditional_formats");
-    }
-    if opts.merged_ranges.is_some() {
-        disabled.push("merged_ranges");
-    }
-    if opts.hyperlinks.is_some() {
-        disabled.push("hyperlinks");
-    }
-    if opts.comments.is_some() {
-        disabled.push("comments");
-    }
-    if opts.validations.is_some() {
-        disabled.push("validations");
-    }
-    if opts.rich_text.is_some() {
-        disabled.push("rich_text");
-    }
-    if opts.images.is_some() {
-        disabled.push("images");
-    }
-    if opts.checkboxes.is_some() {
-        disabled.push("checkboxes");
-    }
-    if opts.textboxes.is_some() {
-        disabled.push("textboxes");
-    }
-    if opts.charts.is_some() {
-        disabled.push("charts");
-    }
-    if opts.cells.is_some() {
-        disabled.push("cells");
+    // Complex feature options: every present one is skipped except those applied
+    // during the write phase. New features default to "skipped + warned", the
+    // safe direction.
+    for name in opts.present_complex_options() {
+        if !CONSTANT_MEMORY_SAFE_OPTIONS.contains(&name) {
+            disabled.push(name);
+        }
     }
     if disabled.is_empty() {
         return Ok(());
@@ -1037,4 +1016,60 @@ pub(crate) fn convert_dataframe_to_xlsx(
         .map_err(|e| format!("Failed to save workbook: {}", e))?;
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod constant_memory_tests {
+    use super::CONSTANT_MEMORY_SAFE_OPTIONS;
+    use crate::types::EffectiveOpts;
+
+    /// Guard the one remaining hand-maintained part of the `constant_memory`
+    /// skip warning: the safe/skipped classification of each complex option.
+    ///
+    /// `warn_constant_memory_skips` warns every present complex option except
+    /// those in `CONSTANT_MEMORY_SAFE_OPTIONS`. Adding a field to the
+    /// `define_options!` list auto-grows `EffectiveOpts::COMPLEX_OPTION_NAMES`,
+    /// which makes this test fail until the new option is placed in exactly one
+    /// of the two sets — forcing a deliberate "does this work under
+    /// constant_memory?" decision instead of defaulting silently.
+    #[test]
+    fn every_complex_option_is_classified_for_constant_memory() {
+        // The complex options that `apply_worksheet_features` skips under
+        // constant_memory (everything applied only after the data write).
+        const EXPECTED_SKIPPED: &[&str] = &[
+            "conditional_formats",
+            "formula_columns",
+            "merged_ranges",
+            "hyperlinks",
+            "comments",
+            "validations",
+            "rich_text",
+            "images",
+            "checkboxes",
+            "textboxes",
+            "charts",
+            "cells",
+        ];
+
+        for &name in EffectiveOpts::COMPLEX_OPTION_NAMES {
+            let safe = CONSTANT_MEMORY_SAFE_OPTIONS.contains(&name);
+            let skipped = EXPECTED_SKIPPED.contains(&name);
+            assert!(
+                safe ^ skipped,
+                "complex option '{}' must be classified exactly once as \
+                 constant_memory-safe OR skipped — a newly added option needs a \
+                 deliberate decision in CONSTANT_MEMORY_SAFE_OPTIONS (applied during \
+                 the data write) or EXPECTED_SKIPPED (skipped + warned)",
+                name
+            );
+        }
+
+        // No stray/duplicate names in either set, and full coverage.
+        assert_eq!(
+            EffectiveOpts::COMPLEX_OPTION_NAMES.len(),
+            CONSTANT_MEMORY_SAFE_OPTIONS.len() + EXPECTED_SKIPPED.len(),
+            "every complex option must be accounted for exactly once across the \
+             safe and skipped sets"
+        );
+    }
 }
