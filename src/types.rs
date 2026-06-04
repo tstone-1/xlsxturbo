@@ -148,6 +148,34 @@ pub(crate) fn pytype_name(v: &Bound<'_, PyAny>) -> String {
         .map_or_else(|_| "unknown".to_string(), |n| n.to_string())
 }
 
+/// Extract an optional typed value from an already-extracted option entry.
+///
+/// `entry` is the result of `map.get(key)` (works for any `HashMap`/`IndexMap`
+/// of `Py<PyAny>`). A missing key or an explicit Python `None` yields `Ok(None)`.
+/// A present value of the wrong type yields `Err(on_err(bound))`, letting the
+/// caller build a context-rich message (e.g. embedding `pytype_name(bound)`).
+///
+/// This is the single shared implementation behind the per-feature
+/// `*_field` extractor helpers in `apply/*` and `parse/formats.rs`.
+pub(crate) fn extract_opt<'py, T, F>(
+    py: Python<'py>,
+    entry: Option<&Py<PyAny>>,
+    on_err: F,
+) -> Result<Option<T>, String>
+where
+    T: for<'a> FromPyObject<'a, 'py>,
+    F: FnOnce(&Bound<'py, PyAny>) -> String,
+{
+    let Some(obj) = entry else {
+        return Ok(None);
+    };
+    let bound = obj.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    bound.extract::<T>().map(Some).map_err(|_| on_err(bound))
+}
+
 /// Detect whether a Python object is a Polars or Pandas DataFrame.
 /// Returns true for Polars, false for Pandas.
 /// Errors if the object is neither.

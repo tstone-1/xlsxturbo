@@ -1,7 +1,7 @@
 //! Data validation application helpers.
 
 use crate::parse::matches_pattern;
-use crate::types::{pytype_name, ValidationConfig};
+use crate::types::{extract_opt, pytype_name, ValidationConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{DataValidation, DataValidationErrorStyle, Worksheet};
@@ -14,17 +14,9 @@ fn validation_string_field(
     col_pattern: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let Some(obj) = config.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<String>()
-        .map(Some)
-        .map_err(|_| format!("validations['{}']: '{}' must be a string", col_pattern, key))
+    extract_opt(py, config.get(key), |_| {
+        format!("validations['{}']: '{}' must be a string", col_pattern, key)
+    })
 }
 
 fn reject_unknown_keys(
@@ -52,21 +44,15 @@ fn validation_i32_field(
     key: &str,
     default: i32,
 ) -> Result<i32, String> {
-    let Some(obj) = config.get(key) else {
-        return Ok(default);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(default);
-    }
-    bound.extract::<i32>().map_err(|_| {
+    Ok(extract_opt(py, config.get(key), |bound| {
         format!(
             "validations['{}']: '{}' must be an integer, got {}",
             col_pattern,
             key,
             pytype_name(bound)
         )
-    })
+    })?
+    .unwrap_or(default))
 }
 
 fn validation_u32_field(
@@ -76,21 +62,15 @@ fn validation_u32_field(
     key: &str,
     default: u32,
 ) -> Result<u32, String> {
-    let Some(obj) = config.get(key) else {
-        return Ok(default);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(default);
-    }
-    bound.extract::<u32>().map_err(|_| {
+    Ok(extract_opt(py, config.get(key), |bound| {
         format!(
             "validations['{}']: '{}' must be a non-negative integer, got {}",
             col_pattern,
             key,
             pytype_name(bound)
         )
-    })
+    })?
+    .unwrap_or(default))
 }
 
 fn validation_f64_field(
@@ -100,21 +80,15 @@ fn validation_f64_field(
     key: &str,
     default: f64,
 ) -> Result<f64, String> {
-    let Some(obj) = config.get(key) else {
-        return Ok(default);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(default);
-    }
-    bound.extract::<f64>().map_err(|_| {
+    Ok(extract_opt(py, config.get(key), |bound| {
         format!(
             "validations['{}']: '{}' must be a number, got {}",
             col_pattern,
             key,
             pytype_name(bound)
         )
-    })
+    })?
+    .unwrap_or(default))
 }
 
 /// Apply data validations to worksheet

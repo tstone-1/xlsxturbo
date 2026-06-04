@@ -2,7 +2,7 @@
 
 use crate::extract::pydict_to_hashmap;
 use crate::parse::{parse_cell_ref, parse_color_enum, parse_column_format};
-use crate::types::{ChartConfig, CheckboxConfig, ImageConfig, TextboxConfig};
+use crate::types::{extract_opt, ChartConfig, CheckboxConfig, ImageConfig, TextboxConfig};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     Chart, ChartDataTable, ChartLegendPosition, ChartType, Color, Image, Shape, ShapeFont,
@@ -17,17 +17,9 @@ fn image_f64_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<f64>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<f64>()
-        .map(Some)
-        .map_err(|_| format!("images['{}']: '{}' must be a number", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("images['{}']: '{}' must be a number", cell_ref, key)
+    })
 }
 
 /// Extract an optional string image option. Wrong types produce an error.
@@ -37,17 +29,9 @@ fn image_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<String>()
-        .map(Some)
-        .map_err(|_| format!("images['{}']: '{}' must be a string", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("images['{}']: '{}' must be a string", cell_ref, key)
+    })
 }
 
 /// Apply images to worksheet
@@ -124,14 +108,7 @@ fn textbox_u32_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u32>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound.extract::<u32>().map(Some).map_err(|_| {
+    extract_opt(py, opts.get(key), |_| {
         format!(
             "textboxes['{}']: '{}' must be a non-negative integer",
             cell_ref, key
@@ -146,17 +123,9 @@ fn textbox_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<String>()
-        .map(Some)
-        .map_err(|_| format!("textboxes['{}']: '{}' must be a string", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("textboxes['{}']: '{}' must be a string", cell_ref, key)
+    })
 }
 
 /// Extract an optional color option from a textbox options dict.
@@ -385,17 +354,9 @@ fn chart_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<String>()
-        .map(Some)
-        .map_err(|_| format!("charts['{}']: '{}' must be a string", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("charts['{}']: '{}' must be a string", cell_ref, key)
+    })
 }
 
 fn chart_u32_field(
@@ -404,14 +365,7 @@ fn chart_u32_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u32>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound.extract::<u32>().map(Some).map_err(|_| {
+    extract_opt(py, opts.get(key), |_| {
         format!(
             "charts['{}']: '{}' must be a non-negative integer",
             cell_ref, key
@@ -425,17 +379,9 @@ fn chart_u8_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u8>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<u8>()
-        .map(Some)
-        .map_err(|_| format!("charts['{}']: '{}' must be an integer 0-255", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("charts['{}']: '{}' must be an integer 0-255", cell_ref, key)
+    })
 }
 
 fn chart_bool_field(
@@ -444,17 +390,9 @@ fn chart_bool_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    let Some(obj) = opts.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound
-        .extract::<bool>()
-        .map(Some)
-        .map_err(|_| format!("charts['{}']: '{}' must be a bool", cell_ref, key))
+    extract_opt(py, opts.get(key), |_| {
+        format!("charts['{}']: '{}' must be a bool", cell_ref, key)
+    })
 }
 
 fn add_chart_series(
@@ -524,6 +462,17 @@ pub(crate) fn apply_charts(
         "legend_position",
     ];
 
+    // Keys read by `add_chart_series` for a single series-list item.
+    const SERIES_KEYS: &[&str] = &[
+        "values_range",
+        "values",
+        "data_range",
+        "categories_range",
+        "categories",
+        "name",
+        "series_name",
+    ];
+
     for (cell_ref, config) in charts {
         let (row, col) = parse_cell_ref(cell_ref)?;
         for key in config.keys() {
@@ -562,6 +511,20 @@ pub(crate) fn apply_charts(
                 })?;
                 let series_config = pydict_to_hashmap(series_dict)
                     .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;
+                // Reject typos in series-item keys, matching the top-level
+                // strict-validation contract (a silently-dropped optional key
+                // like 'categories_range' would otherwise produce a wrong chart).
+                for key in series_config.keys() {
+                    if !SERIES_KEYS.contains(&key.as_str()) {
+                        return Err(format!(
+                            "charts['{}']: series item {}: unknown option '{}'. Valid: {}",
+                            cell_ref,
+                            idx,
+                            key,
+                            SERIES_KEYS.join(", ")
+                        ));
+                    }
+                }
                 let default_categories =
                     chart_string_field(py, config, cell_ref, "categories_range")?
                         .or(chart_string_field(py, config, cell_ref, "categories")?);

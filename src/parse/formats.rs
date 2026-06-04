@@ -1,4 +1,4 @@
-use crate::types::pytype_name;
+use crate::types::{extract_opt, pytype_name};
 use indexmap::IndexMap;
 use pyo3::{prelude::*, Py};
 use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatAlign, FormatBorder};
@@ -148,14 +148,7 @@ fn get_bool_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    let Some(obj) = fmt_dict.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound.extract::<bool>().map(Some).map_err(|_| {
+    extract_opt(py, fmt_dict.get(key), |bound| {
         format!(
             "format option '{}' must be a bool, got {}",
             key,
@@ -170,14 +163,7 @@ fn get_string_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<String>, String> {
-    let Some(obj) = fmt_dict.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound.extract::<String>().map(Some).map_err(|_| {
+    extract_opt(py, fmt_dict.get(key), |bound| {
         format!(
             "format option '{}' must be a string, got {}",
             key,
@@ -192,14 +178,7 @@ fn get_f64_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<f64>, String> {
-    let Some(obj) = fmt_dict.get(key) else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
-    }
-    bound.extract::<f64>().map(Some).map_err(|_| {
+    extract_opt(py, fmt_dict.get(key), |bound| {
         format!(
             "format option '{}' must be a number, got {}",
             key,

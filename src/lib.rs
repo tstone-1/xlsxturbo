@@ -408,7 +408,7 @@ fn version() -> &'static str {
 ///     constant_memory: Use constant memory mode for large files (default: False).
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
-///                     Format options: bg_color, font_color, num_format, bold, italic, underline.
+///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
 ///     conditional_formats: Dict mapping column names to conditional format configs (default: None)
 ///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
@@ -584,6 +584,16 @@ fn dfs_to_xlsx<'py>(
     // Apply defined names (workbook-level)
     if let Some(ref names) = defined_names {
         for (name, reference) in names {
+            // The local part (after a sheet-qualifying '!') must be non-empty:
+            // rust_xlsxwriter's define_name calls `chars().next().unwrap()` and
+            // would panic on an empty name (e.g. "" or "Sheet1!").
+            let local = name.rsplit('!').next().unwrap_or("");
+            if local.is_empty() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid defined name '{}': name must not be empty",
+                    name
+                )));
+            }
             workbook.define_name(name, reference).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!(
                     "Failed to define name '{}': {}",

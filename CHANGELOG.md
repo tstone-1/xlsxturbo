@@ -5,17 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.15.2] - 2026-06-04
+
+### Fixed
+- **`table_name` no longer panics on multibyte characters** - A long `table_name` containing non-ASCII letters (e.g. `"é"`) could split a UTF-8 codepoint at the 255-character cap and panic across the Python boundary. The name is now truncated on a character boundary and the call succeeds.
+- **Empty `defined_names` keys raise `ValueError` instead of panicking** - A defined name that is empty (`""`) or has an empty local part (e.g. `"Sheet1!"`) now produces a clear `ValueError` instead of an uncatchable panic from the underlying writer.
+- **Chart `series` items reject unknown keys** - A typo in a series-item option (e.g. `categorie_range` instead of `categories_range`) now raises a clear error listing the valid keys, matching the strict-validation behaviour of top-level chart options instead of silently dropping the value.
+
+### Changed
+- **Type stub `ChartType` lists all accepted aliases** - `col`, `donut`, and the `stacked_*` / `percent_stacked_*` spellings the parser already accepts are now part of the `ChartType` Literal so type-checkers accept them.
+- Updated the package classifier from Beta to Production/Stable to match the documented and tested API surface.
+- Added changelog and roadmap project URLs to package metadata.
+
+### Refactored
+- **Shared optional-field extraction** - The ~20 near-identical per-feature `*_field` extractor helpers across `apply/` and `parse/formats.rs` now delegate to a single `extract_opt` helper, removing duplicated get/None-check/extract/error logic while preserving every error message.
+- **`constant_memory` skip-warning co-located with the skip** - The warning that lists features disabled by `constant_memory` now lives next to the code that actually skips them, so the two can no longer drift out of sync.
 
 ### Documentation
 - Added README trust signals with CI, PyPI, Python version, and license badges.
 - Added a project status section that summarizes tested platforms, versioning expectations, and API scope.
 - Updated the roadmap so completed chart, checkbox, and textbox work no longer appears in planned sections.
 - Clarified benchmark artifact output and the append-mode limitation in the README.
-
-### Changed
-- Updated the package classifier from Beta to Production/Stable to match the documented and tested API surface.
-- Added changelog and roadmap project URLs to package metadata.
 
 ## [0.15.1] - 2026-05-25
 

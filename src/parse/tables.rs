@@ -55,7 +55,10 @@ pub(crate) fn sanitize_table_name(name: &str) -> String {
         sanitized = format!("_{}", sanitized);
     }
 
-    // Max 255 chars
-    sanitized.truncate(255);
+    // Max 255 chars. Build by chars (not bytes) so a multibyte codepoint at the
+    // boundary can never trigger a `truncate` mid-char-boundary panic.
+    if sanitized.chars().count() > 255 {
+        sanitized = sanitized.chars().take(255).collect();
+    }
     sanitized
 }

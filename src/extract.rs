@@ -170,21 +170,7 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_dict_field!(opts, config, "textboxes", textboxes, extract_textboxes);
         extract_dict_field!(opts, config, "charts", charts, extract_charts);
 
-        // Extract cells
-        if let Ok(val) = opts.get_item("cells") {
-            if !val.is_none() {
-                let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
-                        "sheet option 'cells' must be a dict, got {}",
-                        pytype_name(&val)
-                    ))
-                })?;
-                let extracted = extract_cells(dict)?;
-                if !extracted.is_empty() {
-                    config.cells = Some(extracted);
-                }
-            }
-        }
+        extract_dict_field!(opts, config, "cells", cells, extract_cells);
 
         // Extract complex list fields
         extract_list_field!(

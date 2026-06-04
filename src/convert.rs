@@ -536,75 +536,6 @@ pub(crate) fn write_sheet_data(
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
 ) -> Result<(u32, u16), String> {
-    // Warn if constant_memory is enabled with incompatible options
-    if config.constant_memory {
-        let mut disabled: Vec<&str> = Vec::new();
-        if config.table_style.is_some() {
-            disabled.push("table_style");
-        }
-        if config.freeze_panes {
-            disabled.push("freeze_panes");
-        }
-        if config.autofit {
-            disabled.push("autofit");
-        }
-        if config.row_heights.is_some() {
-            disabled.push("row_heights");
-        }
-        if opts.formula_columns.is_some() {
-            disabled.push("formula_columns");
-        }
-        if opts.conditional_formats.is_some() {
-            disabled.push("conditional_formats");
-        }
-        if opts.merged_ranges.is_some() {
-            disabled.push("merged_ranges");
-        }
-        if opts.hyperlinks.is_some() {
-            disabled.push("hyperlinks");
-        }
-        if opts.comments.is_some() {
-            disabled.push("comments");
-        }
-        if opts.validations.is_some() {
-            disabled.push("validations");
-        }
-        if opts.rich_text.is_some() {
-            disabled.push("rich_text");
-        }
-        if opts.images.is_some() {
-            disabled.push("images");
-        }
-        if opts.checkboxes.is_some() {
-            disabled.push("checkboxes");
-        }
-        if opts.textboxes.is_some() {
-            disabled.push("textboxes");
-        }
-        if opts.charts.is_some() {
-            disabled.push("charts");
-        }
-        if opts.cells.is_some() {
-            disabled.push("cells");
-        }
-        if !disabled.is_empty() {
-            let warnings = py
-                .import("warnings")
-                .map_err(|e| format!("Failed to import warnings: {}", e))?;
-            let msg = format!(
-                "constant_memory=True disables these features (they will be silently skipped): {}",
-                disabled.join(", ")
-            );
-            let runtime_warning = py
-                .import("builtins")
-                .and_then(|b| b.getattr("RuntimeWarning"))
-                .map_err(|e| format!("Failed to get RuntimeWarning: {}", e))?;
-            warnings
-                .call_method1("warn", (msg, runtime_warning))
-                .map_err(|e| format!("Failed to emit warning: {}", e))?;
-        }
-    }
-
     // Create formats
     let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
     let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
@@ -779,6 +710,84 @@ pub(crate) fn write_sheet_data(
     Ok((row_idx, total_col_count))
 }
 
+/// Emit a `RuntimeWarning` listing the features that `constant_memory` mode
+/// silently skips. Kept adjacent to `apply_worksheet_features` (which performs
+/// the actual skip) so the warned-about set and the skipped set stay in sync —
+/// the only place a missed feature would otherwise fail silently.
+fn warn_constant_memory_skips(
+    py: Python<'_>,
+    config: &WriteConfig<'_>,
+    opts: &EffectiveOpts<'_>,
+) -> Result<(), String> {
+    let mut disabled: Vec<&str> = Vec::new();
+    if config.table_style.is_some() {
+        disabled.push("table_style");
+    }
+    if config.freeze_panes {
+        disabled.push("freeze_panes");
+    }
+    if config.autofit {
+        disabled.push("autofit");
+    }
+    if config.row_heights.is_some() {
+        disabled.push("row_heights");
+    }
+    if opts.formula_columns.is_some() {
+        disabled.push("formula_columns");
+    }
+    if opts.conditional_formats.is_some() {
+        disabled.push("conditional_formats");
+    }
+    if opts.merged_ranges.is_some() {
+        disabled.push("merged_ranges");
+    }
+    if opts.hyperlinks.is_some() {
+        disabled.push("hyperlinks");
+    }
+    if opts.comments.is_some() {
+        disabled.push("comments");
+    }
+    if opts.validations.is_some() {
+        disabled.push("validations");
+    }
+    if opts.rich_text.is_some() {
+        disabled.push("rich_text");
+    }
+    if opts.images.is_some() {
+        disabled.push("images");
+    }
+    if opts.checkboxes.is_some() {
+        disabled.push("checkboxes");
+    }
+    if opts.textboxes.is_some() {
+        disabled.push("textboxes");
+    }
+    if opts.charts.is_some() {
+        disabled.push("charts");
+    }
+    if opts.cells.is_some() {
+        disabled.push("cells");
+    }
+    if disabled.is_empty() {
+        return Ok(());
+    }
+    let warnings = py
+        .import("warnings")
+        .map_err(|e| format!("Failed to import warnings: {}", e))?;
+    let msg = format!(
+        "constant_memory=True disables these features (they will be silently skipped): {}",
+        disabled.join(", ")
+    );
+    let runtime_warning = py
+        .import("builtins")
+        .and_then(|b| b.getattr("RuntimeWarning"))
+        .map_err(|e| format!("Failed to get RuntimeWarning: {}", e))?;
+    warnings
+        .call_method1("warn", (msg, runtime_warning))
+        .map_err(|e| format!("Failed to emit warning: {}", e))?;
+    Ok(())
+}
+
 /// Apply all worksheet features after data has been written.
 ///
 /// Handles: table formatting, formula columns, conditional formats, freeze panes,
@@ -798,8 +807,10 @@ fn apply_worksheet_features(
     opts: &EffectiveOpts<'_>,
     content_widths: &[f64],
 ) -> Result<u16, String> {
-    // In constant_memory mode, only column widths (without autofit) are supported
+    // In constant_memory mode, only column widths (without autofit) are supported.
+    // Warn about every other requested feature right here, next to the skip.
     if config.constant_memory {
+        warn_constant_memory_skips(py, config, opts)?;
         if let Some(widths) = opts.column_widths {
             apply_column_widths(worksheet, col_count, widths)?;
         }
@@ -1005,6 +1016,16 @@ pub(crate) fn convert_dataframe_to_xlsx(
     // Apply defined names (workbook-level)
     if let Some(names) = defined_names {
         for (name, reference) in names {
+            // The local part (after a sheet-qualifying '!') must be non-empty:
+            // rust_xlsxwriter's define_name calls `chars().next().unwrap()` and
+            // would panic on an empty name (e.g. "" or "Sheet1!").
+            let local = name.rsplit('!').next().unwrap_or("");
+            if local.is_empty() {
+                return Err(format!(
+                    "Invalid defined name '{}': name must not be empty",
+                    name
+                ));
+            }
             workbook
                 .define_name(name, reference)
                 .map_err(|e| format!("Failed to define name '{}': {}", name, e))?;

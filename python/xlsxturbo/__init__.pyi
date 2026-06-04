@@ -157,9 +157,14 @@ class TextboxOptions(TypedDict, total=False):
 
 ChartType = Literal[
     "area", "area_stacked", "area_percent_stacked",
+    "stacked_area", "percent_stacked_area",  # aliases
     "bar", "bar_stacked", "bar_percent_stacked",
-    "column", "column_stacked", "column_percent_stacked",
-    "doughnut", "line", "line_stacked", "line_percent_stacked",
+    "stacked_bar", "percent_stacked_bar",  # aliases
+    "column", "col", "column_stacked", "column_percent_stacked",
+    "stacked_column", "percent_stacked_column",  # aliases
+    "doughnut", "donut",
+    "line", "line_stacked", "line_percent_stacked",
+    "stacked_line", "percent_stacked_line",  # aliases
     "pie", "radar", "radar_with_markers", "radar_filled",
     "scatter", "scatter_straight", "scatter_straight_with_markers",
     "scatter_smooth", "scatter_smooth_with_markers", "stock",

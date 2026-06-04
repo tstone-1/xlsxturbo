@@ -37,7 +37,9 @@ pub(crate) fn apply_formula_columns(
         // Write formula for each data row
         for row in data_start_row..=data_end_row {
             // Replace {row} with actual row number (Excel is 1-based)
-            let excel_row = row + 1; // Convert 0-based to 1-based
+            let excel_row = row
+                .checked_add(1)
+                .ok_or("Formula row index exceeds u32 limit")?;
             let formula = formula_template.replace("{row}", &excel_row.to_string());
 
             worksheet

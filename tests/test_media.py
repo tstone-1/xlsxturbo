@@ -260,6 +260,10 @@ class TestCharts:
                 assert "Monthly Sales" in chart_xml
                 assert "<c:dTable>" in chart_xml
                 assert "<c:barChart>" in chart_xml
+                # The data_range and categories_range must actually land in the
+                # chart XML, not just produce a well-formed but empty chart.
+                assert "Sheet1!$B$2:$B$4" in chart_xml
+                assert "Sheet1!$A$2:$A$4" in chart_xml
         finally:
             os.unlink(path)
 
@@ -295,6 +299,11 @@ class TestCharts:
                 assert chart_xml.count("<c:ser>") == 2
                 assert "Quarter Results" in chart_xml
                 assert "<c:legend>" not in chart_xml
+                # Each series' values range and the shared categories range
+                # must reach the XML.
+                assert "Sheet1!$B$2:$B$4" in chart_xml
+                assert "Sheet1!$C$2:$C$4" in chart_xml
+                assert "Sheet1!$A$2:$A$4" in chart_xml
         finally:
             os.unlink(path)
 
@@ -351,6 +360,32 @@ class TestCharts:
                     df,
                     path,
                     charts={"D2": {"type": "not_a_chart", "data_range": "Sheet1!$A$2:$A$3"}},
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_chart_series_unknown_key_raises(self):
+        """A typo in a series-item key is rejected, not silently dropped"""
+        df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="unknown option"):
+                xlsxturbo.df_to_xlsx(
+                    df,
+                    path,
+                    charts={
+                        "D2": {
+                            "type": "column",
+                            "series": [
+                                # 'categorie_range' is a typo for 'categories_range'
+                                {
+                                    "values_range": "Sheet1!$B$2:$B$4",
+                                    "categorie_range": "Sheet1!$A$2:$A$4",
+                                }
+                            ],
+                        }
+                    },
                 )
         finally:
             if os.path.exists(path):
