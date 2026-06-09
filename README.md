@@ -1029,7 +1029,7 @@ xlsxturbo.dfs_to_xlsx([
 ], "multi_sheet.xlsx", constant_memory=True)
 ```
 
-**Note:** Constant memory mode disables some features that require random access:
+**Note:** Constant memory mode emits a `RuntimeWarning` and disables some features that require random access:
 - `table_style` (Excel tables)
 - `freeze_panes`
 - `row_heights`
@@ -1047,7 +1047,7 @@ xlsxturbo.dfs_to_xlsx([
 - `charts`
 - `cells`
 
-Column widths still work in constant memory mode.
+Plain `column_widths`, `header_format`, and `column_formats` remain supported.
 
 ### CSV Conversion
 

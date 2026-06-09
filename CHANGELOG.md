@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.4] - 2026-06-09
+
+### Fixed
+- Prevented non-nanosecond NumPy `datetime64` values from overflowing through an unsafe nanosecond cast and writing wrapped dates.
+- Preserved oversized Python integers and `i64::MIN` as strings instead of rounded floats.
+- Matched CSV behavior for pre-1900 DataFrame dates by writing them as strings instead of unsupported Excel serials.
+- Rejected unknown per-sheet option keys in `dfs_to_xlsx` with a valid-key list.
+- Accepted pandas DataFrames with non-string column labels by stringifying labels.
+- Accepted `os.PathLike` values for path arguments.
+
+### Documentation
+- Updated constant-memory documentation to describe RuntimeWarning behavior and the supported safe options.
+
+### Refactored
+- Moved shared cell-writing primitives into a leaf `write` module and split chart application into `apply/charts.rs`.
+- Shared defined-name validation and worksheet creation/write setup between single-sheet and multi-sheet paths.
+- Replaced the same-typed `extract_options` positional parameter list with a named raw-options struct.
+
+### Tested
+- Added regression coverage for datetime/int boundary conversions, strict per-sheet keys, multibyte table-name truncation, empty defined names, and pathlib paths.
+
 ## [0.15.3] - 2026-06-04
 
 ### Documentation

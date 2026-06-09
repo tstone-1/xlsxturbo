@@ -245,6 +245,17 @@ class TestErrorPaths:
             if os.path.exists(path):
                 os.unlink(path)
 
+    def test_dfs_to_xlsx_per_sheet_unknown_option_raises(self):
+        """Per-sheet option typos are rejected with the valid-key list."""
+        df = pd.DataFrame({"A": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="Unknown sheet option 'tabel_style'"):
+                xlsxturbo.dfs_to_xlsx([(df, "Sheet1", {"tabel_style": "Medium2"})], path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
     def test_cells_wrap_text_wrong_type_raises(self):
         """Invalid cells wrap_text type raises a clear TypeError"""
         df = pd.DataFrame({"A": [1]})

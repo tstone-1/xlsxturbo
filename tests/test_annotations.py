@@ -312,6 +312,36 @@ class TestDefinedNames:
         finally:
             os.unlink(path)
 
+    def test_empty_local_defined_name_raises_df_to_xlsx(self):
+        """Empty local defined names raise ValueError instead of panicking."""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="name must not be empty"):
+                xlsxturbo.df_to_xlsx(
+                    df,
+                    path,
+                    defined_names={"Sheet1!": "=Sheet1!$A$1:$A$2"},
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_empty_local_defined_name_raises_dfs_to_xlsx(self):
+        """Empty local defined names raise ValueError in multi-sheet mode."""
+        df = pd.DataFrame({"a": [1]})
+        path = get_temp_path()
+        try:
+            with pytest.raises(ValueError, match="name must not be empty"):
+                xlsxturbo.dfs_to_xlsx(
+                    [(df, "Sheet1")],
+                    path,
+                    defined_names={"Sheet1!": "=Sheet1!$A$1:$A$2"},
+                )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
 class TestDefinedNamesVerification:
     """Tests for defined_names with content verification"""
 

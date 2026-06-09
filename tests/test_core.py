@@ -10,6 +10,9 @@ from tests.helpers import (
     xlsxturbo,
 )
 
+import numpy as np
+from pathlib import Path
+
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
@@ -127,6 +130,18 @@ class TestEdgeCases:
             assert os.path.exists(path)
         finally:
             os.unlink(path)
+
+    def test_pathlib_output_path(self):
+        """pathlib.Path is accepted for output_path."""
+        df = pd.DataFrame({"A": [1]})
+        path = Path(get_temp_path())
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 2
+            assert cols == 1
+            assert path.exists()
+        finally:
+            path.unlink()
 
     def test_empty_dataframe_with_table_style(self):
         """Empty DataFrame with table_style writes without creating table"""
@@ -669,6 +684,74 @@ class TestUnicodeAndSpecialData:
         finally:
             os.unlink(path)
 
+    def test_non_ns_datetime64_out_of_range_writes_correct_date(self):
+        """datetime64[us] dates outside ns range must not wrap around."""
+        from datetime import datetime
+
+        df = pd.DataFrame({
+            "timestamp": np.array(["3000-01-01T00:00:00"], dtype="datetime64[us]")
+        })
+        path = get_temp_path()
+        try:
+            rows, cols = xlsxturbo.df_to_xlsx(df, path)
+            assert rows == 2
+            assert cols == 1
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == datetime(3000, 1, 1, 0, 0, 0)
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_python_int_beyond_i64_writes_as_string(self):
+        """Oversized Python ints should not fall through to rounded f64."""
+        value = 2**63 + 1025
+        df = pd.DataFrame({"big": [value]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == str(value)
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_i64_min_writes_as_string_without_overflow(self):
+        """The signed minimum value must use the precision-preserving fallback."""
+        value = np.iinfo(np.int64).min
+        df = pd.DataFrame({"min": np.array([value], dtype=np.int64)})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == str(value)
+                wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_dataframe_pre_1900_datetime_writes_as_string(self):
+        """DataFrame datetime paths match CSV behavior for Excel-unsupported dates."""
+        from datetime import datetime
+
+        df = pd.DataFrame({
+            "old": pd.Series([datetime(1850, 1, 1, 12, 0, 0)], dtype=object)
+        })
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(df, path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = wb.active
+                assert ws["A2"].value == "1850-01-01 12:00:00"
+                wb.close()
+        finally:
+            os.unlink(path)
+
     def test_object_timestamp_fractional_seconds(self):
         """Object-dtype pandas Timestamps go through the attribute branch and
         preserve fractional seconds (microsecond*1000 + nanosecond fold).
@@ -856,63 +939,3 @@ class TestPreEpochDates:
             if os.path.exists(csv_path):
                 os.unlink(csv_path)
             os.unlink(xlsx_path)
-
-
-if __name__ == "__main__":
-    import sys
-
-    # Run simple tests without pytest
-    test_classes = [
-        TestColumnWidthCap,
-        TestTableName,
-        TestHeaderFormat,
-        TestBackwardCompatibility,
-        TestPolarsSupport,
-        TestAllFeaturesCombined,
-        TestEdgeCases,
-        TestDateOrder,
-        TestFormulaColumns,
-        TestMergedRanges,
-        TestHyperlinks,
-        TestCsvConversion,
-        TestComments,
-        TestValidations,
-        TestRichText,
-        TestImages,
-        TestV10AllFeatures,
-        TestErrorPaths,
-        TestConditionalFormatting,
-        TestConstantMemoryMode,
-        TestRowHeights,
-        TestUnicodeAndSpecialData,
-        TestDefinedNames,
-        TestCells,
-        TestCellsPerSheet,
-        TestCellsFormatting,
-        TestBorderStyles,
-        TestTextAlignment,
-        TestCellConditionalFormat,
-        TestCsvErrorPaths,
-        TestConstantMemoryWarning,
-        TestDefinedNamesVerification,
-        TestFormulaColumnsHeaderFalse,
-        TestPreEpochDates,
-    ]
-
-    failed = 0
-    passed = 0
-
-    for test_class in test_classes:
-        instance = test_class()
-        for method_name in dir(instance):
-            if method_name.startswith("test_"):
-                try:
-                    getattr(instance, method_name)()
-                    print(f"[PASS] {test_class.__name__}.{method_name}")
-                    passed += 1
-                except Exception as e:
-                    print(f"[FAIL] {test_class.__name__}.{method_name}: {e}")
-                    failed += 1
-
-    print(f"\n{passed} passed, {failed} failed")
-    sys.exit(1 if failed else 0)

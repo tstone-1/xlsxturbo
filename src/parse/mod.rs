@@ -297,6 +297,13 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_table_name_multibyte_truncation() {
+        let long_name = "é".repeat(300);
+        let sanitized = sanitize_table_name(&long_name);
+        assert_eq!(sanitized.chars().count(), 255);
+    }
+
+    #[test]
     fn test_sanitize_table_name_empty() {
         assert_eq!(sanitize_table_name(""), "_");
     }

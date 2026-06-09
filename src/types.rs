@@ -227,7 +227,13 @@ pub(crate) fn extract_columns(
     } else {
         let cols = df.getattr("columns").map_err(|e| e.to_string())?;
         let col_list = cols.call_method0("tolist").map_err(|e| e.to_string())?;
-        col_list.extract().map_err(|e: pyo3::PyErr| e.to_string())
+        let py_list = col_list
+            .cast::<pyo3::types::PyList>()
+            .map_err(|e| e.to_string())?;
+        py_list
+            .iter()
+            .map(|col| col.str().map(|s| s.to_string()).map_err(|e| e.to_string()))
+            .collect()
     }
 }
 

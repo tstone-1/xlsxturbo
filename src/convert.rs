@@ -7,151 +7,20 @@ use crate::apply::{
     apply_textboxes, apply_validations,
 };
 use crate::parse::{
-    build_column_formats, naive_date_to_excel, naive_datetime_to_excel, parse_header_format,
-    parse_table_style, parse_value, sanitize_table_name,
+    build_column_formats, parse_header_format, parse_table_style, parse_value, sanitize_table_name,
 };
 use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
     WriteConfig,
 };
+use crate::workbook::apply_defined_names;
+use crate::write::{write_cell, write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
 use rayon::prelude::*;
-use rust_xlsxwriter::{Format, Table, Worksheet, XlsxError};
+use rust_xlsxwriter::{Format, Table, Workbook, Worksheet};
 use std::collections::HashMap;
 use std::fs::File;
-
-/// Maximum safe integer for lossless f64 representation (2^53).
-/// Integers beyond this range lose precision when cast to f64.
-const MAX_SAFE_INT: i64 = 1 << 53;
-
-/// Excel number format strings (shared with apply::apply_cells)
-pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
-pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
-
-/// Write a string to a cell, applying column format if provided
-fn write_str(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    val: impl Into<String>,
-    fmt: Option<&Format>,
-) -> Result<(), String> {
-    let s = val.into();
-    if let Some(f) = fmt {
-        worksheet.write_string_with_format(row, col, &s, f)
-    } else {
-        worksheet.write_string(row, col, &s)
-    }
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
-/// Write a number to a cell, applying column format if provided
-fn write_num(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    val: f64,
-    fmt: Option<&Format>,
-) -> Result<(), String> {
-    if let Some(f) = fmt {
-        worksheet.write_number_with_format(row, col, val, f)
-    } else {
-        worksheet.write_number(row, col, val)
-    }
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
-/// Write a boolean to a cell, applying column format if provided
-fn write_bool(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    val: bool,
-    fmt: Option<&Format>,
-) -> Result<(), String> {
-    if let Some(f) = fmt {
-        worksheet.write_boolean_with_format(row, col, val, f)
-    } else {
-        worksheet.write_boolean(row, col, val)
-    }
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
-/// Write an integer, falling back to string for values beyond f64 precision (>2^53)
-fn write_int(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    val: i64,
-    fmt: Option<&Format>,
-) -> Result<(), String> {
-    if val.abs() > MAX_SAFE_INT {
-        write_str(worksheet, row, col, val.to_string(), fmt)
-    } else {
-        write_num(worksheet, row, col, val as f64, fmt)
-    }
-}
-
-/// Write a float, treating NaN/Inf as empty
-fn write_float(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    val: f64,
-    fmt: Option<&Format>,
-) -> Result<(), String> {
-    if val.is_nan() || val.is_infinite() {
-        write_str(worksheet, row, col, "", fmt)
-    } else {
-        write_num(worksheet, row, col, val, fmt)
-    }
-}
-
-/// Write a cell value to the worksheet with appropriate formatting
-pub(crate) fn write_cell(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    value: CellValue,
-    date_format: &Format,
-    datetime_format: &Format,
-) -> Result<(), XlsxError> {
-    match value {
-        CellValue::Empty => {
-            // Write empty string rather than leaving cell blank so Excel table
-            // formatting renders consistently. Trade-off: COUNTA will count these.
-            worksheet.write_string(row, col, "")?;
-        }
-        CellValue::Integer(v) => {
-            if v.abs() > MAX_SAFE_INT {
-                worksheet.write_string(row, col, v.to_string())?;
-            } else {
-                worksheet.write_number(row, col, v as f64)?;
-            }
-        }
-        CellValue::Float(v) => {
-            worksheet.write_number(row, col, v)?;
-        }
-        CellValue::Boolean(v) => {
-            worksheet.write_boolean(row, col, v)?;
-        }
-        CellValue::Date(v) => {
-            worksheet.write_number_with_format(row, col, v, date_format)?;
-        }
-        CellValue::DateTime(v) => {
-            worksheet.write_number_with_format(row, col, v, datetime_format)?;
-        }
-        CellValue::String(v) => {
-            worksheet.write_string(row, col, &v)?;
-        }
-    }
-    Ok(())
-}
 
 /// Convert a CSV file to XLSX format with automatic type detection.
 ///
@@ -353,177 +222,6 @@ fn flush_parallel_chunk(
 // DataFrame support
 // ============================================================================
 
-/// Write a Python value to the worksheet with optional column format
-pub(crate) fn write_py_value_with_format(
-    worksheet: &mut Worksheet,
-    row: u32,
-    col: u16,
-    value: &Bound<'_, PyAny>,
-    date_format: &Format,
-    datetime_format: &Format,
-    column_format: Option<&Format>,
-) -> Result<(), String> {
-    // Check for None first
-    if value.is_none() {
-        return write_str(worksheet, row, col, "", column_format);
-    }
-
-    // Fast path: primitive Python scalars. Each of these checks is O(1) on
-    // PyObject type pointer; type_name lookup is deferred to the slow path
-    // (datetime/date/NAType/NaTType detection) so bool/int/float/str writes
-    // don't pay for a Python attribute round-trip per cell.
-
-    // Boolean first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = value.cast::<PyBool>() {
-        return write_bool(worksheet, row, col, b.is_true(), column_format);
-    }
-
-    if let Ok(i) = value.cast::<PyInt>() {
-        if let Ok(val) = i.extract::<i64>() {
-            return write_int(worksheet, row, col, val, column_format);
-        }
-    }
-
-    if let Ok(f) = value.cast::<PyFloat>() {
-        if let Ok(val) = f.extract::<f64>() {
-            return write_float(worksheet, row, col, val, column_format);
-        }
-    }
-
-    if let Ok(s) = value.cast::<PyString>() {
-        return write_str(worksheet, row, col, s.to_string(), column_format);
-    }
-
-    // Slow path: datetime, date, pandas NAType/NaTType, numpy scalars, fallback.
-    // type_name is fetched once and reused.
-    let type_name = value
-        .get_type()
-        .name()
-        .map_err(|e| format!("Failed to get type name: {}", e))?
-        .to_string();
-
-    if type_name == "NAType" || type_name == "NaTType" {
-        return write_str(worksheet, row, col, "", column_format);
-    }
-
-    if type_name == "datetime64" {
-        let ns_since_epoch: i64 = value
-            .call_method1("astype", ("datetime64[ns]",))
-            .and_then(|v| v.call_method1("astype", ("int64",)))
-            .and_then(|v| v.call_method0("item"))
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to convert numpy datetime64 scalar: {}", e))?;
-        if ns_since_epoch == i64::MIN {
-            return write_str(worksheet, row, col, "", column_format);
-        }
-
-        let seconds = ns_since_epoch.div_euclid(1_000_000_000);
-        let nanosecond = ns_since_epoch.rem_euclid(1_000_000_000) as u32;
-        let dt = chrono::DateTime::from_timestamp(seconds, nanosecond)
-            .ok_or_else(|| format!("Invalid numpy datetime64 timestamp: {}", ns_since_epoch))?
-            .naive_utc();
-        let excel_dt = naive_datetime_to_excel(dt);
-        let fmt = column_format.unwrap_or(datetime_format);
-        return write_num(worksheet, row, col, excel_dt, Some(fmt));
-    }
-
-    // Datetime (before date, since datetime is subclass of date)
-    if type_name == "datetime" || type_name == "Timestamp" {
-        let year: i32 = value
-            .getattr("year")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime year: {}", e))?;
-        let month: u32 = value
-            .getattr("month")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime month: {}", e))?;
-        let day: u32 = value
-            .getattr("day")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime day: {}", e))?;
-        let hour: u32 = value
-            .getattr("hour")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime hour: {}", e))?;
-        let minute: u32 = value
-            .getattr("minute")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime minute: {}", e))?;
-        let second: u32 = value
-            .getattr("second")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime second: {}", e))?;
-        let microsecond: u32 = value
-            .getattr("microsecond")
-            .and_then(|v| v.extract())
-            .unwrap_or(0);
-        let nanosecond_remainder: u32 = value
-            .getattr("nanosecond")
-            .and_then(|v| v.extract())
-            .unwrap_or(0);
-        let nanosecond = microsecond
-            .checked_mul(1_000)
-            .and_then(|v| v.checked_add(nanosecond_remainder))
-            .ok_or("Datetime fractional seconds exceed nanosecond range")?;
-
-        let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
-            format!(
-                "Invalid datetime date: year={}, month={}, day={}",
-                year, month, day
-            )
-        })?;
-        let time = chrono::NaiveTime::from_hms_nano_opt(hour, minute, second, nanosecond)
-            .ok_or_else(|| {
-                format!(
-                    "Invalid datetime time: hour={}, minute={}, second={}, nanosecond={}",
-                    hour, minute, second, nanosecond
-                )
-            })?;
-        let dt = chrono::NaiveDateTime::new(date, time);
-        let excel_dt = naive_datetime_to_excel(dt);
-        let fmt = column_format.unwrap_or(datetime_format);
-        return write_num(worksheet, row, col, excel_dt, Some(fmt));
-    }
-
-    if type_name == "date" {
-        let year: i32 = value
-            .getattr("year")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date year: {}", e))?;
-        let month: u32 = value
-            .getattr("month")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date month: {}", e))?;
-        let day: u32 = value
-            .getattr("day")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date day: {}", e))?;
-
-        let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
-            .ok_or_else(|| format!("Invalid date: year={}, month={}, day={}", year, month, day))?;
-        let excel_date = naive_date_to_excel(date);
-        let fmt = column_format.unwrap_or(date_format);
-        return write_num(worksheet, row, col, excel_date, Some(fmt));
-    }
-
-    // numpy scalar int (before f64 to avoid precision loss)
-    if let Ok(val) = value.extract::<i64>() {
-        return write_int(worksheet, row, col, val, column_format);
-    }
-
-    // numpy scalar float
-    if let Ok(val) = value.extract::<f64>() {
-        return write_float(worksheet, row, col, val, column_format);
-    }
-
-    // Fallback: convert to string
-    let s = value
-        .str()
-        .map_err(|e| format!("Failed to convert value to string: {}", e))?
-        .to_string();
-    write_str(worksheet, row, col, s, column_format)
-}
-
 /// Write DataFrame data and apply all features to a worksheet.
 ///
 /// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
@@ -710,13 +408,32 @@ pub(crate) fn write_sheet_data(
     Ok((row_idx, total_col_count))
 }
 
+pub(crate) fn write_configured_sheet(
+    py: Python<'_>,
+    workbook: &mut Workbook,
+    df: &Bound<'_, PyAny>,
+    sheet_name: &str,
+    config: &WriteConfig<'_>,
+    opts: EffectiveOpts<'_>,
+) -> Result<(u32, u16), String> {
+    let worksheet = if config.constant_memory {
+        workbook.add_worksheet_with_constant_memory()
+    } else {
+        workbook.add_worksheet()
+    };
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name '{}': {}", sheet_name, e))?;
+    write_sheet_data(py, worksheet, df, config, opts)
+}
+
 /// Complex feature options that still work under `constant_memory` because they
 /// are applied during the data-write phase (in `write_sheet_data`), not in
 /// `apply_worksheet_features`. Every other present complex option is skipped.
 const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &["column_widths", "header_format", "column_formats"];
 
 /// Emit a `RuntimeWarning` listing the features that `constant_memory` mode
-/// silently skips. The complex-feature list is derived from
+/// skips. The complex-feature list is derived from
 /// `EffectiveOpts::present_complex_options` (single source of truth, generated
 /// with the option fields), so adding a feature can never silently drop it from
 /// this warning — only the handful of scalar flags are listed by hand.
@@ -754,7 +471,7 @@ fn warn_constant_memory_skips(
         .import("warnings")
         .map_err(|e| format!("Failed to import warnings: {}", e))?;
     let msg = format!(
-        "constant_memory=True disables these features (they will be silently skipped): {}",
+        "constant_memory=True disables these features: {}",
         disabled.join(", ")
     );
     let runtime_warning = py
@@ -971,14 +688,6 @@ pub(crate) fn convert_dataframe_to_xlsx(
     defined_names: Option<&HashMap<String, String>>,
 ) -> Result<(u32, u16), String> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
-    let worksheet = if constant_memory {
-        workbook.add_worksheet_with_constant_memory()
-    } else {
-        workbook.add_worksheet()
-    };
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
 
     let config = WriteConfig {
         include_header,
@@ -990,26 +699,16 @@ pub(crate) fn convert_dataframe_to_xlsx(
         constant_memory,
     };
 
-    let result = write_sheet_data(py, worksheet, df, &config, opts.as_effective())?;
+    let result = write_configured_sheet(
+        py,
+        &mut workbook,
+        df,
+        sheet_name,
+        &config,
+        opts.as_effective(),
+    )?;
 
-    // Apply defined names (workbook-level)
-    if let Some(names) = defined_names {
-        for (name, reference) in names {
-            // The local part (after a sheet-qualifying '!') must be non-empty:
-            // rust_xlsxwriter's define_name calls `chars().next().unwrap()` and
-            // would panic on an empty name (e.g. "" or "Sheet1!").
-            let local = name.rsplit('!').next().unwrap_or("");
-            if local.is_empty() {
-                return Err(format!(
-                    "Invalid defined name '{}': name must not be empty",
-                    name
-                ));
-            }
-            workbook
-                .define_name(name, reference)
-                .map_err(|e| format!("Failed to define name '{}': {}", name, e))?;
-        }
-    }
+    apply_defined_names(&mut workbook, defined_names)?;
 
     workbook
         .save(output_path)

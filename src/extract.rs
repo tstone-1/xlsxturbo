@@ -10,6 +10,30 @@ use indexmap::IndexMap;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
+const SHEET_OPTION_NAMES: &[&str] = &[
+    "header",
+    "autofit",
+    "table_style",
+    "freeze_panes",
+    "column_widths",
+    "row_heights",
+    "table_name",
+    "header_format",
+    "column_formats",
+    "conditional_formats",
+    "formula_columns",
+    "merged_ranges",
+    "hyperlinks",
+    "comments",
+    "validations",
+    "rich_text",
+    "images",
+    "checkboxes",
+    "textboxes",
+    "charts",
+    "cells",
+];
+
 /// Helper: extract an optional scalar field from a Python dict into a SheetConfig field
 macro_rules! extract_scalar {
     ($opts:expr, $config:expr, $key:literal, $field:ident) => {
@@ -63,6 +87,25 @@ macro_rules! extract_list_field {
     };
 }
 
+fn validate_sheet_option_keys(opts: &Bound<'_, pyo3::types::PyDict>) -> PyResult<()> {
+    for key in opts.keys().iter() {
+        let key_str: String = key.extract().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "Sheet option keys must be strings, got {}",
+                pytype_name(&key)
+            ))
+        })?;
+        if !SHEET_OPTION_NAMES.contains(&key_str.as_str()) {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Unknown sheet option '{}'. Valid keys: {}",
+                key_str,
+                SHEET_OPTION_NAMES.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
 /// 2-tuple: (df, sheet_name)
 /// 3-tuple: (df, sheet_name, options_dict)
@@ -85,12 +128,13 @@ pub(crate) fn extract_sheet_info<'py>(
         if opts.is_none() {
             return Ok((df, sheet_name, SheetConfig::default()));
         }
-        opts.cast::<pyo3::types::PyDict>().map_err(|_| {
+        let opts_dict = opts.cast::<pyo3::types::PyDict>().map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err(format!(
                 "Sheet options must be a dict, got {}",
                 pytype_name(&opts)
             ))
         })?;
+        validate_sheet_option_keys(opts_dict)?;
         let mut config = SheetConfig::default();
 
         // Extract scalar fields

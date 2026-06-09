@@ -1,6 +1,9 @@
 """Type stubs for xlsxturbo"""
 
+from os import PathLike
 from typing import Literal, TypedDict
+
+PathArg = str | PathLike[str]
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
 ValidationType = Literal["list", "whole_number", "whole", "integer", "decimal", "number", "text_length", "textlength", "length"]
@@ -242,8 +245,8 @@ class SheetOptions(TypedDict, total=False):
     cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
-    input_path: str,
-    output_path: str,
+    input_path: PathArg,
+    output_path: PathArg,
     sheet_name: str = "Sheet1",
     parallel: bool = False,
     date_order: DateOrder = "auto",
@@ -272,7 +275,7 @@ def csv_to_xlsx(
 
 def df_to_xlsx(
     df: object,
-    output_path: str,
+    output_path: PathArg,
     sheet_name: str = "Sheet1",
     header: bool = True,
     autofit: bool = False,
@@ -313,10 +316,11 @@ def df_to_xlsx(
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
-            When enabled, silently disables: table_style, freeze_panes, row_heights,
-            autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images, checkboxes,
-            textboxes, charts, and cells.
+            When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
+            row_heights, autofit, column_widths with autofit cap, conditional_formats,
+            formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
+            images, checkboxes, textboxes, charts, and cells. Plain column_widths,
+            header_format, and column_formats remain supported.
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.
@@ -367,7 +371,7 @@ def df_to_xlsx(
 
 def dfs_to_xlsx(
     sheets: list[tuple[object, str] | tuple[object, str, SheetOptions]],
-    output_path: str,
+    output_path: PathArg,
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
@@ -405,10 +409,11 @@ def dfs_to_xlsx(
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode (default: False).
-            When enabled, silently disables: table_style, freeze_panes, row_heights,
-            autofit, column_widths with autofit cap, conditional_formats, formula_columns,
-            merged_ranges, hyperlinks, comments, validations, rich_text, images, checkboxes,
-            textboxes, charts, and cells.
+            When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
+            row_heights, autofit, column_widths with autofit cap, conditional_formats,
+            formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
+            images, checkboxes, textboxes, charts, and cells. Plain column_widths,
+            header_format, and column_formats remain supported.
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
         column_formats: Dict mapping column name patterns to format options.

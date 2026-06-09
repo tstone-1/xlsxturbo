@@ -15,12 +15,14 @@ mod convert;
 mod extract;
 mod parse;
 mod types;
+mod workbook;
+mod write;
 
 // Re-export public API for the CLI binary (main.rs)
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel};
 pub use types::DateOrder;
 
-use convert::{convert_dataframe_to_xlsx, write_sheet_data};
+use convert::{convert_dataframe_to_xlsx, write_configured_sheet};
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
@@ -30,10 +32,27 @@ use extract::{
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
+use workbook::apply_defined_names;
 
 use pyo3::prelude::*;
 use rust_xlsxwriter::Workbook;
 use std::collections::HashMap;
+
+fn path_arg_to_string(value: &Bound<'_, PyAny>, param_name: &str) -> PyResult<String> {
+    if let Ok(path) = value.extract::<String>() {
+        return Ok(path);
+    }
+    if let Ok(pathlike) = value.call_method0("__fspath__") {
+        if let Ok(path) = pathlike.extract::<String>() {
+            return Ok(path);
+        }
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(format!(
+        "'{}' must be str or os.PathLike, got {}",
+        param_name,
+        pytype_name(value)
+    )))
+}
 
 /// Helper: cast a PyAny to PyDict or raise TypeError with a clear message.
 fn require_dict<'py>(
@@ -63,71 +82,87 @@ fn require_list<'py>(
     })
 }
 
+struct RawOptions<'a, 'py> {
+    column_widths: Option<&'a Bound<'py, PyAny>>,
+    header_format: Option<&'a Bound<'py, PyAny>>,
+    column_formats: Option<&'a Bound<'py, PyAny>>,
+    conditional_formats: Option<&'a Bound<'py, PyAny>>,
+    formula_columns: Option<&'a Bound<'py, PyAny>>,
+    merged_ranges: Option<&'a Bound<'py, PyAny>>,
+    hyperlinks: Option<&'a Bound<'py, PyAny>>,
+    comments: Option<&'a Bound<'py, PyAny>>,
+    validations: Option<&'a Bound<'py, PyAny>>,
+    rich_text: Option<&'a Bound<'py, PyAny>>,
+    images: Option<&'a Bound<'py, PyAny>>,
+    checkboxes: Option<&'a Bound<'py, PyAny>>,
+    textboxes: Option<&'a Bound<'py, PyAny>>,
+    charts: Option<&'a Bound<'py, PyAny>>,
+    cells: Option<&'a Bound<'py, PyAny>>,
+}
+
 /// Extract and validate all optional write parameters from Python into typed Rust structs.
-#[allow(clippy::too_many_arguments)]
-fn extract_options<'py>(
-    column_widths: Option<&Bound<'py, PyAny>>,
-    header_format: Option<&Bound<'py, PyAny>>,
-    column_formats: Option<&Bound<'py, PyAny>>,
-    conditional_formats: Option<&Bound<'py, PyAny>>,
-    formula_columns: Option<&Bound<'py, PyAny>>,
-    merged_ranges: Option<&Bound<'py, PyAny>>,
-    hyperlinks: Option<&Bound<'py, PyAny>>,
-    comments: Option<&Bound<'py, PyAny>>,
-    validations: Option<&Bound<'py, PyAny>>,
-    rich_text: Option<&Bound<'py, PyAny>>,
-    images: Option<&Bound<'py, PyAny>>,
-    checkboxes: Option<&Bound<'py, PyAny>>,
-    textboxes: Option<&Bound<'py, PyAny>>,
-    charts: Option<&Bound<'py, PyAny>>,
-    cells: Option<&Bound<'py, PyAny>>,
-) -> PyResult<ExtractedOptions> {
+fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
     Ok(ExtractedOptions {
-        column_widths: column_widths
+        column_widths: raw
+            .column_widths
             .map(|v| require_dict(v, "column_widths").and_then(|d| extract_column_widths(&d)))
             .transpose()?,
-        header_format: header_format
+        header_format: raw
+            .header_format
             .map(|v| require_dict(v, "header_format").and_then(|d| extract_header_format(&d)))
             .transpose()?,
-        column_formats: column_formats
+        column_formats: raw
+            .column_formats
             .map(|v| require_dict(v, "column_formats").and_then(|d| extract_column_formats(&d)))
             .transpose()?,
-        conditional_formats: conditional_formats
+        conditional_formats: raw
+            .conditional_formats
             .map(|v| {
                 require_dict(v, "conditional_formats").and_then(|d| extract_conditional_formats(&d))
             })
             .transpose()?,
-        formula_columns: formula_columns
+        formula_columns: raw
+            .formula_columns
             .map(|v| require_dict(v, "formula_columns").and_then(|d| extract_formula_columns(&d)))
             .transpose()?,
-        merged_ranges: merged_ranges
+        merged_ranges: raw
+            .merged_ranges
             .map(|v| require_list(v, "merged_ranges").and_then(|l| extract_merged_ranges(&l)))
             .transpose()?,
-        hyperlinks: hyperlinks
+        hyperlinks: raw
+            .hyperlinks
             .map(|v| require_list(v, "hyperlinks").and_then(|l| extract_hyperlinks(&l)))
             .transpose()?,
-        comments: comments
+        comments: raw
+            .comments
             .map(|v| require_dict(v, "comments").and_then(|d| extract_comments(&d)))
             .transpose()?,
-        validations: validations
+        validations: raw
+            .validations
             .map(|v| require_dict(v, "validations").and_then(|d| extract_validations(&d)))
             .transpose()?,
-        rich_text: rich_text
+        rich_text: raw
+            .rich_text
             .map(|v| require_dict(v, "rich_text").and_then(|d| extract_rich_text(&d)))
             .transpose()?,
-        images: images
+        images: raw
+            .images
             .map(|v| require_dict(v, "images").and_then(|d| extract_images(&d)))
             .transpose()?,
-        checkboxes: checkboxes
+        checkboxes: raw
+            .checkboxes
             .map(|v| require_dict(v, "checkboxes").and_then(|d| extract_checkboxes(&d)))
             .transpose()?,
-        textboxes: textboxes
+        textboxes: raw
+            .textboxes
             .map(|v| require_dict(v, "textboxes").and_then(|d| extract_textboxes(&d)))
             .transpose()?,
-        charts: charts
+        charts: raw
+            .charts
             .map(|v| require_dict(v, "charts").and_then(|d| extract_charts(&d)))
             .transpose()?,
-        cells: cells
+        cells: raw
+            .cells
             .map(|v| require_dict(v, "cells").and_then(|d| extract_cells(&d)))
             .transpose()?,
     })
@@ -171,12 +206,14 @@ fn extract_options<'py>(
 #[pyfunction]
 #[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false, date_order = "auto"))]
 fn csv_to_xlsx(
-    input_path: &str,
-    output_path: &str,
+    input_path: &Bound<'_, PyAny>,
+    output_path: &Bound<'_, PyAny>,
     sheet_name: &str,
     parallel: bool,
     date_order: &str,
 ) -> PyResult<(u32, u16)> {
+    let input_path = path_arg_to_string(input_path, "input_path")?;
+    let output_path = path_arg_to_string(output_path, "output_path")?;
     let order = DateOrder::parse(date_order).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!(
             "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu",
@@ -185,9 +222,9 @@ fn csv_to_xlsx(
     })?;
 
     let result = if parallel {
-        convert_csv_to_xlsx_parallel(input_path, output_path, sheet_name, order)
+        convert_csv_to_xlsx_parallel(&input_path, &output_path, sheet_name, order)
     } else {
-        convert_csv_to_xlsx(input_path, output_path, sheet_name, order)
+        convert_csv_to_xlsx(&input_path, &output_path, sheet_name, order)
     };
     result.map_err(pyo3::exceptions::PyValueError::new_err)
 }
@@ -310,7 +347,7 @@ fn csv_to_xlsx(
 fn df_to_xlsx<'py>(
     py: Python<'py>,
     df: &Bound<'py, PyAny>,
-    output_path: &str,
+    output_path: &Bound<'py, PyAny>,
     sheet_name: &str,
     header: bool,
     autofit: bool,
@@ -336,7 +373,8 @@ fn df_to_xlsx<'py>(
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
-    let opts = extract_options(
+    let output_path = path_arg_to_string(output_path, "output_path")?;
+    let opts = extract_options(&RawOptions {
         column_widths,
         header_format,
         column_formats,
@@ -352,12 +390,12 @@ fn df_to_xlsx<'py>(
         textboxes,
         charts,
         cells,
-    )?;
+    })?;
 
     convert_dataframe_to_xlsx(
         py,
         df,
-        output_path,
+        &output_path,
         sheet_name,
         header,
         autofit,
@@ -485,7 +523,7 @@ fn version() -> &'static str {
 fn dfs_to_xlsx<'py>(
     py: Python<'py>,
     sheets: Vec<Bound<'py, PyAny>>,
-    output_path: &str,
+    output_path: &Bound<'py, PyAny>,
     header: bool,
     autofit: bool,
     table_style: Option<&str>,
@@ -510,10 +548,11 @@ fn dfs_to_xlsx<'py>(
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
+    let output_path = path_arg_to_string(output_path, "output_path")?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
 
-    let opts = extract_options(
+    let opts = extract_options(&RawOptions {
         column_widths,
         header_format,
         column_formats,
@@ -529,7 +568,7 @@ fn dfs_to_xlsx<'py>(
         textboxes,
         charts,
         cells,
-    )?;
+    })?;
 
     for sheet_tuple in sheets {
         let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
@@ -553,18 +592,6 @@ fn dfs_to_xlsx<'py>(
         // Merge per-sheet complex options with global defaults (references, no cloning needed)
         let effective_opts = sheet_config.merge_with(&opts);
 
-        let worksheet = if constant_memory {
-            workbook.add_worksheet_with_constant_memory()
-        } else {
-            workbook.add_worksheet()
-        };
-        worksheet.set_name(&sheet_name).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "Failed to set sheet name '{}': {}",
-                sheet_name, e
-            ))
-        })?;
-
         let sheet_config_write = WriteConfig {
             include_header: effective_header,
             autofit: effective_autofit,
@@ -575,37 +602,25 @@ fn dfs_to_xlsx<'py>(
             constant_memory,
         };
 
-        let result = write_sheet_data(py, worksheet, &df, &sheet_config_write, effective_opts)
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let result = write_configured_sheet(
+            py,
+            &mut workbook,
+            &df,
+            &sheet_name,
+            &sheet_config_write,
+            effective_opts,
+        )
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         stats.push(result);
     }
 
-    // Apply defined names (workbook-level)
-    if let Some(ref names) = defined_names {
-        for (name, reference) in names {
-            // The local part (after a sheet-qualifying '!') must be non-empty:
-            // rust_xlsxwriter's define_name calls `chars().next().unwrap()` and
-            // would panic on an empty name (e.g. "" or "Sheet1!").
-            let local = name.rsplit('!').next().unwrap_or("");
-            if local.is_empty() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid defined name '{}': name must not be empty",
-                    name
-                )));
-            }
-            workbook.define_name(name, reference).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "Failed to define name '{}': {}",
-                    name, e
-                ))
-            })?;
-        }
-    }
+    apply_defined_names(&mut workbook, defined_names.as_ref())
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     // Save workbook
     workbook
-        .save(output_path)
+        .save(&output_path)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Failed to save: {}", e)))?;
 
     Ok(stats)
