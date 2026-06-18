@@ -832,7 +832,7 @@ wheels = [
 
 [[package]]
 name = "xlsxturbo"
-version = "0.15.1"
+version = "0.15.4"
 source = { editable = "." }
 
 [package.optional-dependencies]
