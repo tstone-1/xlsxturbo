@@ -36,7 +36,7 @@ pub(crate) fn parse_color(color_str: &str) -> Result<u32, String> {
 
 /// Parse color string into a rust_xlsxwriter `Color` enum.
 /// Wraps `parse_color` — used by features whose setters take `impl Into<Color>`
-/// rather than a raw `u32` (shapes, charts, sparklines).
+/// rather than a raw `u32` (e.g. shapes/textboxes and charts).
 pub(crate) fn parse_color_enum(color_str: &str) -> Result<Color, String> {
     parse_color(color_str).map(Color::RGB)
 }

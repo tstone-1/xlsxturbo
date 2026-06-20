@@ -21,8 +21,11 @@ class TestValidations:
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
                 ws = wb.active
-                # Check that data validation exists
                 assert len(ws.data_validations.dataValidation) > 0
+                dv = ws.data_validations.dataValidation[0]
+                # Assert the type and that the dropdown values actually landed.
+                assert dv.type == "list"
+                assert "Open" in dv.formula1 and "Pending" in dv.formula1
                 wb.close()
         finally:
             os.unlink(path)
@@ -42,6 +45,11 @@ class TestValidations:
                 wb = load_workbook(path)
                 ws = wb.active
                 assert len(ws.data_validations.dataValidation) > 0
+                dv = ws.data_validations.dataValidation[0]
+                # Assert the type and the min/max bounds, not just presence.
+                assert dv.type == "whole"
+                assert dv.formula1 == "0"
+                assert dv.formula2 == "100"
                 wb.close()
         finally:
             os.unlink(path)

@@ -26,7 +26,11 @@ class TestImages:
                 f.write(png_data)
 
             xlsxturbo.df_to_xlsx(df, path, images={"D1": img_path})
-            assert os.path.exists(path)
+            # The image must actually land in the package, not just produce a file.
+            with zipfile.ZipFile(path) as zf:
+                media = [n for n in zf.namelist() if n.startswith("xl/media/")]
+                assert media, "no embedded image found in xl/media/"
+                assert any(n.endswith(".png") for n in media)
         finally:
             if os.path.exists(path):
                 os.unlink(path)
@@ -52,7 +56,11 @@ class TestImages:
                 path,
                 images={"B5": {"path": img_path, "scale_width": 2.0, "scale_height": 2.0}},
             )
-            assert os.path.exists(path)
+            with zipfile.ZipFile(path) as zf:
+                media = [n for n in zf.namelist() if n.startswith("xl/media/")]
+                assert media, "no embedded image found in xl/media/"
+                # A drawing relationship must anchor the image to the sheet.
+                assert any(n.startswith("xl/drawings/") for n in zf.namelist())
         finally:
             if os.path.exists(path):
                 os.unlink(path)
@@ -224,7 +232,10 @@ class TestTextboxes:
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, textboxes={"C2": "Simple note"})
-            assert os.path.exists(path)
+            with zipfile.ZipFile(path) as zf:
+                assert "xl/drawings/drawing1.xml" in zf.namelist()
+                drawing = zf.read("xl/drawings/drawing1.xml").decode("utf-8")
+                assert "Simple note" in drawing
         finally:
             os.unlink(path)
 
@@ -451,7 +462,13 @@ class TestCharts:
                     }
                 },
             )
-            assert os.path.exists(path)
+            with zipfile.ZipFile(path) as zf:
+                drawing = zf.read("xl/drawings/drawing1.xml").decode("utf-8")
+                assert "Annotated" in drawing
+                # alt_text, fill color, and font color must reach the XML.
+                assert "A textbox annotation" in drawing
+                assert "F0F0F0" in drawing.upper()
+                assert "FF0000" in drawing.upper()
         finally:
             os.unlink(path)
 

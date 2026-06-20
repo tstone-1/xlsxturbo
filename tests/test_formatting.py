@@ -1,3 +1,5 @@
+import zipfile
+
 from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
 
 
@@ -324,12 +326,13 @@ class TestRichText:
             xlsxturbo.df_to_xlsx(
                 df, path, rich_text={"A1": [("Bold", {"bold": True}), " normal"]}
             )
-            assert os.path.exists(path)
-            if HAS_OPENPYXL:
-                wb = load_workbook(path)
-                ws = wb.active
-                # openpyxl may have issues reading rich text, just verify file exists
-                wb.close()
+            # openpyxl flattens rich text, so inspect the runs in sharedStrings.xml:
+            # the two segments must be distinct runs and the first must be bold.
+            with zipfile.ZipFile(path) as zf:
+                shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
+                assert "Bold" in shared
+                assert "normal" in shared
+                assert "<b/>" in shared
         finally:
             os.unlink(path)
 
@@ -349,7 +352,12 @@ class TestRichText:
                     ]
                 },
             )
-            assert os.path.exists(path)
+            with zipfile.ZipFile(path) as zf:
+                shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
+                assert "Red text" in shared and "blue text" in shared
+                # Red (FF0000) and blue (0000FF) runs and an italic run must be present.
+                assert "FF0000" in shared.upper() and "0000FF" in shared.upper()
+                assert "<i/>" in shared
         finally:
             os.unlink(path)
 

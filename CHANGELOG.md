@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.5] - 2026-06-20
+
+### Changed
+- Updated `pyo3` to 0.29, clearing RUSTSEC-2026-0176 and RUSTSEC-2026-0177 (neither vulnerable API was reachable from this crate; the bump is dependency hygiene). `cargo audit` is clean.
+
+### Fixed
+- List-validation length checks and autofit width estimates now count characters instead of UTF-8 bytes, so multibyte values are no longer over-counted.
+
+### Documentation
+- Replaced the stale hard-coded performance multiplier in the module docstring with a pointer to the README's machine-labeled benchmark tables.
+- Documented the `cells` alignment/wrap options (`align_horizontal`, `align_vertical`, `wrap_text`) in the `df_to_xlsx`/`dfs_to_xlsx` docstrings.
+- Added contextual row/column/column-name information to previously bare cell-write and column-extraction error messages.
+- Restored the changelog version link references (0.13.0 through current).
+
+### Tested
+- Added CLI integration tests (`tests/cli.rs`): exit codes, the `OK rows cols` stdout contract, and the invalid-`date_order` error path.
+- Added a `version()` regression test asserting it matches the installed package metadata.
+- Upgraded `rich_text`, `images`, `textboxes`, `validations`, conditional-format, and `freeze_panes` happy-path tests from existence/count smoke checks to content/semantic assertions.
+
 ## [0.15.4] - 2026-06-09
 
 ### Fixed
@@ -524,6 +543,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.15.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.5
+[0.15.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.4
+[0.15.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.3
+[0.15.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.2
+[0.15.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.1
+[0.15.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.0
+[0.14.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.14.1
+[0.14.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.14.0
+[0.13.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.13.0
 [0.12.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.5
 [0.12.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.4
 [0.12.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.12.3

@@ -1,3 +1,5 @@
+import zipfile
+
 from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
 
 
@@ -19,13 +21,11 @@ class TestConditionalFormatting:
                     "Score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
                 },
             )
-            assert os.path.exists(path)
-            if HAS_OPENPYXL:
-                wb = load_workbook(path)
-                ws = wb.active
-                # openpyxl reads conditional formats
-                assert len(ws.conditional_formatting) > 0
-                wb.close()
+            with zipfile.ZipFile(path) as zf:
+                xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
+                # Assert it's actually a color scale with both configured colors.
+                assert "<COLORSCALE>" in xml
+                assert "FF0000" in xml and "00FF00" in xml
         finally:
             os.unlink(path)
 
@@ -46,12 +46,11 @@ class TestConditionalFormatting:
                     }
                 },
             )
-            assert os.path.exists(path)
-            if HAS_OPENPYXL:
-                wb = load_workbook(path)
-                ws = wb.active
-                assert len(ws.conditional_formatting) > 0
-                wb.close()
+            with zipfile.ZipFile(path) as zf:
+                xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
+                assert "<COLORSCALE>" in xml
+                # All three configured colors must be present.
+                assert "F8696B" in xml and "FFEB84" in xml and "63BE7B" in xml
         finally:
             os.unlink(path)
 
@@ -67,12 +66,11 @@ class TestConditionalFormatting:
                     "Progress": {"type": "data_bar", "bar_color": "#638EC6"}
                 },
             )
-            assert os.path.exists(path)
-            if HAS_OPENPYXL:
-                wb = load_workbook(path)
-                ws = wb.active
-                assert len(ws.conditional_formatting) > 0
-                wb.close()
+            with zipfile.ZipFile(path) as zf:
+                xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
+                # Assert it's a data bar with the configured bar color.
+                assert "DATABAR" in xml
+                assert "638EC6" in xml
         finally:
             os.unlink(path)
 
@@ -88,12 +86,13 @@ class TestConditionalFormatting:
                     "Status": {"type": "icon_set", "icon_type": "3_traffic_lights"}
                 },
             )
-            assert os.path.exists(path)
-            if HAS_OPENPYXL:
-                wb = load_workbook(path)
-                ws = wb.active
-                assert len(ws.conditional_formatting) > 0
-                wb.close()
+            with zipfile.ZipFile(path) as zf:
+                xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                # Assert it's an iconSet rule with three thresholds (a 3-icon set).
+                # Excel omits the iconSet type attr for the default 3-traffic-lights,
+                # so verify the structure rather than the (absent) type string.
+                assert 'type="iconSet"' in xml
+                assert xml.count("<cfvo ") == 3
         finally:
             os.unlink(path)
 

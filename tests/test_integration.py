@@ -29,6 +29,8 @@ class TestAllFeaturesCombined:
                 wb = load_workbook(path)
                 ws = wb.active
                 assert "StudentScores" in ws.tables
+                # freeze_panes=True must freeze the header row (split below row 1).
+                assert ws.freeze_panes == "A2"
                 # Note: table_style overrides header_format styling
                 # This is expected Excel behavior - tables have their own header styles
                 wb.close()

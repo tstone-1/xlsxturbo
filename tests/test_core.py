@@ -498,14 +498,43 @@ class TestCsvConversion:
             if HAS_OPENPYXL:
                 wb = load_workbook(xlsx_path)
                 ws = wb.active
-                # NaN/Inf/empty should become empty strings or None
-                # (written as empty string in write_cell for CellValue::Empty)
+                # NaN/Inf/empty all become empty cells (write_cell -> CellValue::Empty
+                # writes an empty string, which openpyxl reads back as None or "").
+                for ref in ("A2", "B2", "C2", "A3", "B3", "C3"):
+                    assert ws[ref].value in (None, ""), f"{ref} should be empty"
                 wb.close()
         finally:
             if os.path.exists(csv_path):
                 os.unlink(csv_path)
             if os.path.exists(xlsx_path):
                 os.unlink(xlsx_path)
+
+    def test_csv_int_min_writes_as_string_without_overflow(self):
+        """i64::MIN via the CSV path (write_cell) is written as text, no overflow.
+
+        Complements test_i64_min_writes_as_string_without_overflow, which covers
+        the distinct DataFrame write_int path.
+        """
+        import csv as _csv
+
+        int_min = -9223372036854775808  # i64::MIN
+        csv_path = get_temp_path().replace(".xlsx", ".csv")
+        xlsx_path = get_temp_path()
+        try:
+            with open(csv_path, "w", newline="") as f:
+                w = _csv.writer(f)
+                w.writerow(["n"])
+                w.writerow([str(int_min)])
+            xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+            if HAS_OPENPYXL:
+                wb = load_workbook(xlsx_path)
+                ws = wb.active
+                assert ws["A2"].value == str(int_min)
+                wb.close()
+        finally:
+            for p in (csv_path, xlsx_path):
+                if os.path.exists(p):
+                    os.unlink(p)
 
     def test_csv_parallel(self):
         """CSV parallel mode produces same output"""

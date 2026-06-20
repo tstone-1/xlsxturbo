@@ -270,16 +270,17 @@ pub(crate) fn write_sheet_data(
         for (col_idx, col_name) in columns.iter().enumerate() {
             let col = col_idx as u16; // safe: col_count already validated via u16::try_from
             if track_widths {
-                max_lens[col_idx] = col_name.len();
+                // Char count, not byte count: width is a visual estimate.
+                max_lens[col_idx] = col_name.chars().count();
             }
             if let Some(ref fmt) = header_fmt {
                 worksheet
                     .write_string_with_format(row_idx, col, col_name, fmt)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| format!("Failed to write header '{}': {}", col_name, e))?;
             } else {
                 worksheet
                     .write_string(row_idx, col, col_name)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| format!("Failed to write header '{}': {}", col_name, e))?;
             }
         }
         row_idx = 1;
@@ -321,7 +322,11 @@ pub(crate) fn write_sheet_data(
             for (col_idx, value) in row_tuple.iter().enumerate() {
                 let col = col_idx as u16; // safe: col_count already validated via u16::try_from
                 if track_widths {
-                    let len = value.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                    // Char count, not byte count: width is a visual estimate.
+                    let len = value
+                        .str()
+                        .map(|s| s.to_string_lossy().chars().count())
+                        .unwrap_or(0);
                     if len > max_lens[col_idx] {
                         max_lens[col_idx] = len;
                     }
@@ -358,7 +363,11 @@ pub(crate) fn write_sheet_data(
                     .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
 
                 if track_widths {
-                    let len = value.str().map(|s| s.to_string_lossy().len()).unwrap_or(0);
+                    // Char count, not byte count: width is a visual estimate.
+                    let len = value
+                        .str()
+                        .map(|s| s.to_string_lossy().chars().count())
+                        .unwrap_or(0);
                     if len > max_lens[col_idx] {
                         max_lens[col_idx] = len;
                     }

@@ -30,7 +30,7 @@ fn write_str(
         worksheet.write_string(row, col, &s)
     }
     .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("Failed to write text at row {}, col {}: {}", row, col, e))
 }
 
 /// Write a number to a cell, applying column format if provided.
@@ -47,7 +47,7 @@ fn write_num(
         worksheet.write_number(row, col, val)
     }
     .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("Failed to write number at row {}, col {}: {}", row, col, e))
 }
 
 /// Write a boolean to a cell, applying column format if provided.
@@ -64,7 +64,7 @@ fn write_bool(
         worksheet.write_boolean(row, col, val)
     }
     .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| format!("Failed to write boolean at row {}, col {}: {}", row, col, e))
 }
 
 /// Write an integer, falling back to string for values beyond f64 precision.

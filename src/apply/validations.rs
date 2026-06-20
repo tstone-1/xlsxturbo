@@ -159,9 +159,11 @@ pub(crate) fn apply_validations(
                             format!("validations['{}']: invalid 'values': {}", col_pattern, e)
                         })?;
 
-                    // Check Excel's 255 character limit for list validation
-                    let total_chars: usize = values.iter().map(|s| s.len()).sum::<usize>()
-                        + values.len().saturating_sub(1); // commas between items
+                    // Check Excel's 255 character limit for list validation.
+                    // Count characters, not bytes — Excel's limit is on characters.
+                    let total_chars: usize =
+                        values.iter().map(|s| s.chars().count()).sum::<usize>()
+                            + values.len().saturating_sub(1); // commas between items
                     if total_chars > 255 {
                         return Err(format!(
                             "validations['{}']: list values exceed Excel's 255 character limit ({} chars). \

@@ -292,7 +292,8 @@ fn csv_to_xlsx(
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
-///            Values can be simple (str, int, float, bool) or dicts with "value" and optional "num_format".
+///            Values can be simple (str, int, float, bool) or dicts with "value" and optional
+///            "num_format", "align_horizontal", "align_vertical", and "wrap_text".
 ///            Cells are written after all DataFrame data, so they can overwrite data cells.
 ///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
@@ -468,7 +469,8 @@ fn version() -> &'static str {
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
-///            Values can be simple (str, int, float, bool) or dicts with "value" and optional "num_format".
+///            Values can be simple (str, int, float, bool) or dicts with "value" and optional
+///            "num_format", "align_horizontal", "align_vertical", and "wrap_text".
 ///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
 /// Returns:
@@ -629,7 +631,8 @@ fn dfs_to_xlsx<'py>(
 /// xlsxturbo - High-performance Excel writer
 ///
 /// A Rust-powered library for converting DataFrames and CSV files to Excel XLSX format.
-/// ~6x faster than pandas + openpyxl (benchmark: 100K rows x 50 columns).
+/// Substantially faster than pandas + openpyxl; see the README for machine-labeled
+/// benchmark tables (the durable, reproducible source for performance numbers).
 ///
 /// Features:
 /// - Direct DataFrame support (pandas and polars)
