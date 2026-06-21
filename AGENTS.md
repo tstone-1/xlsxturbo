@@ -29,6 +29,21 @@
 - Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
 
+## Python Lint, Type, and Security Gates
+
+The Python tree (`python/`, `tests/`, `benchmarks/`) must stay clean under ruff, bandit, and pyright, with docstrings and type annotations on all functions. Config lives in `pyproject.toml`; the tools are in the `dev` optional-deps. Run from the repo root using the project-local `.venv`:
+
+- `.venv/Scripts/ruff.exe check python tests benchmarks`
+- `.venv/Scripts/bandit.exe -c pyproject.toml -r python`
+- `.venv/Scripts/pyright.exe`
+- `.venv/Scripts/python.exe -m pytest tests/ -q`
+
+Scoping notes (intentional, do not "fix" by widening):
+- pyright runs `typeCheckingMode = "standard"` project-wide, with the shipped library raised to strict via the top-level `strict = ["python/xlsxturbo"]` path list. Do not use `executionEnvironments` + `typeCheckingMode` for this — that key is silently ignored by pyright 1.1.x.
+- bandit scans `python/` only; tests and benchmarks are excluded (asserts and non-crypto `random` data generation are expected there).
+- ruff per-file-ignores: `S101` in tests; `S404/S603/S607/S311/T201` in benchmarks. Google docstring convention.
+- When changing the `dev` deps, run `uv lock` (the lockfile is tracked).
+
 ## Benchmarks
 
 - The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the README performance table and `--json` for machine-readable output.
