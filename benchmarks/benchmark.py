@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-xlsxturbo Benchmark Suite
+"""xlsxturbo Benchmark Suite.
 
 Professional benchmark comparing Excel writing performance across libraries:
 - xlsxturbo (Rust-based)
@@ -20,7 +19,10 @@ Examples:
     python benchmarks/benchmark.py --json > benchmark_results.json
 """
 
+from __future__ import annotations
+
 import argparse
+import contextlib
 import gc
 import json
 import os
@@ -30,6 +32,11 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, cast
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Number of data type categories for column generation:
 # 0,1 = integers (25%), 2,3 = floats (25%), 4,5 = strings (25%), 6 = dates (12.5%), 7 = booleans (12.5%)
@@ -59,11 +66,11 @@ class BenchmarkSummary:
     all_times: list[float]
 
 
-def get_system_info() -> dict:
+def get_system_info() -> dict[str, object]:
     """Collect system information for reproducibility."""
     import xlsxturbo
 
-    info = {
+    info: dict[str, object] = {
         "python_version": platform.python_version(),
         "platform": platform.system(),
         "platform_release": platform.release(),
@@ -77,20 +84,20 @@ def get_system_info() -> dict:
     return info
 
 
-def generate_test_data(rows: int, cols: int, seed: int = 42):
-    """
-    Generate test DataFrame with realistic mixed types:
+def generate_test_data(rows: int, cols: int, seed: int = 42) -> pd.DataFrame:
+    """Generate test DataFrame with realistic mixed types.
+
     - 25% integers
     - 25% floats
     - 25% strings (5-20 chars)
-    - 12.5% dates (datetime64[ns] — fair path for pandas)
+    - 12.5% dates (datetime64[ns], fair path for pandas)
     - 12.5% booleans
     """
     import numpy as np
     import pandas as pd
 
     rng = np.random.default_rng(seed)
-    data = {}
+    data: dict[str, object] = {}
     base_date = np.datetime64("2020-01-01", "ns")
 
     for i in range(cols):
@@ -118,10 +125,10 @@ def generate_test_data(rows: int, cols: int, seed: int = 42):
 
 def get_file_size_mb(filepath: str) -> float:
     """Get file size in megabytes."""
-    return os.path.getsize(filepath) / (1024 * 1024)
+    return Path(filepath).stat().st_size / (1024 * 1024)
 
 
-def run_benchmark_xlsxturbo(df_pd, output_path: str, rows: int) -> BenchmarkResult:
+def run_benchmark_xlsxturbo(df_pd: pd.DataFrame, output_path: str, rows: int) -> BenchmarkResult:
     """Benchmark xlsxturbo df_to_xlsx."""
     import xlsxturbo
 
@@ -148,7 +155,7 @@ def run_benchmark_xlsxturbo(df_pd, output_path: str, rows: int) -> BenchmarkResu
         )
 
 
-def run_benchmark_pandas_openpyxl(df_pd, output_path: str, rows: int) -> BenchmarkResult:
+def run_benchmark_pandas_openpyxl(df_pd: pd.DataFrame, output_path: str, rows: int) -> BenchmarkResult:
     """Benchmark pandas with openpyxl engine."""
     try:
         start = time.perf_counter()
@@ -182,7 +189,7 @@ def run_benchmark_pandas_openpyxl(df_pd, output_path: str, rows: int) -> Benchma
         )
 
 
-def run_benchmark_pandas_xlsxwriter(df_pd, output_path: str, rows: int) -> BenchmarkResult:
+def run_benchmark_pandas_xlsxwriter(df_pd: pd.DataFrame, output_path: str, rows: int) -> BenchmarkResult:
     """Benchmark pandas with xlsxwriter engine."""
     try:
         start = time.perf_counter()
@@ -216,16 +223,21 @@ def run_benchmark_pandas_xlsxwriter(df_pd, output_path: str, rows: int) -> Bench
         )
 
 
-def run_benchmark_polars(df_pd, output_path: str, rows: int, df_pl=None) -> BenchmarkResult:
+def run_benchmark_polars(
+    df_pd: pd.DataFrame,
+    output_path: str,
+    rows: int,
+    df_pl: object | None = None,
+) -> BenchmarkResult:
     """Benchmark polars write_excel."""
     try:
         import polars as pl
 
         # Use pre-converted DataFrame if provided, otherwise convert (not timed)
-        if df_pl is None:
-            df_pl = pl.from_pandas(df_pd)
+        raw_frame = pl.from_pandas(df_pd) if df_pl is None else df_pl
+        frame = cast("pl.DataFrame", raw_frame)
         start = time.perf_counter()
-        df_pl.write_excel(output_path)
+        frame.write_excel(output_path)
         elapsed = time.perf_counter() - start
         size_mb = get_file_size_mb(output_path)
         return BenchmarkResult(
@@ -255,7 +267,7 @@ def run_benchmark_polars(df_pd, output_path: str, rows: int, df_pl=None) -> Benc
         )
 
 
-BENCHMARK_FUNCS = [
+BENCHMARK_FUNCS: list[tuple[str, Callable[..., BenchmarkResult]]] = [
     ("xlsxturbo", run_benchmark_xlsxturbo),
     ("pandas + openpyxl", run_benchmark_pandas_openpyxl),
     ("pandas + xlsxwriter", run_benchmark_pandas_xlsxwriter),
@@ -264,15 +276,14 @@ BENCHMARK_FUNCS = [
 
 
 def run_benchmarks(
-    df_pd,
+    df_pd: pd.DataFrame,
     rows: int,
     cols: int,
     runs: int = 3,
     warmup: bool = True,
     verbose: bool = True,
 ) -> dict[str, BenchmarkSummary]:
-    """
-    Run benchmarks for all libraries.
+    """Run benchmarks for all libraries.
 
     Args:
         df_pd: pandas DataFrame to benchmark
@@ -285,11 +296,11 @@ def run_benchmarks(
     Returns:
         Dictionary mapping library name to BenchmarkSummary
     """
-    temp_dir = tempfile.mkdtemp(prefix="xlsxturbo_bench_")
+    temp_dir = Path(tempfile.mkdtemp(prefix="xlsxturbo_bench_"))
     results: dict[str, list[BenchmarkResult]] = {name: [] for name, _ in BENCHMARK_FUNCS}
 
     # Pre-convert polars DataFrame once (outside timing)
-    df_pl = None
+    df_pl: object | None = None
     try:
         import polars as pl
         df_pl = pl.from_pandas(df_pd)
@@ -300,14 +311,13 @@ def run_benchmarks(
     if warmup and verbose:
         print("Warmup run...", flush=True)
         for name, func in BENCHMARK_FUNCS:
-            output_path = os.path.join(temp_dir, f"warmup_{name.replace(' ', '_')}.xlsx")
+            output_path = temp_dir / f"warmup_{name.replace(' ', '_')}.xlsx"
             if name == "polars":
-                func(df_pd, output_path, rows, df_pl=df_pl)
+                func(df_pd, str(output_path), rows, df_pl=df_pl)
             else:
-                func(df_pd, output_path, rows)
+                func(df_pd, str(output_path), rows)
             gc.collect()
-            if os.path.exists(output_path):
-                os.unlink(output_path)
+            output_path.unlink(missing_ok=True)
 
     # Main benchmark runs
     for run_num in range(1, runs + 1):
@@ -315,13 +325,13 @@ def run_benchmarks(
             print(f"Run {run_num}/{runs}...", flush=True)
 
         for name, func in BENCHMARK_FUNCS:
-            output_path = os.path.join(temp_dir, f"run{run_num}_{name.replace(' ', '_')}.xlsx")
+            output_path = temp_dir / f"run{run_num}_{name.replace(' ', '_')}.xlsx"
 
             gc.collect()
             if name == "polars":
-                result = func(df_pd, output_path, rows, df_pl=df_pl)
+                result = func(df_pd, str(output_path), rows, df_pl=df_pl)
             else:
-                result = func(df_pd, output_path, rows)
+                result = func(df_pd, str(output_path), rows)
             results[name].append(result)
 
             if verbose and result.success:
@@ -330,18 +340,15 @@ def run_benchmarks(
                 print(f"  {name}: SKIPPED ({result.error})", flush=True)
 
             # Clean up file
-            if os.path.exists(output_path):
-                os.unlink(output_path)
+            output_path.unlink(missing_ok=True)
 
     # Clean up temp directory
-    try:
-        os.rmdir(temp_dir)
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        temp_dir.rmdir()
 
     # Calculate summaries
-    summaries = {}
-    xlsxturbo_median = None
+    summaries: dict[str, BenchmarkSummary] = {}
+    xlsxturbo_median: float | None = None
 
     for name, run_results in results.items():
         successful = [r for r in run_results if r.success]
@@ -369,7 +376,7 @@ def run_benchmarks(
 
     # Calculate speedup vs xlsxturbo
     if xlsxturbo_median:
-        for name, summary in summaries.items():
+        for summary in summaries.values():
             summary.speedup_vs_xlsxturbo = summary.median_time / xlsxturbo_median
 
     return summaries
@@ -380,12 +387,12 @@ def format_console_output(
     rows: int,
     cols: int,
     runs: int,
-    system_info: dict,
+    system_info: dict[str, object],
 ) -> str:
     """Format results for console output."""
     import xlsxturbo
 
-    lines = []
+    lines: list[str] = []
     lines.append("")
     lines.append(f"xlsxturbo Benchmark Suite v{xlsxturbo.version()}")
     lines.append("=" * 75)
@@ -400,7 +407,10 @@ def format_console_output(
     sorted_summaries = sorted(summaries.values(), key=lambda s: s.median_time)
 
     # Header
-    lines.append(f"{'Library':<22} {'Time (s)':>10} {'Stdev':>8} {'Rows/sec':>12} {'Size (MB)':>10} {'vs xlsxturbo':>13}")
+    lines.append(
+        f"{'Library':<22} {'Time (s)':>10} {'Stdev':>8} "
+        f"{'Rows/sec':>12} {'Size (MB)':>10} {'vs xlsxturbo':>13}"
+    )
     lines.append("-" * 84)
 
     for summary in sorted_summaries:
@@ -436,13 +446,13 @@ def format_markdown_output(
     rows: int,
     cols: int,
     runs: int,
-    system_info: dict,
+    system_info: dict[str, object],
 ) -> str:
     """Format results as markdown table."""
     import xlsxturbo
 
-    lines = []
-    lines.append(f"## xlsxturbo Benchmark Results")
+    lines: list[str] = []
+    lines.append("## xlsxturbo Benchmark Results")
     lines.append("")
     lines.append(f"**System:** {system_info['platform']} {system_info['platform_release']}, "
                  f"Python {system_info['python_version']}, {system_info['cpu_count']} CPUs")
@@ -489,7 +499,7 @@ def format_json_output(
     rows: int,
     cols: int,
     runs: int,
-    system_info: dict,
+    system_info: dict[str, object],
 ) -> str:
     """Format results as JSON for CI integration."""
     result = {
@@ -530,7 +540,8 @@ BENCHMARK_SIZES = {
 }
 
 
-def main():
+def main() -> int:
+    """Parse arguments, run the configured benchmarks, and print results."""
     import xlsxturbo
 
     parser = argparse.ArgumentParser(
@@ -605,14 +616,14 @@ def main():
     # Collect system info
     system_info = get_system_info()
 
-    all_outputs = []
+    all_outputs: list[str] = []
 
     for size_name, (rows, cols) in sizes:
         if verbose:
             print(f"\n{'=' * 75}")
             print(f"Benchmark: {size_name} ({rows:,} rows x {cols} columns)")
             print(f"{'=' * 75}")
-            print(f"Generating test data...", flush=True)
+            print("Generating test data...", flush=True)
 
         # Generate test data
         df_pd = generate_test_data(rows, cols)

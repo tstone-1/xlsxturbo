@@ -1,24 +1,33 @@
-from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
+"""Tests for the formula_columns feature."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+import xlsxturbo
+
+from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestFormulaColumns:
-    """Tests for formula_columns feature (v0.9.0)"""
+    """Tests for formula_columns feature (v0.9.0)."""
 
-    def test_basic_formula(self):
-        """Formula column appended after data columns"""
+    def test_basic_formula(self) -> None:
+        """Formula column appended after data columns."""
         df = pd.DataFrame({"price": [100, 200], "quantity": [5, 3]})
         path = get_temp_path()
         try:
-            rows, cols = xlsxturbo.df_to_xlsx(
+            _rows, cols = xlsxturbo.df_to_xlsx(
                 df, path, formula_columns={"Total": "=A{row}*B{row}"}
             )
             assert cols == 3  # price, quantity, Total
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 # Header should be "Total"
                 assert ws["C1"].value == "Total"
                 # Data rows should have formulas (openpyxl shows them as =formula)
@@ -26,14 +35,14 @@ class TestFormulaColumns:
                 assert ws["C3"].value == "=A3*B3"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_multiple_formula_columns(self):
-        """Multiple formula columns in order"""
+    def test_multiple_formula_columns(self) -> None:
+        """Multiple formula columns in order."""
         df = pd.DataFrame({"price": [100], "qty": [5], "tax": [0.1]})
         path = get_temp_path()
         try:
-            rows, cols = xlsxturbo.df_to_xlsx(
+            _rows, cols = xlsxturbo.df_to_xlsx(
                 df,
                 path,
                 formula_columns={
@@ -44,17 +53,17 @@ class TestFormulaColumns:
             assert cols == 5  # price, qty, tax, Subtotal, TaxAmt
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 assert ws["D1"].value == "Subtotal"
                 assert ws["E1"].value == "TaxAmt"
                 assert ws["D2"].value == "=A2*B2"
                 assert ws["E2"].value == "=D2*C2"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_formula_row_placeholder(self):
-        """The {row} placeholder is correctly replaced per row"""
+    def test_formula_row_placeholder(self) -> None:
+        """The {row} placeholder is correctly replaced per row."""
         df = pd.DataFrame({"A": [10, 20, 30]})
         path = get_temp_path()
         try:
@@ -63,16 +72,16 @@ class TestFormulaColumns:
             )
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 assert ws["B2"].value == "=A2*2"
                 assert ws["B3"].value == "=A3*2"
                 assert ws["B4"].value == "=A4*2"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_formula_with_dfs_to_xlsx(self):
-        """Formula columns work in multi-sheet mode"""
+    def test_formula_with_dfs_to_xlsx(self) -> None:
+        """Formula columns work in multi-sheet mode."""
         df = pd.DataFrame({"A": [1, 2]})
         path = get_temp_path()
         try:
@@ -87,45 +96,46 @@ class TestFormulaColumns:
                 assert ws["B2"].value == "=A2+10"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestFormulaColumnsHeaderFalse:
-    """Regression tests for formula_columns with header=False (v0.10.5 fix)"""
+    """Regression tests for formula_columns with header=False (v0.10.5 fix)."""
 
-    def test_formula_columns_header_false(self):
-        """Formula columns work correctly when header=False"""
+    def test_formula_columns_header_false(self) -> None:
+        """Formula columns work correctly when header=False."""
         df = pd.DataFrame({"A": [10, 20], "B": [1, 2]})
         path = get_temp_path()
         try:
-            rows, cols = xlsxturbo.df_to_xlsx(
+            _rows, cols = xlsxturbo.df_to_xlsx(
                 df, path,
                 header=False,
                 formula_columns={"Sum": "=A{row}+B{row}"},
             )
             assert cols == 3  # 2 data + 1 formula
             wb = load_workbook(path)
-            ws = wb.active
+            ws = active_ws(wb)
             # Row 1 should have data, not headers
             assert ws["A1"].value == 10
             # Formula column should be in C (0-indexed col 2)
             assert ws["C1"].value is not None
             wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_formula_columns_header_true(self):
-        """Formula columns still work correctly when header=True"""
+    def test_formula_columns_header_true(self) -> None:
+        """Formula columns still work correctly when header=True."""
         df = pd.DataFrame({"A": [10, 20], "B": [1, 2]})
         path = get_temp_path()
         try:
-            rows, cols = xlsxturbo.df_to_xlsx(
+            _rows, cols = xlsxturbo.df_to_xlsx(
                 df, path,
                 header=True,
                 formula_columns={"Sum": "=A{row}+B{row}"},
             )
             assert cols == 3
             wb = load_workbook(path)
-            ws = wb.active
+            ws = active_ws(wb)
             # Row 1 should have headers
             assert ws["A1"].value == "A"
             assert ws["C1"].value == "Sum"
@@ -133,4 +143,4 @@ class TestFormulaColumnsHeaderFalse:
             assert ws["A2"].value == 10
             wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()

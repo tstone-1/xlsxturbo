@@ -1,54 +1,65 @@
-from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
+"""Tests for arbitrary cell writes and per-cell formatting."""
 
+from __future__ import annotations
+
+import warnings
+from pathlib import Path
+
+import pandas as pd
+import polars as pl
+import pytest
+import xlsxturbo
+
+from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestCells:
-    """Tests for arbitrary cell writes (v0.11.0)"""
+    """Tests for arbitrary cell writes (v0.11.0)."""
 
-    def test_simple_string_cell(self):
-        """Write a string to a specific cell"""
+    def test_simple_string_cell(self) -> None:
+        """Write a string to a specific cell."""
         df = pd.DataFrame({"a": [1, 2]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, cells={"C1": "hello"})
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                assert wb.active["C1"].value == "hello"
+                assert active_ws(wb)["C1"].value == "hello"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_numeric_cells(self):
-        """Write int and float to cells"""
+    def test_numeric_cells(self) -> None:
+        """Write int and float to cells."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, cells={"B5": 42, "C5": 3.14})
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                assert wb.active["B5"].value == 42
-                assert abs(wb.active["C5"].value - 3.14) < 0.001
+                assert active_ws(wb)["B5"].value == 42
+                assert abs(active_ws(wb)["C5"].value - 3.14) < 0.001
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_bool_cell(self):
-        """Write boolean to cell"""
+    def test_bool_cell(self) -> None:
+        """Write a boolean to a cell."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, cells={"B2": True})
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                assert wb.active["B2"].value is True
+                assert active_ws(wb)["B2"].value is True
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_with_num_format(self):
-        """Dict-style cell with num_format preserves text format"""
+    def test_cell_with_num_format(self) -> None:
+        """Dict-style cell with num_format preserves text format."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -57,52 +68,48 @@ class TestCells:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["D6"]
+                cell = active_ws(wb)["D6"]
                 assert cell.value == "934728173849"
                 assert cell.number_format == "@"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_overwrites_dataframe_data(self):
-        """cells parameter overwrites existing DataFrame values"""
+    def test_cell_overwrites_dataframe_data(self) -> None:
+        """Cells parameter overwrites existing DataFrame values."""
         df = pd.DataFrame({"a": ["original"]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, cells={"A2": "overwritten"})
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                assert wb.active["A2"].value == "overwritten"
+                assert active_ws(wb)["A2"].value == "overwritten"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_dict_missing_value_key(self):
-        """Dict-style cell without 'value' key raises ValueError"""
+    def test_cell_dict_missing_value_key(self) -> None:
+        """Dict-style cell without 'value' key raises ValueError."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
-            import pytest
             with pytest.raises(ValueError, match="missing 'value' key"):
                 xlsxturbo.df_to_xlsx(df, path, cells={"A1": {"num_format": "@"}})
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_invalid_cell_ref(self):
-        """Invalid cell reference raises ValueError"""
+    def test_invalid_cell_ref(self) -> None:
+        """Invalid cell reference raises ValueError."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
-            import pytest
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError):  # noqa: PT011
                 xlsxturbo.df_to_xlsx(df, path, cells={"ZZZZ1": "x"})
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_cells_per_sheet_override(self):
-        """Per-sheet cells override global cells in dfs_to_xlsx"""
+    def test_cells_per_sheet_override(self) -> None:
+        """Per-sheet cells override global cells in dfs_to_xlsx."""
         df1 = pd.DataFrame({"a": [1]})
         df2 = pd.DataFrame({"b": [2]})
         path = get_temp_path()
@@ -116,14 +123,13 @@ class TestCells:
                 assert wb["S2"]["C1"].value == "per-sheet"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_constant_memory_warns(self):
-        """cells with constant_memory emits a warning"""
+    def test_cells_constant_memory_warns(self) -> None:
+        """Cells with constant_memory emits a warning."""
         df = pd.DataFrame({"a": [1, 2]})
         path = get_temp_path()
         try:
-            import warnings
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
                 xlsxturbo.df_to_xlsx(df, path, constant_memory=True,
@@ -131,39 +137,39 @@ class TestCells:
                 assert len(w) == 1
                 assert "cells" in str(w[0].message)
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_num_format_wrong_type_raises(self):
-        """Non-string num_format raises TypeError"""
+    def test_num_format_wrong_type_raises(self) -> None:
+        """Non-string num_format raises TypeError."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
-            import pytest
             with pytest.raises(TypeError):
+                # num_format must be str; int is intentionally invalid to trigger TypeError
                 xlsxturbo.df_to_xlsx(df, path,
-                    cells={"A1": {"value": "x", "num_format": 123}})
+                    cells={"A1": {"value": "x", "num_format": 123}})  # type: ignore[dict-item]
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_cells_with_polars(self):
-        """cells work with polars DataFrames"""
+    def test_cells_with_polars(self) -> None:
+        """Cells work with polars DataFrames."""
         df = pl.DataFrame({"a": [1, 2]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, cells={"C1": "extra"})
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                assert wb.active["C1"].value == "extra"
+                assert active_ws(wb)["C1"].value == "extra"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestCellsPerSheet:
-    """Tests for cells with per-sheet SheetOptions in dfs_to_xlsx (item 6)"""
+    """Tests for cells with per-sheet SheetOptions in dfs_to_xlsx (item 6)."""
 
-    def test_cells_per_sheet_3tuple(self):
-        """Per-sheet cells override via 3-tuple SheetOptions"""
+    def test_cells_per_sheet_3tuple(self) -> None:
+        """Per-sheet cells override via 3-tuple SheetOptions."""
         df1 = pd.DataFrame({"a": [1, 2]})
         df2 = pd.DataFrame({"b": [3, 4]})
         path = get_temp_path()
@@ -180,10 +186,10 @@ class TestCellsPerSheet:
                 assert wb["Sheet2"]["C2"].value is None
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_per_sheet_overrides_global(self):
-        """Per-sheet cells replace (not merge with) global cells"""
+    def test_cells_per_sheet_overrides_global(self) -> None:
+        """Per-sheet cells replace (not merge with) global cells."""
         df1 = pd.DataFrame({"a": [1]})
         df2 = pd.DataFrame({"a": [2]})
         path = get_temp_path()
@@ -201,10 +207,10 @@ class TestCellsPerSheet:
                 assert wb["S2"]["C1"].value is None
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_per_sheet_with_num_format(self):
-        """Per-sheet cells with num_format via SheetOptions"""
+    def test_cells_per_sheet_with_num_format(self) -> None:
+        """Per-sheet cells with num_format via SheetOptions."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -220,10 +226,10 @@ class TestCellsPerSheet:
                 assert cell.number_format == "@"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_per_sheet_with_alignment(self):
-        """Per-sheet cells with alignment via SheetOptions"""
+    def test_cells_per_sheet_with_alignment(self) -> None:
+        """Per-sheet cells with alignment via SheetOptions."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -239,13 +245,14 @@ class TestCellsPerSheet:
                 assert cell.alignment.horizontal == "center"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestCellsFormatting:
-    """Tests for cells with formatting options beyond num_format (item 7)"""
+    """Tests for cells with formatting options beyond num_format (item 7)."""
 
-    def test_cells_with_horizontal_alignment(self):
-        """cells with align_horizontal"""
+    def test_cells_with_horizontal_alignment(self) -> None:
+        """Write cells with align_horizontal."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -254,15 +261,15 @@ class TestCellsFormatting:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["C1"]
+                cell = active_ws(wb)["C1"]
                 assert cell.value == "right-aligned"
                 assert cell.alignment.horizontal == "right"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_with_vertical_alignment(self):
-        """cells with align_vertical"""
+    def test_cells_with_vertical_alignment(self) -> None:
+        """Write cells with align_vertical."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -271,15 +278,15 @@ class TestCellsFormatting:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["C1"]
+                cell = active_ws(wb)["C1"]
                 assert cell.value == "top"
                 assert cell.alignment.vertical == "top"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_with_wrap_text(self):
-        """cells with wrap_text"""
+    def test_cells_with_wrap_text(self) -> None:
+        """Write cells with wrap_text."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -288,15 +295,15 @@ class TestCellsFormatting:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["C1"]
+                cell = active_ws(wb)["C1"]
                 assert cell.value == "long text here"
                 assert cell.alignment.wrapText is True
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_with_combined_formatting(self):
-        """cells with num_format + alignment + wrap_text together"""
+    def test_cells_with_combined_formatting(self) -> None:
+        """Write cells with num_format + alignment + wrap_text together."""
         df = pd.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -311,17 +318,17 @@ class TestCellsFormatting:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["C1"]
+                cell = active_ws(wb)["C1"]
                 assert cell.number_format == "0.00%"
                 assert cell.alignment.horizontal == "center"
                 assert cell.alignment.vertical == "top"
                 assert cell.alignment.wrapText is True
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cells_formatting_with_polars(self):
-        """cells formatting works with polars DataFrames"""
+    def test_cells_formatting_with_polars(self) -> None:
+        """Cells formatting works with polars DataFrames."""
         df = pl.DataFrame({"a": [1]})
         path = get_temp_path()
         try:
@@ -330,9 +337,9 @@ class TestCellsFormatting:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                cell = wb.active["C1"]
+                cell = active_ws(wb)["C1"]
                 assert cell.value == "test"
                 assert cell.alignment.horizontal == "center"
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()

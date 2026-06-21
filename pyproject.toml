@@ -45,9 +45,79 @@ dev = [
     "xlsxwriter>=3.2.9",
     "pyarrow>=21.0.0",
     "maturin>=1.13.3",
+    "ruff>=0.14.0",
+    "bandit>=1.8.0",
+    "pyright>=1.1.390",
+    "pandas-stubs",
 ]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "xlsxturbo"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+extend-exclude = ["python/xlsxturbo/xlsxturbo.pyd"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "D",    # pydocstyle
+    "UP",   # pyupgrade
+    "ANN",  # flake8-annotations
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "PIE",  # flake8-pie
+    "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "PTH",  # flake8-use-pathlib
+    "RUF",  # ruff-specific
+    "S",    # flake8-bandit
+]
+ignore = [
+    "D203",   # one-blank-line-before-class (conflicts with D211)
+    "D213",   # multi-line-summary-second-line (conflicts with D212)
+    "ANN401", # allow explicit typing.Any where a precise type is impractical
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: assert is the point; helper builtins shadowing is acceptable.
+"tests/**" = ["S101"]
+# Benchmarks are throwaway dev scripts: subprocess, print, and non-crypto
+# random data generation are all intentional.
+"benchmarks/**" = ["S404", "S603", "S607", "S311", "T201"]
+
+[tool.pyright]
+include = ["python", "tests", "benchmarks"]
+exclude = ["**/__pycache__", "**/.venv", "target"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.9"
+# Default mode for the project (tests + benchmarks). The shipped library
+# (python/xlsxturbo) is raised to "strict" via the `strict` path list below.
+typeCheckingMode = "standard"
+reportMissingModuleSource = false
+strict = ["python/xlsxturbo"]
+
+# Bandit scans the shipped package only. Tests and benchmarks are dev-only
+# scripts (asserts and non-crypto random data generation are expected there).
+[tool.bandit]
+exclude_dirs = ["tests", "benchmarks", "target", ".venv"]

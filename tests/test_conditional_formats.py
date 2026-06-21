@@ -1,16 +1,25 @@
+"""Tests for conditional formatting features (color scales, data bars, icon sets, cell rules)."""
+
+from __future__ import annotations
+
 import zipfile
+from pathlib import Path
 
-from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
+import pandas as pd
+import polars as pl
+import pytest
+import xlsxturbo
 
+from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestConditionalFormatting:
-    """Tests for conditional formatting feature (v0.8.0)"""
+    """Tests for conditional formatting feature (v0.8.0)."""
 
-    def test_2_color_scale(self):
-        """2-color scale conditional format"""
+    def test_2_color_scale(self) -> None:
+        """Verify 2-color scale conditional format."""
         df = pd.DataFrame({"Score": [10, 50, 90]})
         path = get_temp_path()
         try:
@@ -25,12 +34,13 @@ class TestConditionalFormatting:
                 xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
                 # Assert it's actually a color scale with both configured colors.
                 assert "<COLORSCALE>" in xml
-                assert "FF0000" in xml and "00FF00" in xml
+                assert "FF0000" in xml
+                assert "00FF00" in xml
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_3_color_scale(self):
-        """3-color scale conditional format"""
+    def test_3_color_scale(self) -> None:
+        """Verify 3-color scale conditional format."""
         df = pd.DataFrame({"Value": [1, 5, 10]})
         path = get_temp_path()
         try:
@@ -50,12 +60,14 @@ class TestConditionalFormatting:
                 xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
                 assert "<COLORSCALE>" in xml
                 # All three configured colors must be present.
-                assert "F8696B" in xml and "FFEB84" in xml and "63BE7B" in xml
+                assert "F8696B" in xml
+                assert "FFEB84" in xml
+                assert "63BE7B" in xml
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_data_bar(self):
-        """Data bar conditional format"""
+    def test_data_bar(self) -> None:
+        """Verify data bar conditional format."""
         df = pd.DataFrame({"Progress": [25, 50, 75, 100]})
         path = get_temp_path()
         try:
@@ -72,10 +84,10 @@ class TestConditionalFormatting:
                 assert "DATABAR" in xml
                 assert "638EC6" in xml
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_icon_set(self):
-        """Icon set conditional format"""
+    def test_icon_set(self) -> None:
+        """Verify icon set conditional format."""
         df = pd.DataFrame({"Status": [1, 2, 3]})
         path = get_temp_path()
         try:
@@ -94,10 +106,10 @@ class TestConditionalFormatting:
                 assert 'type="iconSet"' in xml
                 assert xml.count("<cfvo ") == 3
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_conditional_format_with_pattern(self):
-        """Conditional format with wildcard column pattern"""
+    def test_conditional_format_with_pattern(self) -> None:
+        """Verify conditional format with wildcard column pattern."""
         df = pd.DataFrame({"score_a": [80], "score_b": [60], "name": ["Alice"]})
         path = get_temp_path()
         try:
@@ -108,21 +120,22 @@ class TestConditionalFormatting:
                     "score_*": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
                 },
             )
-            assert os.path.exists(path)
+            assert Path(path).exists()
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 # Should have conditional formats on both score columns
                 assert len(ws.conditional_formatting) >= 1
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestCellConditionalFormat:
-    """Tests for rule-based conditional formatting (v0.12.0)"""
+    """Tests for rule-based conditional formatting (v0.12.0)."""
 
-    def test_cell_equal_to_string(self):
-        """type='cell' with criteria='equal_to' highlights matching string cells"""
+    def test_cell_equal_to_string(self) -> None:
+        """Verify type='cell' with criteria='equal_to' highlights matching string cells."""
         df = pd.DataFrame({"status": ["OK", "ERROR", "OK", "ERROR"]})
         path = get_temp_path()
         try:
@@ -134,13 +147,13 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#FF0000", "bold": True}
                 }
             })
-            assert os.path.exists(path)
-            assert os.path.getsize(path) > 0
+            assert Path(path).exists()
+            assert Path(path).stat().st_size > 0
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_equal_to_number(self):
-        """type='cell' with numeric value"""
+    def test_cell_equal_to_number(self) -> None:
+        """Verify type='cell' with numeric value."""
         df = pd.DataFrame({"score": [50, 75, 100, 25]})
         path = get_temp_path()
         try:
@@ -152,12 +165,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#00FF00"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_between(self):
-        """between criteria with min_value and max_value"""
+    def test_cell_between(self) -> None:
+        """Verify between criteria with min_value and max_value."""
         df = pd.DataFrame({"temp": [10, 20, 30, 40, 50]})
         path = get_temp_path()
         try:
@@ -170,12 +183,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#FFFF00"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_not_between(self):
-        """not_between criteria"""
+    def test_cell_not_between(self) -> None:
+        """Verify not_between criteria."""
         df = pd.DataFrame({"val": [1, 5, 10, 15]})
         path = get_temp_path()
         try:
@@ -188,12 +201,12 @@ class TestCellConditionalFormat:
                     "format": {"font_color": "red"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_multiple_rules_list(self):
-        """Multiple rules on one column via list"""
+    def test_cell_multiple_rules_list(self) -> None:
+        """Verify multiple rules on one column via list."""
         df = pd.DataFrame({"severity": ["HIGH", "MEDIUM", "LOW", "HIGH"]})
         path = get_temp_path()
         try:
@@ -207,12 +220,12 @@ class TestCellConditionalFormat:
                      "format": {"bg_color": "#FFFF00"}},
                 ]
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_text_containing(self):
-        """criteria='containing' for text match"""
+    def test_text_containing(self) -> None:
+        """Verify criteria='containing' for text match."""
         df = pd.DataFrame({"desc": ["error occurred", "all good", "error found"]})
         path = get_temp_path()
         try:
@@ -224,12 +237,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#FF0000"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_text_begins_with(self):
-        """criteria='begins_with' for text match"""
+    def test_text_begins_with(self) -> None:
+        """Verify criteria='begins_with' for text match."""
         df = pd.DataFrame({"code": ["ERR-001", "OK-002", "ERR-003"]})
         path = get_temp_path()
         try:
@@ -241,12 +254,12 @@ class TestCellConditionalFormat:
                     "format": {"font_color": "red"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_text_ends_with(self):
-        """criteria='ends_with' for text match"""
+    def test_text_ends_with(self) -> None:
+        """Verify criteria='ends_with' for text match."""
         df = pd.DataFrame({"file": ["report.pdf", "data.csv", "notes.pdf"]})
         path = get_temp_path()
         try:
@@ -258,12 +271,12 @@ class TestCellConditionalFormat:
                     "format": {"italic": True}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_blanks(self):
-        """criteria='blanks' highlights blank cells"""
+    def test_blanks(self) -> None:
+        """Verify criteria='blanks' highlights blank cells."""
         df = pd.DataFrame({"val": [1, None, 3, None]})
         path = get_temp_path()
         try:
@@ -274,12 +287,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#CCCCCC"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_no_blanks(self):
-        """criteria='no_blanks' highlights non-blank cells"""
+    def test_no_blanks(self) -> None:
+        """Verify criteria='no_blanks' highlights non-blank cells."""
         df = pd.DataFrame({"val": [1, None, 3]})
         path = get_temp_path()
         try:
@@ -290,24 +303,24 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#00FF00"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_backward_compat_single_dict(self):
-        """Existing single-dict format still works (backward compat)"""
+    def test_backward_compat_single_dict(self) -> None:
+        """Verify existing single-dict format still works (backward compat)."""
         df = pd.DataFrame({"score": [10, 50, 90]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, conditional_formats={
                 "score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_less_than(self):
-        """less_than criteria"""
+    def test_cell_less_than(self) -> None:
+        """Verify less_than criteria."""
         df = pd.DataFrame({"price": [10.5, 20.0, 5.0]})
         path = get_temp_path()
         try:
@@ -319,12 +332,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#FF0000"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_with_pattern_matching(self):
-        """Cell conditional format works with wildcard patterns"""
+    def test_cell_with_pattern_matching(self) -> None:
+        """Verify cell conditional format works with wildcard patterns."""
         df = pd.DataFrame({"score_a": [50], "score_b": [80], "name": ["x"]})
         path = get_temp_path()
         try:
@@ -336,12 +349,12 @@ class TestCellConditionalFormat:
                     "format": {"bold": True}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_format_with_border(self):
-        """Cell conditional format can include border styling"""
+    def test_cell_format_with_border(self) -> None:
+        """Verify cell conditional format can include border styling."""
         df = pd.DataFrame({"val": [1, 2, 3]})
         path = get_temp_path()
         try:
@@ -353,41 +366,37 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#FFFF00", "border": "thin"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_invalid_criteria_raises(self):
-        """Invalid criteria raises ValueError"""
+    def test_invalid_criteria_raises(self) -> None:
+        """Verify invalid criteria raises ValueError."""
         df = pd.DataFrame({"A": [1]})
         path = get_temp_path()
         try:
-            import pytest
             with pytest.raises(ValueError, match="Unknown criteria"):
                 xlsxturbo.df_to_xlsx(df, path, conditional_formats={
                     "A": {"type": "cell", "criteria": "invalid", "value": 1,
                            "format": {"bold": True}}
                 })
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_missing_criteria_raises(self):
-        """Missing criteria key raises ValueError"""
+    def test_missing_criteria_raises(self) -> None:
+        """Verify missing criteria key raises ValueError."""
         df = pd.DataFrame({"A": [1]})
         path = get_temp_path()
         try:
-            import pytest
             with pytest.raises(ValueError, match="requires 'criteria'"):
                 xlsxturbo.df_to_xlsx(df, path, conditional_formats={
                     "A": {"type": "cell", "value": 1, "format": {"bold": True}}
                 })
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_cell_with_polars(self):
-        """Cell conditional format works with polars"""
+    def test_cell_with_polars(self) -> None:
+        """Verify cell conditional format works with polars."""
         df = pl.DataFrame({"score": [50, 75, 100]})
         path = get_temp_path()
         try:
@@ -399,12 +408,12 @@ class TestCellConditionalFormat:
                     "format": {"bg_color": "#00FF00"}
                 }
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_not_equal_to(self):
-        """not_equal_to criteria"""
+    def test_cell_not_equal_to(self) -> None:
+        """Verify not_equal_to criteria."""
         df = pd.DataFrame({"A": ["ok", "fail", "ok"]})
         path = get_temp_path()
         try:
@@ -412,12 +421,12 @@ class TestCellConditionalFormat:
                 "A": {"type": "cell", "criteria": "not_equal_to", "value": "ok",
                        "format": {"bg_color": "#FF0000"}}
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_less_than_or_equal_to(self):
-        """less_than_or_equal_to criteria"""
+    def test_cell_less_than_or_equal_to(self) -> None:
+        """Verify less_than_or_equal_to criteria."""
         df = pd.DataFrame({"A": [1, 5, 10]})
         path = get_temp_path()
         try:
@@ -425,12 +434,12 @@ class TestCellConditionalFormat:
                 "A": {"type": "cell", "criteria": "less_than_or_equal_to", "value": 5,
                        "format": {"bold": True}}
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_not_containing(self):
-        """not_containing criteria"""
+    def test_cell_not_containing(self) -> None:
+        """Verify not_containing criteria."""
         df = pd.DataFrame({"A": ["hello world", "goodbye", "hello"]})
         path = get_temp_path()
         try:
@@ -438,39 +447,37 @@ class TestCellConditionalFormat:
                 "A": {"type": "cell", "criteria": "not_containing", "value": "hello",
                        "format": {"italic": True}}
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_without_format_key(self):
-        """Cell rule without format key still works (no styling applied)"""
+    def test_cell_without_format_key(self) -> None:
+        """Verify cell rule without format key still works (no styling applied)."""
         df = pd.DataFrame({"A": [1, 2, 3]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, conditional_formats={
                 "A": {"type": "cell", "criteria": "greater_than", "value": 1}
             })
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_missing_value_raises(self):
-        """Missing value key for value-requiring criteria raises ValueError"""
+    def test_cell_missing_value_raises(self) -> None:
+        """Verify missing value key for value-requiring criteria raises ValueError."""
         df = pd.DataFrame({"A": [1]})
         path = get_temp_path()
         try:
-            import pytest
             with pytest.raises(ValueError, match="missing 'value'"):
                 xlsxturbo.df_to_xlsx(df, path, conditional_formats={
                     "A": {"type": "cell", "criteria": "greater_than",
                            "format": {"bold": True}}
                 })
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)
 
-    def test_cell_numeric_comparison_correct(self):
-        """Numeric values produce numeric (not string) comparisons in Excel"""
+    def test_cell_numeric_comparison_correct(self) -> None:
+        """Verify numeric values produce numeric (not string) comparisons in Excel."""
         df = pd.DataFrame({"score": [8, 50, 70, 100]})
         path = get_temp_path()
         try:
@@ -484,20 +491,20 @@ class TestCellConditionalFormat:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 cf_rules = ws.conditional_formatting
                 assert len(list(cf_rules)) > 0
-                rule = list(cf_rules)[0]
+                rule = next(iter(cf_rules))
                 cf = rule.rules[0]
                 assert cf.type == "cellIs"
                 assert cf.operator == "greaterThan"
                 assert cf.formula == ['70']
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_cell_string_comparison_correct(self):
-        """String values produce string comparisons in Excel"""
+    def test_cell_string_comparison_correct(self) -> None:
+        """Verify string values produce string comparisons in Excel."""
         df = pd.DataFrame({"status": ["OK", "ERROR", "OK"]})
         path = get_temp_path()
         try:
@@ -511,29 +518,27 @@ class TestCellConditionalFormat:
             })
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 cf_rules = ws.conditional_formatting
                 assert len(list(cf_rules)) > 0
-                rule = list(cf_rules)[0]
+                rule = next(iter(cf_rules))
                 cf = rule.rules[0]
                 assert cf.type == "cellIs"
                 assert cf.operator == "equal"
                 assert cf.formula == ['"ERROR"']
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_invalid_list_item_raises(self):
-        """Non-dict item in conditional format list raises TypeError"""
+    def test_invalid_list_item_raises(self) -> None:
+        """Verify non-dict item in conditional format list raises TypeError."""
         df = pd.DataFrame({"A": [1]})
         path = get_temp_path()
+        invalid_formats = {
+            "A": [{"type": "cell", "criteria": "equal_to", "value": 1, "format": {"bold": True}}, "not_a_dict"],
+        }
         try:
-            import pytest
-            with pytest.raises(TypeError, match="list item .* must be a dict"):
-                xlsxturbo.df_to_xlsx(df, path, conditional_formats={
-                    "A": [{"type": "cell", "criteria": "equal_to", "value": 1,
-                            "format": {"bold": True}}, "not_a_dict"]
-                })
+            with pytest.raises(TypeError, match=r"list item .* must be a dict"):
+                xlsxturbo.df_to_xlsx(df, path, conditional_formats=invalid_formats)  # type: ignore[arg-type]
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
+            Path(path).unlink(missing_ok=True)

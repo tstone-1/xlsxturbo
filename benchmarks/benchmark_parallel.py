@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""
-Benchmark script for xlsxturbo parallel processing.
-Compares single-threaded vs multi-threaded CSV to XLSX conversion.
-"""
+"""Benchmark xlsxturbo parallel processing, comparing single vs multi-threaded CSV to XLSX conversion."""
+
+from __future__ import annotations
 
 import os
-import statistics
-import sys
-import time
-import tempfile
 import random
+import statistics
 import string
+import tempfile
+import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
-def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42):
+
+def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42) -> str:
     """Generate a test CSV with mixed data types."""
     print(f"Generating test CSV: {rows:,} rows x {cols} columns...")
     random.seed(seed)
 
     start = time.perf_counter()
-    with open(filepath, 'w', encoding='utf-8') as f:
+    with Path(filepath).open("w", encoding="utf-8") as f:
         # Header
         headers = [f"col_{i}" for i in range(cols)]
         f.write(','.join(headers) + '\n')
@@ -28,8 +28,8 @@ def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42):
         base_date = date(2020, 1, 1)
         base_datetime = datetime(2020, 1, 1, 0, 0, 0)
 
-        for row in range(rows):
-            values = []
+        for _row in range(rows):
+            values: list[str] = []
             for col in range(cols):
                 col_type = col % 6
                 if col_type == 0:
@@ -61,20 +61,26 @@ def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42):
             f.write(','.join(values) + '\n')
 
     elapsed = time.perf_counter() - start
-    file_size = os.path.getsize(filepath) / (1024 * 1024)
+    file_size = Path(filepath).stat().st_size / (1024 * 1024)
     print(f"  Generated in {elapsed:.2f}s ({file_size:.1f} MB)")
     return filepath
 
-def benchmark_conversion(csv_path: str, parallel: bool, runs: int = 3, warmup: bool = True):
+
+def benchmark_conversion(
+    csv_path: str,
+    parallel: bool,
+    runs: int = 3,
+    warmup: bool = True,
+) -> tuple[float, float]:
     """Benchmark CSV to XLSX conversion."""
     import xlsxturbo
 
     mode = "parallel" if parallel else "single-threaded"
-    times = []
+    times: list[float] = []
 
     total_runs = runs + (1 if warmup else 0)
     for run in range(total_runs):
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             xlsx_path = tmp.name
 
         try:
@@ -90,22 +96,24 @@ def benchmark_conversion(csv_path: str, parallel: bool, runs: int = 3, warmup: b
                 times.append(elapsed)
 
             if run == 0:
-                xlsx_size = os.path.getsize(xlsx_path) / (1024 * 1024)
+                xlsx_size = Path(xlsx_path).stat().st_size / (1024 * 1024)
                 print(f"  {mode}: {rows:,} rows x {cols} cols -> {xlsx_size:.1f} MB")
         finally:
-            if os.path.exists(xlsx_path):
-                os.unlink(xlsx_path)
+            Path(xlsx_path).unlink(missing_ok=True)
 
     median_time = statistics.median(times)
     stdev_time = statistics.stdev(times) if len(times) > 1 else 0.0
     return median_time, stdev_time
 
-def main():
+
+def main() -> None:
+    """Run the parallel-vs-single-threaded conversion benchmark and print results."""
     import argparse
-    parser = argparse.ArgumentParser(description='Benchmark xlsxturbo parallel processing')
-    parser.add_argument('--rows', type=int, default=500000, help='Number of rows (default: 500000)')
-    parser.add_argument('--cols', type=int, default=50, help='Number of columns (default: 50)')
-    parser.add_argument('--runs', type=int, default=3, help='Number of benchmark runs (default: 3)')
+
+    parser = argparse.ArgumentParser(description="Benchmark xlsxturbo parallel processing")
+    parser.add_argument("--rows", type=int, default=500000, help="Number of rows (default: 500000)")
+    parser.add_argument("--cols", type=int, default=50, help="Number of columns (default: 50)")
+    parser.add_argument("--runs", type=int, default=3, help="Number of benchmark runs (default: 3)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -149,12 +157,12 @@ def main():
         if speedup > 1:
             print(f"\n[OK] Parallel processing is {speedup:.2f}x faster!")
         else:
-            print(f"\n[INFO] Parallel processing is slower for this dataset size.")
+            print("\n[INFO] Parallel processing is slower for this dataset size.")
             print("       Try with larger files (1M+ rows) for better results.")
 
     finally:
-        if os.path.exists(csv_path):
-            os.unlink(csv_path)
+        Path(csv_path).unlink(missing_ok=True)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

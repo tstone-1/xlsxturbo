@@ -1,14 +1,24 @@
-from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
+"""Integration tests exercising multiple xlsxturbo features together."""
 
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+
+import pandas as pd
+import pytest
+import xlsxturbo
+
+from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestAllFeaturesCombined:
-    """Test using all new features together"""
+    """Test using all new features together."""
 
-    def test_all_features_df_to_xlsx(self):
-        """All features work together in df_to_xlsx"""
+    def test_all_features_df_to_xlsx(self) -> None:
+        """All features work together in df_to_xlsx."""
         df = pd.DataFrame(
             {"Name": ["Alice", "Bob"], "Score": [95, 87], "Grade": ["A", "B"]}
         )
@@ -24,10 +34,10 @@ class TestAllFeaturesCombined:
                 header_format={"bold": True, "bg_color": "#4F81BD", "font_color": "white"},
                 freeze_panes=True,
             )
-            assert os.path.exists(path)
+            assert Path(path).exists()
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 assert "StudentScores" in ws.tables
                 # freeze_panes=True must freeze the header row (split below row 1).
                 assert ws.freeze_panes == "A2"
@@ -35,10 +45,10 @@ class TestAllFeaturesCombined:
                 # This is expected Excel behavior - tables have their own header styles
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_all_features_dfs_to_xlsx(self):
-        """All features work together in dfs_to_xlsx"""
+    def test_all_features_dfs_to_xlsx(self) -> None:
+        """All features work together in dfs_to_xlsx."""
         df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
         df2 = pd.DataFrame({"X": ["a", "b"], "Y": ["c", "d"]})
         path = get_temp_path()
@@ -69,30 +79,30 @@ class TestAllFeaturesCombined:
                 autofit=True,
                 freeze_panes=True,
             )
-            assert os.path.exists(path)
+            assert Path(path).exists()
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
                 assert "NumbersTable" in wb["Numbers"].tables
                 assert "LettersTable" in wb["Letters"].tables
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestV10AllFeatures:
-    """Tests combining v0.10.0 features"""
+    """Tests combining v0.10.0 features."""
 
-    def test_all_new_features_together(self):
-        """All v0.10.0 features work together"""
+    def test_all_new_features_together(self) -> None:
+        """All v0.10.0 features work together."""
         df = pd.DataFrame({"Name": ["Alice", "Bob"], "Score": [85, 92]})
         path = get_temp_path()
-        import base64
 
         png_data = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
         )
         img_path = get_temp_path().replace(".xlsx", ".png")
         try:
-            with open(img_path, "wb") as f:
+            with Path(img_path).open("wb") as f:
                 f.write(png_data)
 
             xlsxturbo.df_to_xlsx(
@@ -103,15 +113,13 @@ class TestV10AllFeatures:
                 rich_text={"D1": [("Legend:", {"bold": True}), " student scores"]},
                 images={"E1": img_path},
             )
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            if os.path.exists(path):
-                os.unlink(path)
-            if os.path.exists(img_path):
-                os.unlink(img_path)
+            Path(path).unlink(missing_ok=True)
+            Path(img_path).unlink(missing_ok=True)
 
-    def test_new_features_with_dfs_to_xlsx(self):
-        """New features work with dfs_to_xlsx"""
+    def test_new_features_with_dfs_to_xlsx(self) -> None:
+        """New features work with dfs_to_xlsx."""
         df1 = pd.DataFrame({"A": [1, 2]})
         df2 = pd.DataFrame({"B": [3, 4]})
         path = get_temp_path()
@@ -123,6 +131,6 @@ class TestV10AllFeatures:
                 ],
                 path,
             )
-            assert os.path.exists(path)
+            assert Path(path).exists()
         finally:
-            os.unlink(path)
+            Path(path).unlink()

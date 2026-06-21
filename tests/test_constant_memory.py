@@ -1,14 +1,24 @@
-from tests.helpers import HAS_OPENPYXL, get_temp_path, load_workbook, os, pd, pl, pytest, xlsxturbo
+"""Tests for constant_memory mode and its warning emission."""
 
+from __future__ import annotations
+
+import warnings
+from pathlib import Path
+
+import pandas as pd
+import pytest
+import xlsxturbo
+
+from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestConstantMemoryMode:
-    """Tests for constant_memory mode (v0.4.0)"""
+    """Tests for constant_memory mode (v0.4.0)."""
 
-    def test_basic_constant_memory(self):
-        """File is created in constant memory mode"""
+    def test_basic_constant_memory(self) -> None:
+        """File is created in constant memory mode."""
         df = pd.DataFrame({"A": list(range(100)), "B": list(range(100, 200))})
         path = get_temp_path()
         try:
@@ -17,20 +27,20 @@ class TestConstantMemoryMode:
             assert cols == 2
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 assert ws["A1"].value == "A"  # header
                 assert ws["A2"].value == 0  # first data row
                 assert ws["B2"].value == 100
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_constant_memory_silently_disables_features(self):
-        """Features are silently disabled in constant memory mode (no crash)"""
+    def test_constant_memory_silently_disables_features(self) -> None:
+        """Features are silently disabled in constant memory mode (no crash)."""
         df = pd.DataFrame({"Score": [1, 2, 3]})
         path = get_temp_path()
         try:
-            rows, cols = xlsxturbo.df_to_xlsx(
+            rows, _cols = xlsxturbo.df_to_xlsx(
                 df,
                 path,
                 constant_memory=True,
@@ -50,7 +60,7 @@ class TestConstantMemoryMode:
             assert rows > 0
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
+                ws = active_ws(wb)
                 # Table should NOT be created
                 assert len(ws.tables) == 0
                 # Data should still be written
@@ -58,30 +68,31 @@ class TestConstantMemoryMode:
                 assert ws["A2"].value == 1
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_constant_memory_with_column_widths(self):
-        """Column widths still work in constant memory mode"""
+    def test_constant_memory_with_column_widths(self) -> None:
+        """Column widths still work in constant memory mode."""
         df = pd.DataFrame({"A": [1], "B": [2]})
         path = get_temp_path()
         try:
             xlsxturbo.df_to_xlsx(df, path, constant_memory=True, column_widths={0: 25})
-            assert os.path.exists(path)
+            assert Path(path).exists()
             if HAS_OPENPYXL:
                 wb = load_workbook(path)
-                ws = wb.active
-                assert ws.column_dimensions["A"].width > 20
+                ws = active_ws(wb)
+                width = ws.column_dimensions["A"].width
+                assert width is not None
+                assert width > 20
                 wb.close()
         finally:
-            os.unlink(path)
+            Path(path).unlink()
+
 
 class TestConstantMemoryWarning:
-    """Tests for constant_memory warning emission"""
+    """Tests for constant_memory warning emission."""
 
-    def test_constant_memory_warns_on_incompatible_options(self):
-        """constant_memory=True with incompatible options emits RuntimeWarning"""
-        import warnings
-
+    def test_constant_memory_warns_on_incompatible_options(self) -> None:
+        """constant_memory=True with incompatible options emits RuntimeWarning."""
         df = pd.DataFrame({"A": [1, 2]})
         path = get_temp_path()
         try:
@@ -98,12 +109,10 @@ class TestConstantMemoryWarning:
                 assert "table_style" in str(w[0].message)
                 assert "freeze_panes" in str(w[0].message)
         finally:
-            os.unlink(path)
+            Path(path).unlink()
 
-    def test_constant_memory_no_warning_when_clean(self):
-        """constant_memory=True without incompatible options emits no warning"""
-        import warnings
-
+    def test_constant_memory_no_warning_when_clean(self) -> None:
+        """constant_memory=True without incompatible options emits no warning."""
         df = pd.DataFrame({"A": [1, 2]})
         path = get_temp_path()
         try:
@@ -112,4 +121,4 @@ class TestConstantMemoryWarning:
                 xlsxturbo.df_to_xlsx(df, path, constant_memory=True)
                 assert len(w) == 0
         finally:
-            os.unlink(path)
+            Path(path).unlink()
