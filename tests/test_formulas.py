@@ -80,6 +80,25 @@ class TestFormulaColumns:
         finally:
             Path(path).unlink()
 
+    def test_formula_columns_empty_dataframe(self) -> None:
+        """An empty DataFrame writes cleanly, skipping the formula column when there are no data rows."""
+        df = pd.DataFrame({"A": []})
+        path = get_temp_path()
+        try:
+            _rows, cols = xlsxturbo.df_to_xlsx(
+                df, path, formula_columns={"Total": "=A{row}*2"}
+            )
+            # No data rows -> the formula column is not appended.
+            assert cols == 1
+            if HAS_OPENPYXL:
+                wb = load_workbook(path)
+                ws = active_ws(wb)
+                assert ws["A1"].value == "A"  # header still written
+                assert ws["B1"].value is None  # no formula column emitted
+                wb.close()
+        finally:
+            Path(path).unlink()
+
     def test_formula_with_dfs_to_xlsx(self) -> None:
         """Formula columns work in multi-sheet mode."""
         df = pd.DataFrame({"A": [1, 2]})

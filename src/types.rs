@@ -179,6 +179,34 @@ where
     bound.extract::<T>().map(Some).map_err(|_| on_err(bound))
 }
 
+/// Extract an optional typed field, producing a uniform error message of the
+/// form `"<context>: '<key>' must be <type_desc>, got <actual>"`.
+///
+/// Thin wrapper over [`extract_opt`] that centralizes the per-feature error
+/// phrasing so the `apply/*` and `parse/formats` field helpers can't drift —
+/// some used to include the offending type and some didn't. `context` is the
+/// already-formatted option locator (e.g. `"charts['D2']"`).
+pub(crate) fn extract_field<'py, T>(
+    py: Python<'py>,
+    entry: Option<&Py<PyAny>>,
+    context: &str,
+    key: &str,
+    type_desc: &str,
+) -> Result<Option<T>, String>
+where
+    T: for<'a> FromPyObject<'a, 'py>,
+{
+    extract_opt(py, entry, |bound| {
+        format!(
+            "{}: '{}' must be {}, got {}",
+            context,
+            key,
+            type_desc,
+            pytype_name(bound)
+        )
+    })
+}
+
 /// Convert a Python dict to a Rust `HashMap<String, Py<PyAny>>`.
 ///
 /// Lives in the lowest layer so both `extract` (Python→Rust) and `apply`

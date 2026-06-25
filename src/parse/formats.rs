@@ -1,4 +1,4 @@
-use crate::types::{extract_opt, pytype_name};
+use crate::types::{extract_field, pytype_name};
 use indexmap::IndexMap;
 use pyo3::{prelude::*, Py};
 use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatAlign, FormatBorder};
@@ -148,13 +148,7 @@ fn get_bool_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    extract_opt(py, fmt_dict.get(key), |bound| {
-        format!(
-            "format option '{}' must be a bool, got {}",
-            key,
-            pytype_name(bound)
-        )
-    })
+    extract_field(py, fmt_dict.get(key), "format option", key, "a bool")
 }
 
 /// Extract a string field. None values are treated as unset. Wrong types error.
@@ -163,13 +157,7 @@ fn get_string_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, fmt_dict.get(key), |bound| {
-        format!(
-            "format option '{}' must be a string, got {}",
-            key,
-            pytype_name(bound)
-        )
-    })
+    extract_field(py, fmt_dict.get(key), "format option", key, "a string")
 }
 
 /// Extract an f64 field. None values are treated as unset. Wrong types error.
@@ -178,13 +166,7 @@ fn get_f64_field(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     key: &str,
 ) -> Result<Option<f64>, String> {
-    extract_opt(py, fmt_dict.get(key), |bound| {
-        format!(
-            "format option '{}' must be a number, got {}",
-            key,
-            pytype_name(bound)
-        )
-    })
+    extract_field(py, fmt_dict.get(key), "format option", key, "a number")
 }
 
 /// Extract a border field accepting bool (True=thin) or a style name string.

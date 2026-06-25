@@ -15,7 +15,7 @@ import xlsxturbo
 from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 if TYPE_CHECKING:
-    from xlsxturbo import ChartOptions, SparklineOptions, TextboxOptions
+    from xlsxturbo.xlsxturbo import ChartOptions, SparklineOptions, TextboxOptions
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
@@ -768,9 +768,9 @@ class TestSparklines:
         finally:
             Path(path).unlink(missing_ok=True)
 
-    @pytest.mark.parametrize("style", [0, 37])
+    @pytest.mark.parametrize("style", [0, 37, 300, -1])
     def test_sparkline_invalid_style_raises(self, style: int) -> None:
-        """A style outside 1-36 is rejected, not silently ignored by Excel."""
+        """A style outside 1-36 is rejected with the 1-36 message, including values >255 (300) and negatives (-1)."""
         df = pd.DataFrame({"A": [1, 2]})
         path = get_temp_path()
         sparklines: dict[str, SparklineOptions] = {

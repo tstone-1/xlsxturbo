@@ -6,7 +6,7 @@
 //! range — via [`Worksheet::add_sparkline_group`].
 
 use crate::parse::{parse_cell_range, parse_cell_ref, parse_color_enum};
-use crate::types::{extract_opt, SparklineConfig};
+use crate::types::{extract_field, SparklineConfig};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Sparkline, SparklineType, Worksheet};
 use std::collections::HashMap;
@@ -58,9 +58,13 @@ fn spark_string(
     loc: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("sparklines['{}']: '{}' must be a string", loc, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("sparklines['{}']", loc),
+        key,
+        "a string",
+    )
 }
 
 fn spark_bool(
@@ -69,20 +73,28 @@ fn spark_bool(
     loc: &str,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("sparklines['{}']: '{}' must be a bool", loc, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("sparklines['{}']", loc),
+        key,
+        "a bool",
+    )
 }
 
-fn spark_u8(
+fn spark_i64(
     py: Python<'_>,
     opts: &HashMap<String, Py<PyAny>>,
     loc: &str,
     key: &str,
-) -> Result<Option<u8>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("sparklines['{}']: '{}' must be an integer 0-255", loc, key)
-    })
+) -> Result<Option<i64>, String> {
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("sparklines['{}']", loc),
+        key,
+        "an integer",
+    )
 }
 
 fn spark_f64(
@@ -91,9 +103,13 @@ fn spark_f64(
     loc: &str,
     key: &str,
 ) -> Result<Option<f64>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("sparklines['{}']: '{}' must be a number", loc, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("sparklines['{}']", loc),
+        key,
+        "a number",
+    )
 }
 
 fn build_sparkline(
@@ -129,14 +145,14 @@ fn build_sparkline(
             .map_err(|e| format!("sparklines['{}']: {}", loc, e))?;
         sparkline = sparkline.set_type(parsed);
     }
-    if let Some(style) = spark_u8(py, config, loc, "style")? {
+    if let Some(style) = spark_i64(py, config, loc, "style")? {
         if !(1..=36).contains(&style) {
             return Err(format!(
                 "sparklines['{}']: 'style' must be in the range 1-36, got {}",
                 loc, style
             ));
         }
-        sparkline = sparkline.set_style(style);
+        sparkline = sparkline.set_style(style as u8);
     }
 
     // Boolean display toggles. Local macro keeps the builder reassignment DRY

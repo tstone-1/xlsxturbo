@@ -11,6 +11,13 @@ use rust_xlsxwriter::{Format, Worksheet, XlsxError};
 const MAX_SAFE_INT: i64 = 1 << 53;
 const MAX_SAFE_INT_U64: u64 = MAX_SAFE_INT as u64;
 
+/// Whether an integer of the given magnitude fits in an f64 without precision
+/// loss. Single source of the overflow-to-string policy shared by every integer
+/// write path (`write_int`, `write_uint`, and the `CellValue::Integer` arm).
+fn int_fits_f64(magnitude: u64) -> bool {
+    magnitude <= MAX_SAFE_INT_U64
+}
+
 /// Excel number format strings (shared with apply::apply_cells)
 pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
 pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
@@ -75,10 +82,10 @@ fn write_int(
     val: i64,
     fmt: Option<&Format>,
 ) -> Result<(), String> {
-    if val.unsigned_abs() > MAX_SAFE_INT_U64 {
-        write_str(worksheet, row, col, val.to_string(), fmt)
-    } else {
+    if int_fits_f64(val.unsigned_abs()) {
         write_num(worksheet, row, col, val as f64, fmt)
+    } else {
+        write_str(worksheet, row, col, val.to_string(), fmt)
     }
 }
 
@@ -89,10 +96,10 @@ fn write_uint(
     val: u64,
     fmt: Option<&Format>,
 ) -> Result<(), String> {
-    if val > MAX_SAFE_INT_U64 {
-        write_str(worksheet, row, col, val.to_string(), fmt)
-    } else {
+    if int_fits_f64(val) {
         write_num(worksheet, row, col, val as f64, fmt)
+    } else {
+        write_str(worksheet, row, col, val.to_string(), fmt)
     }
 }
 
@@ -127,10 +134,10 @@ pub(crate) fn write_cell(
             worksheet.write_string(row, col, "")?;
         }
         CellValue::Integer(v) => {
-            if v.unsigned_abs() > MAX_SAFE_INT_U64 {
-                worksheet.write_string(row, col, v.to_string())?;
-            } else {
+            if int_fits_f64(v.unsigned_abs()) {
                 worksheet.write_number(row, col, v as f64)?;
+            } else {
+                worksheet.write_string(row, col, v.to_string())?;
             }
         }
         CellValue::Float(v) => {

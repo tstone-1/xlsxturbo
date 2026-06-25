@@ -1,7 +1,7 @@
 //! Image, checkbox, and textbox application helpers.
 
 use crate::parse::{parse_cell_ref, parse_color_enum, parse_column_format};
-use crate::types::{extract_opt, pydict_to_hashmap, CheckboxConfig, ImageConfig, TextboxConfig};
+use crate::types::{extract_field, pydict_to_hashmap, CheckboxConfig, ImageConfig, TextboxConfig};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     Color, Image, Shape, ShapeFont, ShapeFormat, ShapeLine, ShapeSolidFill, Worksheet,
@@ -15,9 +15,13 @@ fn image_f64_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<f64>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("images['{}']: '{}' must be a number", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("images['{}']", cell_ref),
+        key,
+        "a number",
+    )
 }
 
 /// Extract an optional string image option. Wrong types produce an error.
@@ -27,9 +31,13 @@ fn image_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("images['{}']: '{}' must be a string", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("images['{}']", cell_ref),
+        key,
+        "a string",
+    )
 }
 
 /// Apply images to worksheet
@@ -106,12 +114,13 @@ fn textbox_u32_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u32>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!(
-            "textboxes['{}']: '{}' must be a non-negative integer",
-            cell_ref, key
-        )
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("textboxes['{}']", cell_ref),
+        key,
+        "a non-negative integer",
+    )
 }
 
 /// Extract an optional string option from a textbox options dict.
@@ -121,9 +130,13 @@ fn textbox_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("textboxes['{}']: '{}' must be a string", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("textboxes['{}']", cell_ref),
+        key,
+        "a string",
+    )
 }
 
 /// Extract an optional color option from a textbox options dict.

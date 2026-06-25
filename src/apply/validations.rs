@@ -1,7 +1,7 @@
 //! Data validation application helpers.
 
 use crate::parse::matches_pattern;
-use crate::types::{extract_opt, pytype_name, ValidationConfig};
+use crate::types::{extract_field, ValidationConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{DataValidation, DataValidationErrorStyle, Worksheet};
@@ -14,9 +14,13 @@ fn validation_string_field(
     col_pattern: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, config.get(key), |_| {
-        format!("validations['{}']: '{}' must be a string", col_pattern, key)
-    })
+    extract_field(
+        py,
+        config.get(key),
+        &format!("validations['{}']", col_pattern),
+        key,
+        "a string",
+    )
 }
 
 fn reject_unknown_keys(
@@ -44,14 +48,13 @@ fn validation_i32_field(
     key: &str,
     default: i32,
 ) -> Result<i32, String> {
-    Ok(extract_opt(py, config.get(key), |bound| {
-        format!(
-            "validations['{}']: '{}' must be an integer, got {}",
-            col_pattern,
-            key,
-            pytype_name(bound)
-        )
-    })?
+    Ok(extract_field(
+        py,
+        config.get(key),
+        &format!("validations['{}']", col_pattern),
+        key,
+        "an integer",
+    )?
     .unwrap_or(default))
 }
 
@@ -62,14 +65,13 @@ fn validation_u32_field(
     key: &str,
     default: u32,
 ) -> Result<u32, String> {
-    Ok(extract_opt(py, config.get(key), |bound| {
-        format!(
-            "validations['{}']: '{}' must be a non-negative integer, got {}",
-            col_pattern,
-            key,
-            pytype_name(bound)
-        )
-    })?
+    Ok(extract_field(
+        py,
+        config.get(key),
+        &format!("validations['{}']", col_pattern),
+        key,
+        "a non-negative integer",
+    )?
     .unwrap_or(default))
 }
 
@@ -80,14 +82,13 @@ fn validation_f64_field(
     key: &str,
     default: f64,
 ) -> Result<f64, String> {
-    Ok(extract_opt(py, config.get(key), |bound| {
-        format!(
-            "validations['{}']: '{}' must be a number, got {}",
-            col_pattern,
-            key,
-            pytype_name(bound)
-        )
-    })?
+    Ok(extract_field(
+        py,
+        config.get(key),
+        &format!("validations['{}']", col_pattern),
+        key,
+        "a number",
+    )?
     .unwrap_or(default))
 }
 

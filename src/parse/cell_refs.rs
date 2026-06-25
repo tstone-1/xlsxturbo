@@ -75,5 +75,12 @@ pub(crate) fn parse_cell_range(range_str: &str) -> Result<(u32, u16, u32, u16), 
     let (first_row, first_col) = parse_cell_ref(parts[0])?;
     let (last_row, last_col) = parse_cell_ref(parts[1])?;
 
+    if first_row > last_row || first_col > last_col {
+        return Err(format!(
+            "Invalid cell range '{}': first cell must precede the last cell (top-left to bottom-right)",
+            range_str
+        ));
+    }
+
     Ok((first_row, first_col, last_row, last_col))
 }

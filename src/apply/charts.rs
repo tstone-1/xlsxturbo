@@ -1,7 +1,7 @@
 //! Native Excel chart application helpers.
 
 use crate::parse::parse_cell_ref;
-use crate::types::{extract_opt, pydict_to_hashmap, ChartConfig};
+use crate::types::{extract_field, pydict_to_hashmap, ChartConfig};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Chart, ChartDataTable, ChartLegendPosition, ChartType, Worksheet};
 use std::collections::HashMap;
@@ -60,9 +60,13 @@ fn chart_string_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<String>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("charts['{}']: '{}' must be a string", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("charts['{}']", cell_ref),
+        key,
+        "a string",
+    )
 }
 
 fn chart_u32_field(
@@ -71,12 +75,13 @@ fn chart_u32_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u32>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!(
-            "charts['{}']: '{}' must be a non-negative integer",
-            cell_ref, key
-        )
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("charts['{}']", cell_ref),
+        key,
+        "a non-negative integer",
+    )
 }
 
 fn chart_u8_field(
@@ -85,9 +90,13 @@ fn chart_u8_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<u8>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("charts['{}']: '{}' must be an integer 0-255", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("charts['{}']", cell_ref),
+        key,
+        "an integer in the range 0-255",
+    )
 }
 
 fn chart_bool_field(
@@ -96,9 +105,13 @@ fn chart_bool_field(
     cell_ref: &str,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    extract_opt(py, opts.get(key), |_| {
-        format!("charts['{}']: '{}' must be a bool", cell_ref, key)
-    })
+    extract_field(
+        py,
+        opts.get(key),
+        &format!("charts['{}']", cell_ref),
+        key,
+        "a bool",
+    )
 }
 
 fn add_chart_series(

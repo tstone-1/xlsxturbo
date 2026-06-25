@@ -1,7 +1,7 @@
 //! Conditional formatting application helpers.
 
 use crate::parse::{matches_pattern, parse_color, parse_column_format, parse_icon_type};
-use crate::types::{extract_opt, pydict_to_hashmap, ConditionalFormatConfigs};
+use crate::types::{extract_field, pydict_to_hashmap, ConditionalFormatConfigs};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,
@@ -40,12 +40,13 @@ fn cf_optional_color(
     col_pattern: &str,
     key: &str,
 ) -> Result<Option<u32>, String> {
-    let Some(color_str) = extract_opt::<String, _>(py, config.get(key), |_| {
-        format!(
-            "conditional_formats['{}']: '{}' must be a color string",
-            col_pattern, key
-        )
-    })?
+    let Some(color_str) = extract_field::<String>(
+        py,
+        config.get(key),
+        &format!("conditional_formats['{}']", col_pattern),
+        key,
+        "a color string",
+    )?
     else {
         return Ok(None);
     };
@@ -59,12 +60,13 @@ fn cf_optional_bool(
     col_pattern: &str,
     key: &str,
 ) -> Result<Option<bool>, String> {
-    extract_opt(py, config.get(key), |_| {
-        format!(
-            "conditional_formats['{}']: '{}' must be a bool",
-            col_pattern, key
-        )
-    })
+    extract_field(
+        py,
+        config.get(key),
+        &format!("conditional_formats['{}']", col_pattern),
+        key,
+        "a bool",
+    )
 }
 
 /// Extract a required string field.

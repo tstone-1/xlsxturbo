@@ -276,7 +276,8 @@ fn csv_to_xlsx(
 ///     comments: Dict mapping cell refs to note text or config dict (default: None).
 ///               Example: {"A1": "Note text"} or {"A1": {"text": "Note", "author": "John"}}
 ///     validations: Dict mapping column names/patterns to validation configs (default: None).
-///                  Types: list, whole_number, decimal, text_length.
+///                  Types: list, whole_number, decimal, text_length
+///                  (aliases accepted, e.g. integer/number/length — see README).
 ///                  Example: {"status": {"type": "list", "values": ["Open", "Closed"]}}
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///                Example: {"A1": [("Bold text", {"bold": True}), (" normal text",)]}
@@ -477,7 +478,8 @@ fn version() -> &'static str {
 ///     hyperlinks: List of link specs: (cell_ref, url) or (cell_ref, url, display_text) (default: None).
 ///     comments: Dict mapping cell refs to note text or config dict (default: None).
 ///     validations: Dict mapping column names/patterns to validation configs (default: None).
-///                  Types: list, whole_number, decimal, text_length.
+///                  Types: list, whole_number, decimal, text_length
+///                  (aliases accepted, e.g. integer/number/length — see README).
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
 ///     checkboxes: Dict mapping cell refs to checkbox state (bool) or config dict (default: None).

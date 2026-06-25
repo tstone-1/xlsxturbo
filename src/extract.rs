@@ -788,3 +788,28 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
     }
     Ok(cells)
 }
+
+#[cfg(test)]
+mod sheet_option_name_tests {
+    use super::SHEET_OPTION_NAMES;
+    use crate::types::EffectiveOpts;
+
+    /// Every complex feature option declared via `define_options!` must also be a
+    /// recognized per-sheet option key. Otherwise `dfs_to_xlsx`'s
+    /// `validate_sheet_option_keys` would reject an option that `df_to_xlsx`
+    /// accepts — a silent feature gap on the multi-sheet path with no compile
+    /// error. Adding a `define_options!` field auto-grows `COMPLEX_OPTION_NAMES`,
+    /// failing this test until the name is added to `SHEET_OPTION_NAMES` too.
+    #[test]
+    fn every_complex_option_is_a_valid_sheet_option() {
+        for &name in EffectiveOpts::COMPLEX_OPTION_NAMES {
+            assert!(
+                SHEET_OPTION_NAMES.contains(&name),
+                "complex option '{}' is declared in define_options! but missing from \
+                 SHEET_OPTION_NAMES — dfs_to_xlsx would reject it as an unknown \
+                 per-sheet option",
+                name
+            );
+        }
+    }
+}

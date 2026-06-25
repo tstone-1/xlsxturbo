@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-06-25
+
+### Fixed
+- `__init__.pyi` no longer advertises the option `TypedDict`/`Literal` helpers (`SparklineOptions`, `ChartOptions`, `ValidationType`, ...) as importable from the top-level package. They are stub-only types with no runtime object, so `from xlsxturbo import SparklineOptions` raised `ImportError` at runtime despite type-checking as valid. The stub now mirrors the real runtime surface; annotate option dicts by importing these from `xlsxturbo.xlsxturbo` under `TYPE_CHECKING`.
+- Sparkline `style` values outside the `u8` range (e.g. `300`) or negative now report the documented "must be in the range 1-36" message instead of a generic integer error.
+- `parse_cell_range` rejects reversed ranges (e.g. `"D10:A1"`) with a clear "first cell must precede the last cell" message instead of deferring to an opaque backend error (affects `merged_ranges` and grouped sparkline locations).
+- Validation docstrings now note that type aliases (e.g. `integer`/`number`/`length`) are accepted, matching the README and type stub.
+
+### Changed
+- Unified the per-feature option-extraction error messages across charts, sparklines, images, textboxes, validations, conditional formats, and column formats via a single shared `extract_field` helper, so the same kind of error reads consistently regardless of which feature surfaced it.
+- Centralized the integer-overflow-to-string policy in `write.rs` behind one predicate shared by every integer write path.
+
+### Internal
+- Added a guard test ensuring every `define_options!` feature option is also a recognized per-sheet option key, preventing a silent multi-sheet feature gap.
+- Added a regression test pinning `formula_columns` behavior on an empty DataFrame (the formula column is skipped when there are no data rows).
+
 ## [0.16.1] - 2026-06-25
 
 ### Fixed
