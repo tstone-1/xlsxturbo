@@ -124,6 +124,9 @@ pub(crate) struct TextboxConfig {
 /// Type alias for native Excel chart config: cell_ref -> chart options dict
 pub(crate) type ChartConfig = HashMap<String, Py<PyAny>>;
 
+/// Type alias for sparkline config: location ref -> sparkline options dict
+pub(crate) type SparklineConfig = HashMap<String, Py<PyAny>>;
+
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
@@ -266,6 +269,7 @@ pub(crate) struct SheetConfig {
     pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
     pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
     pub(crate) charts: Option<HashMap<String, ChartConfig>>, // cell_ref -> chart options
+    pub(crate) sparklines: Option<HashMap<String, SparklineConfig>>, // location ref -> sparkline options
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -370,5 +374,6 @@ define_options! {
     checkboxes: HashMap<String, CheckboxConfig>,
     textboxes: HashMap<String, TextboxConfig>,
     charts: HashMap<String, ChartConfig>,
+    sparklines: HashMap<String, SparklineConfig>,
     cells: Vec<CellWrite>,
 }

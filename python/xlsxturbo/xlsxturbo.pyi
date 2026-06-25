@@ -229,6 +229,41 @@ class ChartOptions(TypedDict, total=False):
     show_legend: bool  # Show chart legend (default True)
     legend_position: Literal["right", "left", "top", "bottom", "top_right"]
 
+SparklineType = Literal["line", "column", "col", "win_loss", "win_lose", "winloss", "winlose"]
+
+class SparklineOptions(TypedDict, total=False):
+    """Options for a native Excel sparkline (mini in-cell chart).
+
+    Note: 'range' is required at runtime but TypedDict doesn't enforce this.
+    """
+
+    range: str  # Data range to plot, e.g. 'A2:C2' (1D) or 'A2:C10' (2D, for a group)
+    type: SparklineType  # Sparkline style (default 'line')
+    style: int  # Built-in sparkline style id, 1-36
+    markers: bool  # Show a marker on every data point
+    high_point: bool  # Highlight the highest point
+    low_point: bool  # Highlight the lowest point
+    first_point: bool  # Highlight the first point
+    last_point: bool  # Highlight the last point
+    negative_points: bool  # Highlight negative points
+    show_axis: bool  # Show a horizontal axis line
+    show_hidden_data: bool  # Plot data in hidden rows/columns
+    group_max: bool  # Use a common max across a grouped sparkline
+    group_min: bool  # Use a common min across a grouped sparkline
+    right_to_left: bool  # Plot the data right-to-left
+    column_order: bool  # Plot data column-by-column instead of row-by-row
+    color: str  # Sparkline series color ('#RRGGBB' or named)
+    high_point_color: str  # High-point marker color
+    low_point_color: str  # Low-point marker color
+    first_point_color: str  # First-point marker color
+    last_point_color: str  # Last-point marker color
+    negative_points_color: str  # Negative-points marker color
+    markers_color: str  # Marker color
+    line_weight: float  # Line weight in points (line sparklines)
+    custom_max: float  # Custom vertical-axis maximum
+    custom_min: float  # Custom vertical-axis minimum
+    date_range: str  # Range supplying X-axis date values
+
 class CellValueOptions(TypedDict, total=False):
     """Options for a cell write with custom formatting.
 
@@ -264,6 +299,7 @@ class SheetOptions(TypedDict, total=False):
     checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
     textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
     charts: dict[str, ChartOptions] | None  # Cell ref -> native Excel chart options
+    sparklines: dict[str, SparklineOptions] | None  # Location ref -> sparkline options
     cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
 
 def csv_to_xlsx(
@@ -320,6 +356,7 @@ def df_to_xlsx(
     charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
+    sparklines: dict[str, SparklineOptions] | None = None,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
 
@@ -340,7 +377,7 @@ def df_to_xlsx(
             When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
-            images, checkboxes, textboxes, charts, and cells. Plain column_widths,
+            images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
             header_format, and column_formats remain supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
@@ -379,6 +416,10 @@ def df_to_xlsx(
         charts: Dict mapping cell refs to native Excel chart configs.
             Example: {'D2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10',
                       'categories_range': 'Sheet1!$A$2:$A$10', 'title': 'Monthly Activity'}}
+        sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
+            A single-cell key (e.g. 'D2') places one sparkline; a range key (e.g. 'D2:D10')
+            places a grouped sparkline, one per row of the data range. 'range' is required.
+            Example: {'D2:D10': {'range': 'A2:C10', 'type': 'line', 'markers': True}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -416,6 +457,7 @@ def dfs_to_xlsx(
     charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
+    sparklines: dict[str, SparklineOptions] | None = None,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
 
@@ -434,7 +476,7 @@ def dfs_to_xlsx(
             When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
-            images, checkboxes, textboxes, charts, and cells. Plain column_widths,
+            images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
             header_format, and column_formats remain supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
@@ -457,6 +499,9 @@ def dfs_to_xlsx(
             Simple form: {'B2': 'text'}
             Dict form: {'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True}}}
         charts: Dict mapping cell refs to native Excel chart configs.
+        sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
+            Range key (e.g. 'D2:D10') makes a grouped sparkline; single cell makes one.
+            Example: {'D2:D10': {'range': 'A2:C10', 'type': 'line', 'markers': True}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

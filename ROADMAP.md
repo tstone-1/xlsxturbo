@@ -8,14 +8,12 @@ feature gaps first, then records completed milestones.
 
 Niche features for specific use cases.
 
-- [ ] **Sparklines** - Mini inline charts
-  - rust_xlsxwriter: supported
-  - Enables: trend indicators in cells
-  - API: `sparklines={'D2:D10': {'range': 'A2:C10', 'type': 'line'}}`
-
-- [ ] **Append mode** - Add sheets to existing workbook
-  - rust_xlsxwriter: not supported (write-only by design)
-  - Would require openpyxl hybrid approach
+- [ ] **Append mode** - Add sheets to existing workbook (deferred - not planned as a built-in)
+  - rust_xlsxwriter is write-only by design, so this would require an openpyxl hybrid that
+    reads and re-materializes the existing workbook. That pulls in a heavy runtime dependency
+    and makes the one operation carrying the feature openpyxl-bound (slow) - at odds with the
+    library's pure-Rust, high-performance thesis. Recommended path is a documented recipe
+    (read with openpyxl, write new sheets with xlsxturbo to a copy) rather than `append=True`.
 
 ## Completed
 
@@ -60,6 +58,7 @@ Power user features for richer Excel output.
 
 ### Recent Milestones
 
+- [x] Sparklines via `sparklines` parameter (v0.16.0)
 - [x] Native Excel charts via `charts` parameter (v0.15.0)
 - [x] Textboxes via `textboxes` parameter (v0.14.0)
 - [x] Checkboxes via `checkboxes` parameter (v0.13.0)

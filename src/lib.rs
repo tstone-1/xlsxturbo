@@ -27,7 +27,8 @@ use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
     extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
-    extract_rich_text, extract_sheet_info, extract_textboxes, extract_validations,
+    extract_rich_text, extract_sheet_info, extract_sparklines, extract_textboxes,
+    extract_validations,
 };
 use types::pytype_name;
 use types::ExtractedOptions;
@@ -97,6 +98,7 @@ struct RawOptions<'a, 'py> {
     checkboxes: Option<&'a Bound<'py, PyAny>>,
     textboxes: Option<&'a Bound<'py, PyAny>>,
     charts: Option<&'a Bound<'py, PyAny>>,
+    sparklines: Option<&'a Bound<'py, PyAny>>,
     cells: Option<&'a Bound<'py, PyAny>>,
 }
 
@@ -160,6 +162,10 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
         charts: raw
             .charts
             .map(|v| require_dict(v, "charts").and_then(|d| extract_charts(&d)))
+            .transpose()?,
+        sparklines: raw
+            .sparklines
+            .map(|v| require_dict(v, "sparklines").and_then(|d| extract_sparklines(&d)))
             .transpose()?,
         cells: raw
             .cells
@@ -289,6 +295,14 @@ fn csv_to_xlsx(
 ///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
 ///             Example: {"D2": {"type": "bar", "data_range": "Sheet1!$B$2:$B$10",
 ///                       "categories_range": "Sheet1!$A$2:$A$10", "title": "Monthly Activity"}}
+///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
+///                 A single-cell key (e.g. "D2") places one sparkline; a range key (e.g. "D2:D10")
+///                 places a grouped sparkline, one per row of the data range.
+///                 Required key: "range" (the data to plot). Options: type ("line", "column",
+///                 "win_loss"), style (1-36), markers, high_point, low_point, first_point,
+///                 last_point, negative_points, show_axis, color and the *_point colors,
+///                 line_weight, custom_max, custom_min, group_max, group_min, date_range.
+///                 Example: {"D2:D10": {"range": "A2:C10", "type": "line", "markers": True}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -343,6 +357,7 @@ fn csv_to_xlsx(
     charts = None,
     defined_names = None,
     cells = None,
+    sparklines = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
@@ -373,6 +388,7 @@ fn df_to_xlsx<'py>(
     charts: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
+    sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
     let opts = extract_options(&RawOptions {
@@ -390,6 +406,7 @@ fn df_to_xlsx<'py>(
         checkboxes,
         textboxes,
         charts,
+        sparklines,
         cells,
     })?;
 
@@ -430,7 +447,8 @@ fn version() -> &'static str {
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
-///             comments, validations, rich_text, images, checkboxes, textboxes, charts, cells
+///             comments, validations, rich_text, images, checkboxes, textboxes, charts,
+///             sparklines, cells
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -466,6 +484,9 @@ fn version() -> &'static str {
 ///     textboxes: Dict mapping cell refs to floating text shapes (default: None).
 ///                Example: {"B2": "text"} or {"B2": {"text": "Note", "width": 200, "font": {"bold": True}}}
 ///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
+///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
+///                 Range key (e.g. "D2:D10") makes a grouped sparkline; single cell makes one.
+///                 Example: {"D2:D10": {"range": "A2:C10", "type": "line", "markers": True}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -520,6 +541,7 @@ fn version() -> &'static str {
     charts = None,
     defined_names = None,
     cells = None,
+    sparklines = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
@@ -549,6 +571,7 @@ fn dfs_to_xlsx<'py>(
     charts: Option<&Bound<'py, PyAny>>,
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
+    sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
     let mut workbook = Workbook::new();
@@ -569,6 +592,7 @@ fn dfs_to_xlsx<'py>(
         checkboxes,
         textboxes,
         charts,
+        sparklines,
         cells,
     })?;
 

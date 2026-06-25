@@ -15,7 +15,7 @@ import xlsxturbo
 from tests.helpers import HAS_OPENPYXL, active_ws, get_temp_path, load_workbook
 
 if TYPE_CHECKING:
-    from xlsxturbo import ChartOptions, TextboxOptions
+    from xlsxturbo import ChartOptions, SparklineOptions, TextboxOptions
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
@@ -619,5 +619,227 @@ class TestCharts:
                 assert len(w) == 1
                 assert issubclass(w[0].category, RuntimeWarning)
                 assert "textboxes" in str(w[0].message)
+        finally:
+            Path(path).unlink()
+
+
+class TestSparklines:
+    """Tests for native Excel sparklines (mini in-cell charts)."""
+
+    @staticmethod
+    def _sheet_xml(path: str, sheet: str = "sheet1") -> str:
+        """Return the decoded worksheet XML (sparklines live there, not a separate part)."""
+        with zipfile.ZipFile(path) as zf:
+            return zf.read(f"xl/worksheets/{sheet}.xml").decode("utf-8")
+
+    def test_single_sparkline(self) -> None:
+        """A single-cell location places one sparkline with its type and color."""
+        df = pd.DataFrame({"q1": [10], "q2": [30], "q3": [20]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                sparklines={
+                    "D2": {"range": "Sheet1!A2:C2", "type": "column", "color": "#FF0000"}
+                },
+            )
+            xml = self._sheet_xml(path)
+            assert xml.count("<x14:sparklineGroup ") == 1
+            assert 'type="column"' in xml
+            # The data range and location anchor must reach the XML.
+            assert "<xm:f>Sheet1!A2:C2</xm:f>" in xml
+            assert "<xm:sqref>D2</xm:sqref>" in xml
+            # The custom series color must land as an ARGB value.
+            assert 'rgb="FFFF0000"' in xml
+        finally:
+            Path(path).unlink()
+
+    def test_grouped_sparkline_expands_per_row(self) -> None:
+        """A range location makes a grouped sparkline: one per row with a sliced data range."""
+        df = pd.DataFrame({"q1": [10, 30, 20], "q2": [15, 25, 35], "q3": [25, 20, 45]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                sparklines={
+                    "D2:D4": {
+                        "range": "Sheet1!A2:C4",
+                        "type": "line",
+                        "markers": True,
+                        "high_point": True,
+                    }
+                },
+            )
+            xml = self._sheet_xml(path)
+            # One group containing three per-row sparklines.
+            assert xml.count("<x14:sparklineGroup ") == 1
+            assert xml.count("<x14:sparkline>") == 3
+            assert 'markers="1"' in xml
+            assert 'high="1"' in xml
+            # Each row's data range is sliced and anchored to its own cell.
+            assert "<xm:f>Sheet1!A2:C2</xm:f>" in xml
+            assert "<xm:sqref>D2</xm:sqref>" in xml
+            assert "<xm:f>Sheet1!A4:C4</xm:f>" in xml
+            assert "<xm:sqref>D4</xm:sqref>" in xml
+        finally:
+            Path(path).unlink()
+
+    def test_sparklines_with_dfs_to_xlsx_per_sheet(self) -> None:
+        """Sparklines work via per-sheet options in dfs_to_xlsx."""
+        df1 = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+        df2 = pd.DataFrame({"a": [5, 6], "b": [7, 8]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (df1, "North", {"sparklines": {"D2": {"range": "North!A2:B2"}}}),
+                    (df2, "South", {"sparklines": {"D2": {"range": "South!A2:B2"}}}),
+                ],
+                path,
+            )
+            assert "<x14:sparklineGroup" in self._sheet_xml(path, "sheet1")
+            assert "<x14:sparklineGroup" in self._sheet_xml(path, "sheet2")
+        finally:
+            Path(path).unlink()
+
+    def test_sparkline_missing_range_raises(self) -> None:
+        """Omitting the required 'range' key raises a clear error."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        # Intentionally invalid: no 'range' key.
+        sparklines: dict[str, SparklineOptions] = {"D2": {"type": "line"}}
+        try:
+            with pytest.raises(ValueError, match="missing required 'range'"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_sparkline_invalid_type_raises(self) -> None:
+        """An unknown sparkline type is rejected."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        # Intentionally invalid: 'squiggle' is not a known sparkline type.
+        sparklines: dict[str, SparklineOptions] = {
+            "D2": {"range": "Sheet1!A2:A3", "type": "squiggle"}  # type: ignore[typeddict-item]
+        }
+        try:
+            with pytest.raises(ValueError, match="Unknown sparkline type"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_sparkline_unknown_key_raises(self) -> None:
+        """A typo in a sparkline option key is rejected, not silently dropped."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        # Intentionally invalid: 'marker' is a typo for 'markers'.
+        sparklines: dict[str, SparklineOptions] = {
+            "D2": {"range": "Sheet1!A2:A3", "marker": True}  # type: ignore[typeddict-unknown-key]
+        }
+        try:
+            with pytest.raises(ValueError, match="unknown option"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_sparkline_rectangular_location_raises(self) -> None:
+        """A 2D block location for a grouped sparkline is rejected as ambiguous."""
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
+        path = get_temp_path()
+        # Intentionally invalid: 'E2:F4' spans two rows and two columns.
+        sparklines: dict[str, SparklineOptions] = {"E2:F4": {"range": "Sheet1!A2:C4"}}
+        try:
+            with pytest.raises(ValueError, match="single row or column"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    @pytest.mark.parametrize("style", [0, 37])
+    def test_sparkline_invalid_style_raises(self, style: int) -> None:
+        """A style outside 1-36 is rejected, not silently ignored by Excel."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        sparklines: dict[str, SparklineOptions] = {
+            "D2": {"range": "Sheet1!A2:A3", "style": style}
+        }
+        try:
+            with pytest.raises(ValueError, match="'style' must be in the range 1-36"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_sparkline_win_loss_and_group_axes(self) -> None:
+        """win_loss type, negative points, and grouped min/max axes reach the XML."""
+        df = pd.DataFrame({"q1": [10, -30, 20], "q2": [15, 25, -35], "q3": [25, 20, 45]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                sparklines={
+                    "E2:E4": {
+                        "range": "Sheet1!A2:C4",
+                        "type": "win_loss",
+                        "negative_points": True,
+                        "group_max": True,
+                        "group_min": True,
+                        "negative_points_color": "#00B050",
+                    }
+                },
+            )
+            xml = self._sheet_xml(path)
+            assert 'type="stacked"' in xml  # win_loss serializes as a stacked sparkline
+            assert 'negative="1"' in xml
+            assert 'maxAxisType="group"' in xml
+            assert 'minAxisType="group"' in xml
+            assert 'rgb="FF00B050"' in xml  # negative-points color
+        finally:
+            Path(path).unlink()
+
+    def test_sparkline_custom_axes_and_date_range(self) -> None:
+        """custom_max/min and a date_range serialize as manual axes and a date axis."""
+        df = pd.DataFrame({"q1": [10], "q2": [30], "q3": [20]})
+        path = get_temp_path()
+        try:
+            xlsxturbo.df_to_xlsx(
+                df,
+                path,
+                sparklines={
+                    "F2": {
+                        "range": "Sheet1!A2:C2",
+                        "custom_max": 100.0,
+                        "custom_min": 0.0,
+                        "date_range": "Sheet1!A1:C1",
+                    }
+                },
+            )
+            xml = self._sheet_xml(path)
+            assert 'manualMax="100"' in xml
+            assert 'manualMin="0"' in xml
+            assert 'maxAxisType="custom"' in xml
+            assert 'minAxisType="custom"' in xml
+            assert 'dateAxis="1"' in xml
+            assert "<xm:f>Sheet1!A1:C1</xm:f>" in xml  # the supplied date range
+        finally:
+            Path(path).unlink()
+
+    def test_sparkline_constant_memory_warns(self) -> None:
+        """constant_memory=True with sparklines emits RuntimeWarning."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                xlsxturbo.df_to_xlsx(
+                    df,
+                    path,
+                    constant_memory=True,
+                    sparklines={"D2": {"range": "Sheet1!A2:A3"}},
+                )
+                assert len(w) == 1
+                assert issubclass(w[0].category, RuntimeWarning)
+                assert "sparklines" in str(w[0].message)
         finally:
             Path(path).unlink()

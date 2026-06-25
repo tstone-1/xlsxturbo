@@ -11,6 +11,7 @@ mod dimensions;
 mod formulas;
 mod media;
 mod rich_text;
+mod sparklines;
 mod validations;
 
 pub(crate) use annotations::{apply_comments, apply_hyperlinks, apply_merged_ranges};
@@ -21,4 +22,5 @@ pub(crate) use dimensions::{apply_column_widths, apply_column_widths_with_autofi
 pub(crate) use formulas::apply_formula_columns;
 pub(crate) use media::{apply_checkboxes, apply_images, apply_textboxes};
 pub(crate) use rich_text::apply_rich_text;
+pub(crate) use sparklines::apply_sparklines;
 pub(crate) use validations::apply_validations;

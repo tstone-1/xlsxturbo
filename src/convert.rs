@@ -4,7 +4,7 @@ use crate::apply::{
     apply_cells, apply_charts, apply_checkboxes, apply_column_widths,
     apply_column_widths_with_autofit_cap, apply_comments, apply_conditional_formats,
     apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_rich_text,
-    apply_textboxes, apply_validations,
+    apply_sparklines, apply_textboxes, apply_validations,
 };
 use crate::parse::{
     build_column_formats, parse_header_format, parse_table_style, parse_value, sanitize_table_name,
@@ -669,6 +669,13 @@ fn apply_worksheet_features(
         }
     }
 
+    // Apply native Excel sparklines
+    if let Some(sparklines) = opts.sparklines {
+        if !sparklines.is_empty() {
+            apply_sparklines(py, worksheet, sparklines)?;
+        }
+    }
+
     // Apply cells (arbitrary cell writes, after all DataFrame data)
     if let Some(cells) = opts.cells {
         if !cells.is_empty() {
@@ -756,6 +763,7 @@ mod constant_memory_tests {
             "checkboxes",
             "textboxes",
             "charts",
+            "sparklines",
             "cells",
         ];
 

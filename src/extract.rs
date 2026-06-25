@@ -4,7 +4,7 @@ use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_al
 use crate::types::{
     pydict_to_hashmap, pytype_name, CellWrite, ChartConfig, CheckboxConfig, Comment,
     ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig,
-    TextboxConfig, ValidationConfig,
+    SparklineConfig, TextboxConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -31,6 +31,7 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "checkboxes",
     "textboxes",
     "charts",
+    "sparklines",
     "cells",
 ];
 
@@ -202,6 +203,7 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_dict_field!(opts, config, "checkboxes", checkboxes, extract_checkboxes);
         extract_dict_field!(opts, config, "textboxes", textboxes, extract_textboxes);
         extract_dict_field!(opts, config, "charts", charts, extract_charts);
+        extract_dict_field!(opts, config, "sparklines", sparklines, extract_sparklines);
 
         extract_dict_field!(opts, config, "cells", cells, extract_cells);
 
@@ -693,6 +695,27 @@ pub(crate) fn extract_charts(
     }
 
     Ok(charts)
+}
+
+/// Extract sparklines from Python dict (location ref -> sparkline options dict)
+pub(crate) fn extract_sparklines(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, SparklineConfig>> {
+    let mut sparklines: HashMap<String, SparklineConfig> = HashMap::new();
+
+    for (loc_ref, value) in py_dict.iter() {
+        let loc_str: String = loc_ref.extract()?;
+        let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "sparklines['{}']: expected dict, got {}",
+                loc_str,
+                pytype_name(&value)
+            ))
+        })?;
+        sparklines.insert(loc_str, pydict_to_hashmap(inner_dict)?);
+    }
+
+    Ok(sparklines)
 }
 
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})
