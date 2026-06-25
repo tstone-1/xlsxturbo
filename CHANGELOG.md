@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-06-25
+
+### Fixed
+- Sparkline `range` and `date_range` now raise a clear error when not sheet-qualified (e.g. `"A2:C10"` instead of `"Sheet1!A2:C10"`). Previously a bare range failed deep in the writer with an opaque "Sparkline data range not set" message. Corrected the README/CHANGELOG/docstring examples, which used bare ranges.
+- Sparkline `style` is validated to the documented 1-36 range instead of being silently ignored by Excel for out-of-range values.
+- A grouped sparkline location must be a single row or column; a 2D block is now rejected rather than producing unexpected placement.
+
 ## [0.16.0] - 2026-06-25
 
 ### Added
-- **Sparklines** via the new `sparklines` parameter on `df_to_xlsx` and `dfs_to_xlsx`. Sparklines are mini in-cell charts. A single-cell location key (e.g. `"D2"`) places one sparkline; a range key (e.g. `"D2:D10"`) places a grouped sparkline, one per row of the data range. The `range` key (data to plot) is required. Supported options: `type` (`line`/`column`/`win_loss`), `style` (0-36), `markers`, `high_point`, `low_point`, `first_point`, `last_point`, `negative_points`, `show_axis`, `show_hidden_data`, `group_max`, `group_min`, `right_to_left`, `column_order`, `color` and the per-point/marker colors, `line_weight`, `custom_max`, `custom_min`, and `date_range`. Like charts, sparklines are skipped under `constant_memory=True`.
-  - Example: `df_to_xlsx(df, "out.xlsx", sparklines={"D2:D10": {"range": "A2:C10", "type": "line", "markers": True}})`
+- **Sparklines** via the new `sparklines` parameter on `df_to_xlsx` and `dfs_to_xlsx`. Sparklines are mini in-cell charts. A single-cell location key (e.g. `"D2"`) places one sparkline; a range key (e.g. `"D2:D10"`) places a grouped sparkline, one per row of the data range. The `range` key (data to plot, sheet-qualified like a chart range) is required. Supported options: `type` (`line`/`column`/`win_loss`), `style` (1-36), `markers`, `high_point`, `low_point`, `first_point`, `last_point`, `negative_points`, `show_axis`, `show_hidden_data`, `group_max`, `group_min`, `right_to_left`, `column_order`, `color` and the per-point/marker colors, `line_weight`, `custom_max`, `custom_min`, and `date_range`. Like charts, sparklines are skipped under `constant_memory=True`.
+  - Example: `df_to_xlsx(df, "out.xlsx", sparklines={"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}})`
 
 ### Changed
 - Refreshed `uv.lock` to the latest compatible dependency versions (numpy 2.5.0, polars 1.42.0, pyarrow 24.0.0, maturin 1.14.1, plus dev tools).
@@ -552,6 +559,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.16.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.1
 [0.16.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.0
 [0.15.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.5
 [0.15.4]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.4

@@ -919,7 +919,7 @@ xlsxturbo.df_to_xlsx(df, "charts.xlsx",
 
 ### Sparklines
 
-Add sparklines - mini charts that live inside a single cell - to show trends next to your data. The dict key is the sparkline *location*: a single cell (e.g. `'D2'`) places one sparkline, while a range (e.g. `'D2:D10'`) places a grouped sparkline, one per row of the data range. The `range` key (the data to plot) is required.
+Add sparklines - mini charts that live inside a single cell - to show trends next to your data. The dict key is the sparkline *location*: a single cell (e.g. `'D2'`) places one sparkline, while a range (e.g. `'D2:D10'`) places a grouped sparkline, one per row of the data range. The `range` key (the data to plot) is required and must be sheet-qualified (e.g. `'Sheet1!A2:C10'`), like chart ranges.
 
 ```python
 import xlsxturbo
@@ -936,7 +936,7 @@ xlsxturbo.df_to_xlsx(df, "sparklines.xlsx",
     sparklines={
         # One sparkline per row, plotting that row's q1:q3 values into column D
         'D2:D4': {
-            'range': 'A2:C4',
+            'range': 'Sheet1!A2:C4',
             'type': 'line',
             'markers': True,
             'high_point': True,
@@ -947,11 +947,11 @@ xlsxturbo.df_to_xlsx(df, "sparklines.xlsx",
 ```
 
 **Sparkline format:**
-- `{'D2': {'range': 'A2:C2', 'type': 'column'}}` - a single sparkline
-- `{'D2:D10': {'range': 'A2:C10', 'type': 'line'}}` - a grouped sparkline (one per row)
+- `{'D2': {'range': 'Sheet1!A2:C2', 'type': 'column'}}` - a single sparkline
+- `{'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line'}}` - a grouped sparkline (one per row)
 
 **Available options:**
-- `range` (str, required): The data range to plot (1D for a single cell, 2D for a group)
+- `range` (str, required): The data range to plot, sheet-qualified (e.g. `'Sheet1!A2:C10'`); 1D for a single cell, 2D for a group
 - `type` (str): `line` (default), `column`, or `win_loss`
 - `style` (int): Built-in sparkline style ID, 1-36
 - `markers`, `high_point`, `low_point`, `first_point`, `last_point`, `negative_points` (bool): Point highlighting
@@ -961,12 +961,12 @@ xlsxturbo.df_to_xlsx(df, "sparklines.xlsx",
 - `line_weight` (float): Line weight in points (line sparklines)
 - `custom_max`, `custom_min` (float): Fixed vertical-axis bounds
 - `group_max`, `group_min` (bool): Share a common max/min across a grouped sparkline
-- `date_range` (str): Range supplying X-axis date values
+- `date_range` (str): Sheet-qualified range supplying X-axis date values
 - `right_to_left`, `column_order`, `show_hidden_data` (bool): Plot direction and hidden-data handling
 
 **Notes:**
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
-- Ranges use Excel notation; include the sheet name when referencing another sheet
+- `range` and `date_range` must be sheet-qualified Excel ranges (e.g. `'Sheet1!A2:C10'`), as with chart ranges
 - Not available in constant memory mode
 
 ### Defined Names

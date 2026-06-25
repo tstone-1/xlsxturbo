@@ -744,6 +744,18 @@ class TestSparklines:
         finally:
             Path(path).unlink(missing_ok=True)
 
+    def test_sparkline_bare_range_raises(self) -> None:
+        """A 'range' without a sheet name gives a clear, actionable error."""
+        df = pd.DataFrame({"A": [1, 2]})
+        path = get_temp_path()
+        # Intentionally invalid: bare range, missing the 'Sheet1!' qualifier.
+        sparklines: dict[str, SparklineOptions] = {"D2": {"range": "A2:A3"}}
+        try:
+            with pytest.raises(ValueError, match="must include a sheet name"):
+                xlsxturbo.df_to_xlsx(df, path, sparklines=sparklines)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
     def test_sparkline_rectangular_location_raises(self) -> None:
         """A 2D block location for a grouped sparkline is rejected as ambiguous."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})

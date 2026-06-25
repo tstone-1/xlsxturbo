@@ -114,6 +114,14 @@ fn build_sparkline(
 
     let range = spark_string(py, config, loc, "range")?
         .ok_or_else(|| format!("sparklines['{}']: missing required 'range' key", loc))?;
+    // rust_xlsxwriter requires a sheet-qualified range string (like charts);
+    // a bare range silently yields an empty data range, so reject it early.
+    if !range.contains('!') {
+        return Err(format!(
+            "sparklines['{}']: 'range' must include a sheet name, e.g. 'Sheet1!{}'",
+            loc, range
+        ));
+    }
     let mut sparkline = Sparkline::new().set_range(range.as_str());
 
     if let Some(sparkline_type) = spark_string(py, config, loc, "type")? {
@@ -181,6 +189,12 @@ fn build_sparkline(
         sparkline = sparkline.set_custom_min(min);
     }
     if let Some(date_range) = spark_string(py, config, loc, "date_range")? {
+        if !date_range.contains('!') {
+            return Err(format!(
+                "sparklines['{}']: 'date_range' must include a sheet name, e.g. 'Sheet1!{}'",
+                loc, date_range
+            ));
+        }
         sparkline = sparkline.set_date_range(date_range.as_str());
     }
 

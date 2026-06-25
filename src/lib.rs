@@ -298,11 +298,12 @@ fn csv_to_xlsx(
 ///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
 ///                 A single-cell key (e.g. "D2") places one sparkline; a range key (e.g. "D2:D10")
 ///                 places a grouped sparkline, one per row of the data range.
-///                 Required key: "range" (the data to plot). Options: type ("line", "column",
-///                 "win_loss"), style (1-36), markers, high_point, low_point, first_point,
-///                 last_point, negative_points, show_axis, color and the *_point colors,
-///                 line_weight, custom_max, custom_min, group_max, group_min, date_range.
-///                 Example: {"D2:D10": {"range": "A2:C10", "type": "line", "markers": True}}
+///                 Required key: "range" (the data to plot, sheet-qualified like a chart range,
+///                 e.g. "Sheet1!A2:C10"). Options: type ("line", "column", "win_loss"),
+///                 style (1-36), markers, high_point, low_point, first_point, last_point,
+///                 negative_points, show_axis, color and the *_point colors, line_weight,
+///                 custom_max, custom_min, group_max, group_min, date_range.
+///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -486,7 +487,8 @@ fn version() -> &'static str {
 ///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
 ///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
 ///                 Range key (e.g. "D2:D10") makes a grouped sparkline; single cell makes one.
-///                 Example: {"D2:D10": {"range": "A2:C10", "type": "line", "markers": True}}
+///                 "range" must be sheet-qualified, e.g. "Sheet1!A2:C10".
+///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).

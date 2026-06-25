@@ -237,7 +237,7 @@ class SparklineOptions(TypedDict, total=False):
     Note: 'range' is required at runtime but TypedDict doesn't enforce this.
     """
 
-    range: str  # Data range to plot, e.g. 'A2:C2' (1D) or 'A2:C10' (2D, for a group)
+    range: str  # Sheet-qualified data range, e.g. 'Sheet1!A2:C2' (1D) or 'Sheet1!A2:C10' (2D, group)
     type: SparklineType  # Sparkline style (default 'line')
     style: int  # Built-in sparkline style id, 1-36
     markers: bool  # Show a marker on every data point
@@ -262,7 +262,7 @@ class SparklineOptions(TypedDict, total=False):
     line_weight: float  # Line weight in points (line sparklines)
     custom_max: float  # Custom vertical-axis maximum
     custom_min: float  # Custom vertical-axis minimum
-    date_range: str  # Range supplying X-axis date values
+    date_range: str  # Sheet-qualified range supplying X-axis date values, e.g. 'Sheet1!A1:C1'
 
 class CellValueOptions(TypedDict, total=False):
     """Options for a cell write with custom formatting.
@@ -418,8 +418,9 @@ def df_to_xlsx(
                       'categories_range': 'Sheet1!$A$2:$A$10', 'title': 'Monthly Activity'}}
         sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
             A single-cell key (e.g. 'D2') places one sparkline; a range key (e.g. 'D2:D10')
-            places a grouped sparkline, one per row of the data range. 'range' is required.
-            Example: {'D2:D10': {'range': 'A2:C10', 'type': 'line', 'markers': True}}
+            places a grouped sparkline, one per row of the data range. 'range' is required and
+            must be sheet-qualified (e.g. 'Sheet1!A2:C10'), like a chart range.
+            Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -501,7 +502,8 @@ def dfs_to_xlsx(
         charts: Dict mapping cell refs to native Excel chart configs.
         sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
             Range key (e.g. 'D2:D10') makes a grouped sparkline; single cell makes one.
-            Example: {'D2:D10': {'range': 'A2:C10', 'type': 'line', 'markers': True}}
+            'range' must be sheet-qualified, e.g. 'Sheet1!A2:C10'.
+            Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
