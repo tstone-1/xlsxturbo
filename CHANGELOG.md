@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-07-02
+
+### Added
+- CLI: new `--parallel`/`-p` flag enabling multi-core CSV parsing, mirroring the Python `parallel=True` option.
+- CI: new `python-lint` job runs the documented ruff, bandit, and pyright gates; the release workflow gained a `smoke-test` job that installs each built wheel on Linux/Windows/macOS and runs the full test suite before publishing.
+
+### Changed
+- An explicitly empty per-sheet dict/list (e.g. `{"comments": {}}`) now disables the corresponding global option for that sheet instead of silently inheriting it. Empty options no longer appear in the `constant_memory` disabled-features warning. Note: per-sheet `column_widths={}` selects the explicit-widths branch and therefore also suppresses `autofit` for that sheet (consistent with non-empty dicts).
+- Chart `values`/`values_range`/`data_range` and `categories`/`categories_range` must be sheet-qualified (e.g. `"Sheet1!A2:A10"`). Bare ranges now raise a clear error instead of producing a misleading message (values) or silently rendering default 1..N axis labels (categories) - the same guard sparklines received in 0.16.1.
+- Unknown keys in `conditional_formats` configs (per type), `comments` dicts, `checkboxes` dicts, and `cells` dicts are now rejected with an error listing the valid keys, matching the strict validation charts, sparklines, images, textboxes, and validations already had. Previously typos were silently ignored, yielding default-styled output.
+- CSV string cells preserve leading/trailing whitespace instead of being silently trimmed. Type detection still ignores surrounding whitespace (`" 123 "` stays numeric) and whitespace-only cells remain empty; the CSV and DataFrame paths now agree on string content.
+- `column_widths` keys are validated: negative, non-integer, or beyond-Excel-limit (> 16383) keys raise a clear error, and explicit keys beyond the data's column count are now applied instead of silently ignored.
+- `csv_to_xlsx` releases the GIL for the duration of the conversion, so other Python threads stay responsive during large sequential or parallel conversions.
+- `Cargo.lock` is now tracked for reproducible builds; the CI cargo cache keys (which hash the lockfile) are effective as a result.
+
+### Fixed
+- Dates from 1899-12-31 through 1900-02-28 are now written as text instead of date serials that rendered one day late in Excel (the 1900 leap-year bug; the first correctly representable date is 1900-03-01). Applies to the CSV, Python `date`/`datetime`, and numpy `datetime64` paths.
+- Hex colors containing sign characters (e.g. `"#+12345"`) are rejected instead of parsing to an unintended color.
+- Subclasses of `datetime.datetime`/`datetime.date` (e.g. pendulum or freezegun types) are written as real datetimes/dates instead of falling back to their string representation.
+- Out-of-range `whole_number` validation bounds report the supported i32 range instead of a misleading "must be an integer, got int" type error.
+- `date_order` error messages and the CLI help now list the accepted `european` alias; runtime docstrings list the `cell` conditional-format type (supported since 0.12.0); the path-argument error message clarifies that bytes paths are unsupported.
+- Benchmarks: warmup now actually runs in `--json`/`--quiet` modes, matching the stated "median of N runs after warmup" methodology.
+- Documentation accuracy: README CI-matrix wording and hyperlink example prose corrected; BUILD.md job lists match the workflows; dead CHANGELOG links for never-released tags removed.
+
+### Internal
+- Dependencies: rust_xlsxwriter 0.95 -> 0.96 (table-style variant list verified unchanged; all chart/sparkline/table XML assertions pass), zlib-rs 0.6.4 -> 0.6.5 via `cargo update`; CI `actions/cache` v5 -> v6. Supersedes Dependabot PRs #18 and #17.
+- The 7-touchpoint feature-wiring checklist is now committed in `AGENTS.md`.
+- New signature-parity test guards `df_to_xlsx`/`dfs_to_xlsx` kwarg drift; conditional-format cell-rule tests assert operators and formulas read back via openpyxl instead of file existence; textbox tests moved to their own class; shared `tmp_xlsx` fixture and parametrized constant-memory warning tests replace copy-pasted scaffolding.
+
 ## [0.16.2] - 2026-06-25
 
 ### Fixed
@@ -379,7 +408,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added disclaimer that results vary by system
   - Linked to Benchmarking section for running your own tests
 
-## [0.10.0] - 2026-01-16
+## 0.10.0 - 2026-01-16
 
 ### Added
 - **Comments/Notes** - Add cell annotations with optional author
@@ -488,7 +517,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `column_widths` parameter now accepts both integer keys (`{0: 20}`) and string keys (`{"_all": 50}`)
 
-## [0.5.0] - 2025-12-08
+## 0.5.0 - 2025-12-08
 
 ### Added
 - **Per-sheet options for `dfs_to_xlsx()`** - override global settings per sheet
@@ -540,7 +569,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated type stubs with new parameters and documentation
 
-## [0.2.0] - 2025-12-05
+## 0.2.0 - 2025-12-05
 
 ### Added
 - `df_to_xlsx()` function for direct DataFrame export (pandas and polars)
@@ -575,6 +604,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.17.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.17.0
+[0.16.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.2
 [0.16.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.1
 [0.16.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.0
 [0.15.5]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.15.5
@@ -599,14 +630,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.10.3]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.3
 [0.10.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.2
 [0.10.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.1
-[0.10.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.6.0
-[0.5.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.5.0
 [0.4.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.1
 [0.4.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.3.0
-[0.2.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.1.0

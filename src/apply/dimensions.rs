@@ -3,6 +3,33 @@
 use rust_xlsxwriter::Worksheet;
 use std::collections::HashMap;
 
+/// Apply an explicitly-given column width for every key in `widths` that
+/// names a column index at or beyond `col_count` (i.e. outside the data
+/// range the `0..col_count` loops in this module cover). `"_all"` is a
+/// global cap over the data columns only, so it never applies here.
+/// Extraction (`extract_column_widths`) already validated every integer key
+/// fits Excel's column range, so a stray non-integer/"_all" key is just
+/// skipped rather than erroring again here.
+fn apply_out_of_range_column_widths(
+    worksheet: &mut Worksheet,
+    col_count: u16,
+    widths: &HashMap<String, f64>,
+) -> Result<(), String> {
+    for (key, &width) in widths {
+        if key == "_all" {
+            continue;
+        }
+        if let Ok(col_idx) = key.parse::<u16>() {
+            if col_idx >= col_count {
+                worksheet
+                    .set_column_width(col_idx, width)
+                    .map_err(|e| format!("Failed to set column width: {}", e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Apply column widths to worksheet, supporting '_all' global cap
 pub(crate) fn apply_column_widths(
     worksheet: &mut Worksheet,
@@ -24,7 +51,7 @@ pub(crate) fn apply_column_widths(
                 .map_err(|e| format!("Failed to set column width: {}", e))?;
         }
     }
-    Ok(())
+    apply_out_of_range_column_widths(worksheet, col_count, widths)
 }
 
 /// Apply column widths with autofit and cap: autofit each column to content, then cap at '_all'.
@@ -58,5 +85,5 @@ pub(crate) fn apply_column_widths_with_autofit_cap(
                 .map_err(|e| format!("Failed to set column width: {}", e))?;
         }
     }
-    Ok(())
+    apply_out_of_range_column_widths(worksheet, col_count, widths)
 }

@@ -308,8 +308,9 @@ def run_benchmarks(
         pass  # polars not installed, will be skipped
 
     # Warmup run (discarded)
-    if warmup and verbose:
-        print("Warmup run...", flush=True)
+    if warmup:
+        if verbose:
+            print("Warmup run...", flush=True)
         for name, func in BENCHMARK_FUNCS:
             output_path = temp_dir / f"warmup_{name.replace(' ', '_')}.xlsx"
             if name == "polars":

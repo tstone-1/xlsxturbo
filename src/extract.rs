@@ -2,9 +2,9 @@
 
 use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::{
-    pydict_to_hashmap, pytype_name, CellWrite, ChartConfig, CheckboxConfig, Comment,
-    ConditionalFormatConfigs, Hyperlink, ImageConfig, MergedRange, RichTextSegment, SheetConfig,
-    SparklineConfig, TextboxConfig, ValidationConfig,
+    pydict_to_hashmap, pytype_name, reject_unknown_keys as types_reject_unknown_keys, CellWrite,
+    ChartConfig, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig,
+    MergedRange, RichTextSegment, SheetConfig, SparklineConfig, TextboxConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -46,7 +46,11 @@ macro_rules! extract_scalar {
     };
 }
 
-/// Helper: extract an optional dict field, run an extractor, and set if non-empty
+/// Helper: extract an optional dict field, run an extractor, and set it.
+/// An explicitly-passed empty dict is still recorded as `Some(empty)` (not
+/// dropped) — on the multi-sheet path this is a deliberate per-sheet "off
+/// switch" that shadows a non-empty global default via `SheetConfig::merge_with`,
+/// matching the existing `table_style` explicit-`None`-means-off precedent.
 macro_rules! extract_dict_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
         if let Ok(val) = $opts.get_item($key) {
@@ -59,15 +63,15 @@ macro_rules! extract_dict_field {
                     ))
                 })?;
                 let extracted = $extractor(dict)?;
-                if !extracted.is_empty() {
-                    $config.$field = Some(extracted);
-                }
+                $config.$field = Some(extracted);
             }
         }
     };
 }
 
-/// Helper: extract an optional list field, run an extractor, and set if non-empty
+/// Helper: extract an optional list field, run an extractor, and set it.
+/// See `extract_dict_field!` — an explicitly-passed empty list is likewise
+/// kept as `Some(empty)` rather than dropped.
 macro_rules! extract_list_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
         if let Ok(val) = $opts.get_item($key) {
@@ -80,9 +84,7 @@ macro_rules! extract_list_field {
                     ))
                 })?;
                 let extracted = $extractor(list)?;
-                if !extracted.is_empty() {
-                    $config.$field = Some(extracted);
-                }
+                $config.$field = Some(extracted);
             }
         }
     };
@@ -105,6 +107,32 @@ fn validate_sheet_option_keys(opts: &Bound<'_, pyo3::types::PyDict>) -> PyResult
         }
     }
     Ok(())
+}
+
+/// Reject any dict key not in `allowed`. Shared by the dict-form extractors
+/// (comments, checkboxes, cells) that accept a handful of recognized keys and
+/// previously dropped anything else silently. Delegates the actual
+/// unknown-key policy to `types::reject_unknown_keys` (this crate's single
+/// source of truth for that phrasing); this wrapper only does the PyO3 key
+/// extraction.
+fn reject_unknown_dict_keys(
+    dict: &Bound<'_, pyo3::types::PyDict>,
+    context: &str,
+    allowed: &[&str],
+) -> PyResult<()> {
+    let mut key_strs: Vec<String> = Vec::with_capacity(dict.len());
+    for key in dict.keys().iter() {
+        let key_str: String = key.extract().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "{}: keys must be strings, got {}",
+                context,
+                pytype_name(&key)
+            ))
+        })?;
+        key_strs.push(key_str);
+    }
+    types_reject_unknown_keys(key_strs.iter().map(String::as_str), context, None, allowed)
+        .map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -225,16 +253,70 @@ pub(crate) fn extract_sheet_info<'py>(
     Ok((df, sheet_name, config))
 }
 
-/// Extract column_widths from Python dict, supporting both integer and string keys
+/// Excel's maximum column index (zero-based; column XFD is the 16384th column).
+const MAX_COLUMN_INDEX: i64 = 16_383;
+
+/// Validate a resolved column_widths integer key against Excel's column range
+/// (0..=16383). `label` is the key's original representation — the int
+/// restringified, or the source string key — used to build the
+/// `column_widths['<label>']: ...` context-rich error so int and string keys
+/// share identical messages modulo that label.
+fn validate_column_widths_index(i: i64, label: &str) -> PyResult<()> {
+    if i < 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "column_widths['{}']: must be a non-negative column index",
+            label
+        )));
+    }
+    if i > MAX_COLUMN_INDEX {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "column_widths['{}']: exceeds Excel's maximum column index ({}, i.e. column XFD)",
+            label, MAX_COLUMN_INDEX
+        )));
+    }
+    Ok(())
+}
+
+/// Extract column_widths from Python dict, supporting both integer and string keys.
+/// Integer keys are column indices and are validated against Excel's column range
+/// (0..=16383, i.e. up to XFD); the literal string key `"_all"` is a special
+/// global-width cap applied to every data column (see `apply_column_widths`).
+/// A string key other than `"_all"` must itself parse as an integer column
+/// index and passes through the same range validation — it is not merely
+/// forwarded verbatim, since the backend only recognizes numeric-string keys
+/// and `"_all"`.
 pub(crate) fn extract_column_widths(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
 ) -> PyResult<HashMap<String, f64>> {
     let mut widths: HashMap<String, f64> = HashMap::new();
     for (k, v) in py_dict.iter() {
         let key_str = if let Ok(i) = k.extract::<i64>() {
+            validate_column_widths_index(i, &i.to_string())?;
             i.to_string()
+        } else if let Ok(s) = k.extract::<String>() {
+            if s == "_all" {
+                s
+            } else {
+                let i: i64 = s.parse().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "column_widths['{}']: must be an integer column index or the string \
+                         '_all', got a non-numeric string",
+                        s
+                    ))
+                })?;
+                validate_column_widths_index(i, &s)?;
+                i.to_string()
+            }
         } else {
-            k.extract::<String>()?
+            let key_repr = k
+                .str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "column_widths['{}']: must be an integer column index or the string '_all', got {}",
+                key_repr,
+                pytype_name(&k)
+            )));
         };
         widths.insert(key_str, v.extract()?);
     }
@@ -404,6 +486,11 @@ pub(crate) fn extract_comments(
 
         // Check if value is a dict or simple string
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
+            reject_unknown_dict_keys(
+                inner_dict,
+                &format!("comments['{}']", cell_str),
+                &["text", "author"],
+            )?;
             // Dict format: {'text': '...', 'author': '...'}
             let text: String = inner_dict
                 .get_item("text")?
@@ -575,6 +662,11 @@ pub(crate) fn extract_checkboxes(
 
         // Dict form must be tried before bool, since a dict would extract as False for bool otherwise.
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
+            reject_unknown_dict_keys(
+                inner_dict,
+                &format!("checkboxes['{}']", cell_str),
+                &["checked", "format"],
+            )?;
             let checked: bool = inner_dict
                 .get_item("checked")?
                 .ok_or_else(|| {
@@ -728,6 +820,17 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
 
         // Check if value is a dict with "value" and optional formatting keys
         if let Ok(d) = value.cast::<pyo3::types::PyDict>() {
+            reject_unknown_dict_keys(
+                d,
+                &format!("cells['{}']", cell_ref),
+                &[
+                    "value",
+                    "num_format",
+                    "align_horizontal",
+                    "align_vertical",
+                    "wrap_text",
+                ],
+            )?;
             let val = d.get_item("value")?.ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(format!(
                     "cells['{}'] dict missing 'value' key",
@@ -813,3 +916,9 @@ mod sheet_option_name_tests {
         }
     }
 }
+
+// `reject_unknown_keys` unit tests and the `SheetConfig::merge_with`
+// empty-dict/absent-fallback tests live in `types.rs`, the natural home of
+// the shared `reject_unknown_keys` helper and `merge_with` respectively —
+// see `types::reject_unknown_keys_tests` and
+// `types::complex_option_presence_tests`.

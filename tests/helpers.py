@@ -21,16 +21,25 @@ else:
         load_workbook = None
         HAS_OPENPYXL = False
 
-__all__ = ["HAS_OPENPYXL", "active_ws", "get_temp_path", "load_workbook"]
+__all__ = ["HAS_OPENPYXL", "TINY_PNG_B64", "active_ws", "get_temp_path", "load_workbook"]
+
+# Base64 encoding of the smallest valid PNG: a single 1x1 white pixel.
+TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 
-def get_temp_path() -> str:
-    """Return a temporary ``.xlsx`` file path with its handle closed.
+def get_temp_path(suffix: str = ".xlsx") -> str:
+    """Return a temporary file path with its handle closed.
 
     The handle is closed immediately so Windows allows the file to be
     reopened and rewritten by the library under test.
+
+    Args:
+        suffix: File extension (including the dot) for the temp path.
+
+    Returns:
+        The path to a newly created, empty temporary file.
     """
-    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     return path
 

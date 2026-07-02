@@ -3,7 +3,7 @@
 use crate::parse::{naive_date_to_excel, naive_datetime_to_excel};
 use crate::types::CellValue;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyFloat, PyInt, PyString};
+use pyo3::types::{PyBool, PyDate, PyDateTime, PyFloat, PyInt, PyString};
 use rust_xlsxwriter::{Format, Worksheet, XlsxError};
 
 /// Maximum safe integer for lossless f64 representation (2^53).
@@ -229,7 +229,9 @@ pub(crate) fn write_py_value_with_format(
             .ok_or_else(|| format!("Invalid numpy datetime64 timestamp: {}", us_since_epoch))?
             .naive_utc();
         let excel_dt = naive_datetime_to_excel(dt);
-        if excel_dt <= 0.0 {
+        // Dates before 1900-03-01 (serial 61) can't be represented correctly
+        // due to Excel's 1900 leap-year bug; fall back to string.
+        if excel_dt < 61.0 {
             let s = value
                 .str()
                 .map_err(|e| format!("Failed to convert numpy datetime64 to string: {}", e))?
@@ -240,8 +242,14 @@ pub(crate) fn write_py_value_with_format(
         return write_num(worksheet, row, col, excel_dt, Some(fmt));
     }
 
-    // Datetime before date, since datetime is subclass of date.
-    if type_name == "datetime" || type_name == "Timestamp" {
+    // Datetime before date, since datetime is subclass of date. Use a typed
+    // isinstance-style check (via `cast::<PyDateTime>`) so subclasses such as
+    // pendulum.DateTime or freezegun's FakeDatetime are caught here too,
+    // instead of falling through to the generic str() path below. The
+    // type-name comparisons are kept as a defensive fast path/fallback
+    // (pandas Timestamp is itself a datetime subclass, so the typed check
+    // already covers it, but the string check costs nothing extra here).
+    if value.cast::<PyDateTime>().is_ok() || type_name == "datetime" || type_name == "Timestamp" {
         let year: i32 = value
             .getattr("year")
             .and_then(|v| v.extract())
@@ -294,7 +302,9 @@ pub(crate) fn write_py_value_with_format(
             })?;
         let dt = chrono::NaiveDateTime::new(date, time);
         let excel_dt = naive_datetime_to_excel(dt);
-        if excel_dt <= 0.0 {
+        // Dates before 1900-03-01 (serial 61) can't be represented correctly
+        // due to Excel's 1900 leap-year bug; fall back to string.
+        if excel_dt < 61.0 {
             let s = value
                 .str()
                 .map_err(|e| format!("Failed to convert datetime to string: {}", e))?
@@ -305,7 +315,11 @@ pub(crate) fn write_py_value_with_format(
         return write_num(worksheet, row, col, excel_dt, Some(fmt));
     }
 
-    if type_name == "date" {
+    // Typed check first, same rationale as the datetime branch above; this
+    // branch is only reached for plain dates because the datetime branch
+    // (checked first) already returns for any datetime/subclass instance,
+    // even though `PyDate` would also match those (datetime is-a date).
+    if value.cast::<PyDate>().is_ok() || type_name == "date" {
         let year: i32 = value
             .getattr("year")
             .and_then(|v| v.extract())
@@ -322,7 +336,9 @@ pub(crate) fn write_py_value_with_format(
         let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
             .ok_or_else(|| format!("Invalid date: year={}, month={}, day={}", year, month, day))?;
         let excel_date = naive_date_to_excel(date);
-        if excel_date <= 0.0 {
+        // Dates before 1900-03-01 (serial 61) can't be represented correctly
+        // due to Excel's 1900 leap-year bug; fall back to string.
+        if excel_date < 61.0 {
             let s = value
                 .str()
                 .map_err(|e| format!("Failed to convert date to string: {}", e))?

@@ -1,7 +1,9 @@
 //! Native Excel chart application helpers.
 
 use crate::parse::parse_cell_ref;
-use crate::types::{extract_field, pydict_to_hashmap, ChartConfig};
+use crate::types::{
+    extract_field, pydict_to_hashmap, reject_unknown_keys as types_reject_unknown_keys, ChartConfig,
+};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Chart, ChartDataTable, ChartLegendPosition, ChartType, Worksheet};
 use std::collections::HashMap;
@@ -114,6 +116,49 @@ fn chart_bool_field(
     )
 }
 
+/// Look up the first of `keys` that is present in `config`, returning the
+/// matching key name alongside its string value so callers can report which
+/// key a validation error applies to.
+///
+/// Every key in `keys` is probed — not just up to the first present one —
+/// so a malformed alias later in priority order (e.g. `values` holding an
+/// int while `values_range` is already a valid string) still raises its type
+/// error instead of being silently skipped because an earlier alias won.
+fn first_present_string_field(
+    py: Python<'_>,
+    config: &HashMap<String, Py<PyAny>>,
+    cell_ref: &str,
+    keys: &[&'static str],
+) -> Result<Option<(&'static str, String)>, String> {
+    let mut found: Option<(&'static str, String)> = None;
+    for &key in keys {
+        let value = chart_string_field(py, config, cell_ref, key)?;
+        if found.is_none() {
+            if let Some(v) = value {
+                found = Some((key, v));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// rust_xlsxwriter's `ChartRange::new_from_string` leaves the sheet name
+/// empty when `value` has no `!`. For a values range that surfaces later as a
+/// misleading validate() error; for a categories range it is silently
+/// ignored and the chart falls back to default 1..N axis labels. Reject both
+/// cases up front with a clear, actionable error (mirrors the sparklines
+/// range guard in src/apply/sparklines.rs).
+fn require_sheet_qualified(cell_ref: &str, key: &str, value: &str) -> Result<(), String> {
+    if value.contains('!') {
+        Ok(())
+    } else {
+        Err(format!(
+            "charts['{}']: '{}' must include a sheet name, e.g. 'Sheet1!{}'",
+            cell_ref, key, value
+        ))
+    }
+}
+
 fn add_chart_series(
     py: Python<'_>,
     chart: &mut Chart,
@@ -121,19 +166,36 @@ fn add_chart_series(
     config: &HashMap<String, Py<PyAny>>,
     default_categories: Option<&str>,
 ) -> Result<(), String> {
-    let values = chart_string_field(py, config, cell_ref, "values_range")?
-        .or(chart_string_field(py, config, cell_ref, "values")?)
-        .or(chart_string_field(py, config, cell_ref, "data_range")?)
-        .ok_or_else(|| {
-            format!(
-                "charts['{}']: chart series requires 'values_range', 'values', or 'data_range'",
-                cell_ref
-            )
-        })?;
+    let (values_key, values) = first_present_string_field(
+        py,
+        config,
+        cell_ref,
+        &["values_range", "values", "data_range"],
+    )?
+    .ok_or_else(|| {
+        format!(
+            "charts['{}']: chart series requires 'values_range', 'values', or 'data_range'",
+            cell_ref
+        )
+    })?;
+    require_sheet_qualified(cell_ref, values_key, &values)?;
 
-    let categories = chart_string_field(py, config, cell_ref, "categories_range")?
-        .or(chart_string_field(py, config, cell_ref, "categories")?)
-        .or_else(|| default_categories.map(str::to_string));
+    // Categories are optional; only validate sheet-qualification when a
+    // categories range is actually present (explicit or via the chart-level
+    // default, which was already validated when it was computed).
+    let categories = match first_present_string_field(
+        py,
+        config,
+        cell_ref,
+        &["categories_range", "categories"],
+    )? {
+        Some((key, v)) => {
+            require_sheet_qualified(cell_ref, key, &v)?;
+            Some(v)
+        }
+        None => default_categories.map(str::to_string),
+    };
+
     let name = chart_string_field(py, config, cell_ref, "name")?.or(chart_string_field(
         py,
         config,
@@ -193,16 +255,12 @@ pub(crate) fn apply_charts(
 
     for (cell_ref, config) in charts {
         let (row, col) = parse_cell_ref(cell_ref)?;
-        for key in config.keys() {
-            if !CHART_KEYS.contains(&key.as_str()) {
-                return Err(format!(
-                    "charts['{}']: unknown option '{}'. Valid: {}",
-                    cell_ref,
-                    key,
-                    CHART_KEYS.join(", ")
-                ));
-            }
-        }
+        types_reject_unknown_keys(
+            config.keys().map(String::as_str),
+            &format!("charts['{}']", cell_ref),
+            None,
+            CHART_KEYS,
+        )?;
 
         let chart_type = chart_string_field(py, config, cell_ref, "type")?
             .ok_or_else(|| format!("charts['{}']: missing 'type' key", cell_ref))?;
@@ -223,26 +281,35 @@ pub(crate) fn apply_charts(
                     cell_ref
                 ));
             }
+
+            // Chart-level categories fallback used by any series item that
+            // doesn't specify its own; computed once (not per series item)
+            // and validated up front since it is reused unchanged.
+            let default_categories = match first_present_string_field(
+                py,
+                config,
+                cell_ref,
+                &["categories_range", "categories"],
+            )? {
+                Some((key, v)) => {
+                    require_sheet_qualified(cell_ref, key, &v)?;
+                    Some(v)
+                }
+                None => None,
+            };
+
             for (idx, item) in series_list.iter().enumerate() {
                 let series_dict = item.cast::<pyo3::types::PyDict>().map_err(|_| {
                     format!("charts['{}']: series item {} must be a dict", cell_ref, idx)
                 })?;
                 let series_config = pydict_to_hashmap(series_dict)
                     .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;
-                for key in series_config.keys() {
-                    if !SERIES_KEYS.contains(&key.as_str()) {
-                        return Err(format!(
-                            "charts['{}']: series item {}: unknown option '{}'. Valid: {}",
-                            cell_ref,
-                            idx,
-                            key,
-                            SERIES_KEYS.join(", ")
-                        ));
-                    }
-                }
-                let default_categories =
-                    chart_string_field(py, config, cell_ref, "categories_range")?
-                        .or(chart_string_field(py, config, cell_ref, "categories")?);
+                types_reject_unknown_keys(
+                    series_config.keys().map(String::as_str),
+                    &format!("charts['{}']: series item {}", cell_ref, idx),
+                    None,
+                    SERIES_KEYS,
+                )?;
                 add_chart_series(
                     py,
                     &mut chart,

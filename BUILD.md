@@ -63,9 +63,18 @@ maturin develop --release
 
 # 5. Python tests
 pytest tests/
+
+# 6. Ruff (Python lint)
+ruff check python tests benchmarks
+
+# 7. Bandit (Python security)
+bandit -c pyproject.toml -r python
+
+# 8. Pyright (Python types)
+pyright
 ```
 
-All 5 steps must succeed before pushing.
+All 8 steps must succeed before pushing.
 
 ## Release Process
 
@@ -115,9 +124,11 @@ Don't release with unreviewed dependency PRs piling up.
 
 1. Go to: https://github.com/tstone-1/xlsxturbo/actions
 2. Check the latest push to `main`
-3. Verify both workflows show green checkmarks:
+3. Verify all CI jobs are green:
    - **CI / test (push)** - Rust tests pass
+   - **CI / python-test, python-test-windows, python-test-macos (push)** - pytest passes against a maturin-built wheel on each OS
    - **CI / lint (push)** - Format and clippy pass
+   - **CI / python-lint (push)** - ruff, bandit, and pyright pass
 
 Do NOT proceed if CI is failing.
 
@@ -139,6 +150,7 @@ After pushing the tag:
    - **windows** (x64)
    - **macos** (x86_64, aarch64)
    - **sdist**
+   - **smoke-test** (ubuntu/windows/macos) - pytest against the built wheels
    - **Publish to PyPI**
 
 ### 8. Verify PyPI Publication
@@ -184,5 +196,5 @@ pip install .
 
 | Workflow | Trigger | Jobs |
 |----------|---------|------|
-| CI | Push/PR to main | `test` (cargo test), `lint` (fmt + clippy) |
-| Release | Push tag `v*` | Build wheels (linux/win/mac) + PyPI publish |
+| CI | Push/PR to main | `test` (cargo test), `python-test` / `python-test-windows` / `python-test-macos` (pytest against a maturin-built wheel per OS), `lint` (fmt + clippy), `python-lint` (ruff + bandit + pyright) |
+| Release | Push tag `v*` | Build wheels (linux/win/mac) + sdist + `smoke-test` (pytest against the built wheels) + PyPI publish |

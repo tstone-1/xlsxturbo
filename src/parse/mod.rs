@@ -270,6 +270,19 @@ mod tests {
         assert_eq!(parse_color("  red  ").unwrap(), 0xFF0000);
     }
 
+    #[test]
+    fn test_parse_color_hex_rejects_sign_characters() {
+        // u32::from_str_radix accepts a leading '+'/'-', which would otherwise
+        // let a 6-character-looking string like "+12345" slip through as a
+        // valid (but wrong) color instead of being rejected.
+        assert!(parse_color("#+12345").is_err());
+        assert!(parse_color("#-12345").is_err());
+        // A genuine 6-digit hex color is unaffected.
+        assert_eq!(parse_color("#A1B2C3").unwrap(), 0xA1B2C3);
+        // Case-insensitivity of hex digits is preserved.
+        assert_eq!(parse_color("#a1b2c3").unwrap(), 0xA1B2C3);
+    }
+
     // --- sanitize_table_name tests ---
 
     #[test]
@@ -329,8 +342,13 @@ mod tests {
     // --- naive_date_to_excel tests ---
 
     #[test]
-    fn test_naive_date_to_excel_epoch() {
-        // Excel epoch is 1899-12-30, so 1900-01-01 = day 2
+    fn test_naive_date_to_excel_epoch_formula() {
+        // The raw epoch-based formula (1899-12-30) returns 2.0 for
+        // 1900-01-01, one more than the real Excel serial (1). This is only
+        // correct from 1900-03-01 (serial 61) onward; see
+        // `test_parse_value_pre_march_1900_falls_back_to_string` for the
+        // caller-facing guard that rejects this range instead of writing an
+        // off-by-one date.
         let date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
         assert_eq!(naive_date_to_excel(date), 2.0);
     }
@@ -340,6 +358,55 @@ mod tests {
         // 2024-01-15 is a known Excel serial date
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         assert_eq!(naive_date_to_excel(date), 45306.0);
+    }
+
+    #[test]
+    fn test_naive_date_to_excel_boundary() {
+        // 1900-03-01 is the first date the epoch-based formula gets right
+        // (serial 61); everything before it is rejected by parse_value.
+        let date = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).unwrap();
+        assert_eq!(naive_date_to_excel(date), 61.0);
+    }
+
+    #[test]
+    fn test_parse_value_pre_march_1900_falls_back_to_string() {
+        // 1900-01-01 previously parsed as serial 2.0, which Excel renders as
+        // 1900-01-02 (one day late) because of the 1900 leap-year bug. It
+        // must now fall back to a string instead of writing a wrong date.
+        let result = parse_value("1900-01-01", DateOrder::Auto);
+        match result {
+            CellValue::String(s) => assert_eq!(s, "1900-01-01"),
+            other => panic!("expected String fallback, got {:?}", other),
+        }
+
+        // 1900-02-28 is the last date affected by the bug; still a string.
+        let result = parse_value("1900-02-28", DateOrder::Auto);
+        match result {
+            CellValue::String(s) => assert_eq!(s, "1900-02-28"),
+            other => panic!("expected String fallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_value_first_correct_1900_date() {
+        // 1900-03-01 (serial 61) is the first date the formula gets right,
+        // so it should parse as a real Date, not fall back to string.
+        let result = parse_value("1900-03-01", DateOrder::Auto);
+        match result {
+            CellValue::Date(v) => assert_eq!(v, 61.0),
+            other => panic!("expected Date(61.0), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_value_modern_date_unaffected() {
+        // Modern dates are well past the 1900-03-01 boundary and must keep
+        // parsing as dates exactly as before.
+        let result = parse_value("2024-01-15", DateOrder::Auto);
+        match result {
+            CellValue::Date(v) => assert_eq!(v, 45306.0),
+            other => panic!("expected Date(45306.0), got {:?}", other),
+        }
     }
 
     // --- DateOrder tests ---
@@ -555,8 +622,38 @@ mod tests {
 
     #[test]
     fn test_naive_date_to_excel_pre_epoch() {
-        // Dates before 1900-01-01 should be treated as strings, not invalid serial numbers
-        let result = super::parse_value("1899-01-01", crate::types::DateOrder::Auto);
-        assert!(matches!(result, crate::types::CellValue::String(_)));
+        // Dates before 1900-03-01 (serial 61) should be treated as strings,
+        // not invalid or off-by-one serial numbers.
+        let result = parse_value("1899-01-01", DateOrder::Auto);
+        assert!(matches!(result, CellValue::String(_)));
+    }
+
+    // --- parse_value whitespace-preservation tests (Fix W5) ---
+
+    #[test]
+    fn test_parse_value_preserves_padded_string() {
+        // Type detection operates on the trimmed text, but a genuine string
+        // fallback must preserve the original, untrimmed value.
+        let result = parse_value(" padded ", DateOrder::Auto);
+        match result {
+            CellValue::String(s) => assert_eq!(s, " padded "),
+            other => panic!("expected String(\" padded \"), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_value_padded_number_still_detected() {
+        // Trimming still applies to type detection: a padded numeric string
+        // is recognized as a number (its numeric value, not text).
+        let result = parse_value(" 123 ", DateOrder::Auto);
+        assert!(matches!(result, CellValue::Integer(123)));
+    }
+
+    #[test]
+    fn test_parse_value_whitespace_only_is_empty() {
+        // Whitespace-only input trims to empty and keeps the existing
+        // empty-cell behavior (CellValue::Empty), not a padded empty string.
+        let result = parse_value("   ", DateOrder::Auto);
+        assert!(matches!(result, CellValue::Empty));
     }
 }

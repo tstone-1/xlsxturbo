@@ -96,3 +96,122 @@ fn invalid_date_order_exits_nonzero_with_message() {
     let _ = fs::remove_file(&csv);
     let _ = fs::remove_file(&xlsx);
 }
+
+#[test]
+fn parallel_flag_exits_zero_and_produces_file() {
+    let csv = temp_path("parallel", "csv");
+    let xlsx = temp_path("parallel", "xlsx");
+    fs::write(&csv, "a,b,c\n1,2,3\n4,5,6\n").unwrap();
+
+    let output = Command::new(bin())
+        .arg(&csv)
+        .arg(&xlsx)
+        .arg("--parallel")
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}",
+        output.status
+    );
+    // Contract: prints "OK {rows} {cols}", same as the non-parallel path.
+    assert!(stdout.starts_with("OK "), "stdout was: {:?}", stdout);
+    assert!(stdout.trim().ends_with("3 3"), "stdout was: {:?}", stdout);
+    assert!(xlsx.exists(), "output xlsx was not created");
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&xlsx);
+}
+
+#[test]
+fn sheet_name_flag_is_respected() {
+    let csv = temp_path("sheetname", "csv");
+    let xlsx = temp_path("sheetname", "xlsx");
+    fs::write(&csv, "a,b\n1,2\n").unwrap();
+
+    let output = Command::new(bin())
+        .arg(&csv)
+        .arg(&xlsx)
+        .arg("--sheet-name")
+        .arg("MySheet")
+        .arg("--verbose")
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}",
+        output.status
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The CLI CSV reader treats every line as data (no header row), so "a,b\n1,2\n"
+    // is 2 rows x 2 cols.
+    assert!(stdout.trim().ends_with("2 2"), "stdout was: {:?}", stdout);
+    // --verbose echoes the sheet name to stderr, giving us a cheap way to
+    // confirm the flag was actually threaded through without adding an
+    // xlsx-reading dependency to the test suite.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Sheet:  MySheet"),
+        "stderr was: {:?}",
+        stderr
+    );
+    assert!(xlsx.exists(), "output xlsx was not created");
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&xlsx);
+}
+
+#[test]
+fn version_flag_prints_crate_version() {
+    let output = Command::new(bin())
+        .arg("--version")
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}",
+        output.status
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = format!("xlsxturbo {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        stdout.trim() == expected,
+        "stdout was: {:?}, expected: {:?}",
+        stdout,
+        expected
+    );
+}
+
+#[test]
+fn non_default_date_order_exits_zero() {
+    let csv = temp_path("dmy", "csv");
+    let xlsx = temp_path("dmy", "xlsx");
+    fs::write(&csv, "a\n01-02-2024\n").unwrap();
+
+    let output = Command::new(bin())
+        .arg(&csv)
+        .arg(&xlsx)
+        .arg("--date-order")
+        .arg("dmy")
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}",
+        output.status
+    );
+    assert!(stdout.starts_with("OK "), "stdout was: {:?}", stdout);
+    // The CLI CSV reader treats every line as data (no header row), so "a\n01-02-2024\n"
+    // is 2 rows x 1 col.
+    assert!(stdout.trim().ends_with("2 1"), "stdout was: {:?}", stdout);
+    assert!(xlsx.exists(), "output xlsx was not created");
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&xlsx);
+}

@@ -11,6 +11,13 @@ pub(crate) fn parse_color(color_str: &str) -> Result<u32, String> {
                 hex.len()
             ));
         }
+        // `u32::from_str_radix` accepts a leading '+' (or '-'), which would
+        // otherwise let a value like "#+12345" slip past the length check
+        // above and parse as a valid color. Require every character to be a
+        // hex digit first.
+        if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!("Invalid hex color: {}", color));
+        }
         u32::from_str_radix(hex, 16).map_err(|_| format!("Invalid hex color: {}", color))
     } else {
         match color.to_lowercase().as_str() {

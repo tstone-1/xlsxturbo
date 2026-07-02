@@ -49,7 +49,7 @@ fn path_arg_to_string(value: &Bound<'_, PyAny>, param_name: &str) -> PyResult<St
         }
     }
     Err(pyo3::exceptions::PyTypeError::new_err(format!(
-        "'{}' must be str or os.PathLike, got {}",
+        "'{}' must be str or a path-like object returning str (bytes paths are not supported), got {}",
         param_name,
         pytype_name(value)
     )))
@@ -212,6 +212,7 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
 #[pyfunction]
 #[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false, date_order = "auto"))]
 fn csv_to_xlsx(
+    py: Python<'_>,
     input_path: &Bound<'_, PyAny>,
     output_path: &Bound<'_, PyAny>,
     sheet_name: &str,
@@ -220,18 +221,23 @@ fn csv_to_xlsx(
 ) -> PyResult<(u32, u16)> {
     let input_path = path_arg_to_string(input_path, "input_path")?;
     let output_path = path_arg_to_string(output_path, "output_path")?;
+    let sheet_name = sheet_name.to_string();
     let order = DateOrder::parse(date_order).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu",
+            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu, european",
             date_order
         ))
     })?;
 
-    let result = if parallel {
-        convert_csv_to_xlsx_parallel(&input_path, &output_path, sheet_name, order)
-    } else {
-        convert_csv_to_xlsx(&input_path, &output_path, sheet_name, order)
-    };
+    // No Python objects are touched below this point, so release the GIL for
+    // the (potentially rayon-parallel) pure-Rust conversion work.
+    let result = py.detach(|| {
+        if parallel {
+            convert_csv_to_xlsx_parallel(&input_path, &output_path, &sheet_name, order)
+        } else {
+            convert_csv_to_xlsx(&input_path, &output_path, &sheet_name, order)
+        }
+    });
     result.map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
@@ -262,7 +268,7 @@ fn csv_to_xlsx(
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
 ///     conditional_formats: Dict mapping column names/patterns to conditional format configs (default: None)
-///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
+///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
 ///     table_name: Custom name for the Excel table (default: auto-generated).
 ///                 Must be alphanumeric/underscore, max 255 chars.
@@ -470,7 +476,7 @@ fn version() -> &'static str {
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
 ///     conditional_formats: Dict mapping column names to conditional format configs (default: None)
-///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set
+///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
 ///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
 ///                      Use {row} as placeholder for the current row number.

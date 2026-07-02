@@ -32,13 +32,17 @@ struct Args {
     /// Date order for ambiguous dates like 01-02-2024
     /// auto: ISO first, then European (DMY), then US (MDY)
     /// mdy/us: US format (01-02-2024 = January 2)
-    /// dmy/eu: European format (01-02-2024 = February 1)
+    /// dmy/eu/european: European format (01-02-2024 = February 1)
     #[arg(short, long, default_value = "auto")]
     date_order: String,
 
     /// Show progress information
     #[arg(short, long)]
     verbose: bool,
+
+    /// Use multi-core parallel processing (faster for large files, uses more memory)
+    #[arg(short, long)]
+    parallel: bool,
 }
 
 fn main() {
@@ -46,7 +50,7 @@ fn main() {
 
     let date_order = DateOrder::parse(&args.date_order).unwrap_or_else(|| {
         eprintln!(
-            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu",
+            "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu, european",
             args.date_order
         );
         std::process::exit(1);
@@ -58,11 +62,23 @@ fn main() {
         eprintln!("Output: {}", args.output);
         eprintln!("Sheet:  {}", args.sheet_name);
         eprintln!("Dates:  {:?}", date_order);
+        eprintln!("Parallel: {}", args.parallel);
     }
 
     let start = Instant::now();
 
-    match xlsxturbo::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order) {
+    let result = if args.parallel {
+        xlsxturbo::convert_csv_to_xlsx_parallel(
+            &args.input,
+            &args.output,
+            &args.sheet_name,
+            date_order,
+        )
+    } else {
+        xlsxturbo::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order)
+    };
+
+    match result {
         Ok((rows, cols)) => {
             if args.verbose {
                 let duration = start.elapsed();

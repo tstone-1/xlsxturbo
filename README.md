@@ -12,7 +12,7 @@ xlsxturbo is built for Python users who need fast `.xlsx` exports without giving
 ## Project Status
 
 - Production-ready for documented DataFrame and CSV export workflows.
-- Tested across Linux, Windows, and macOS on Python 3.9, 3.12, and 3.14 in CI.
+- Tested in CI on Python 3.9 and 3.12 across Linux, Windows, and macOS, plus Python 3.14 on Linux.
 - Versioned with SemVer; breaking API changes require a major version bump.
 - Advanced Excel features are supported through focused parameters rather than a full workbook object model.
 
@@ -557,7 +557,7 @@ df = pd.DataFrame({
     'product': ['Claude', 'Gemini', 'Copilot'],
 })
 
-# Add hyperlinks to a new column (D) after the data columns (A, B, C with header)
+# Add hyperlinks to a new column (C) after the data columns (A, B with header)
 xlsxturbo.df_to_xlsx(df, "companies.xlsx",
     autofit=True,
     hyperlinks=[

@@ -1,7 +1,10 @@
 //! Conditional formatting application helpers.
 
 use crate::parse::{matches_pattern, parse_color, parse_column_format, parse_icon_type};
-use crate::types::{extract_field, pydict_to_hashmap, ConditionalFormatConfigs};
+use crate::types::{
+    extract_field, pydict_to_hashmap, reject_unknown_keys as types_reject_unknown_keys,
+    ConditionalFormatConfigs,
+};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,
@@ -477,6 +480,30 @@ fn apply_cell_conditional(
     Ok(())
 }
 
+/// Reject any config key not in `allowed` for the given (already-resolved)
+/// conditional format type. Unlike `validations`, conditional format configs
+/// are dispatched to one of five type-specific families with disjoint key
+/// sets, so the valid-keys list — and thus the error — is per-type; the
+/// format type is passed to the shared helper as its `qualifier`.
+///
+/// Takes a plain string-key iterator rather than the `HashMap<String,
+/// Py<PyAny>>` config directly, so this — the actual validation policy — is
+/// unit-testable without a Python interpreter (this crate's `cargo test`
+/// does not embed one; only the caller needs the PyO3-typed config).
+fn reject_unknown_keys<'a>(
+    keys: impl Iterator<Item = &'a str>,
+    col_pattern: &str,
+    format_type: &str,
+    allowed: &[&str],
+) -> Result<(), String> {
+    types_reject_unknown_keys(
+        keys,
+        &format!("conditional_formats['{}']", col_pattern),
+        Some(format_type),
+        allowed,
+    )
+}
+
 /// Apply a single conditional format config to a column range.
 /// Dispatches by `type` to a family-specific helper.
 fn apply_single_conditional_format(
@@ -501,51 +528,98 @@ fn apply_single_conditional_format(
         })?;
 
     match format_type.to_lowercase().as_str() {
-        "2_color_scale" | "2colorscale" | "two_color_scale" => apply_2_color_scale(
-            py,
-            worksheet,
-            col_pattern,
-            config,
-            col_idx,
-            data_start_row,
-            data_end_row,
-        ),
-        "3_color_scale" | "3colorscale" | "three_color_scale" => apply_3_color_scale(
-            py,
-            worksheet,
-            col_pattern,
-            config,
-            col_idx,
-            data_start_row,
-            data_end_row,
-        ),
-        "data_bar" | "databar" => apply_data_bar(
-            py,
-            worksheet,
-            col_pattern,
-            config,
-            col_idx,
-            data_start_row,
-            data_end_row,
-        ),
-        "icon_set" | "iconset" => apply_icon_set(
-            py,
-            worksheet,
-            col_pattern,
-            config,
-            col_idx,
-            data_start_row,
-            data_end_row,
-        ),
-        "cell" => apply_cell_conditional(
-            py,
-            worksheet,
-            col_pattern,
-            config,
-            col_idx,
-            data_start_row,
-            data_end_row,
-        ),
+        "2_color_scale" | "2colorscale" | "two_color_scale" => {
+            reject_unknown_keys(
+                config.keys().map(String::as_str),
+                col_pattern,
+                &format_type,
+                &["type", "min_color", "max_color"],
+            )?;
+            apply_2_color_scale(
+                py,
+                worksheet,
+                col_pattern,
+                config,
+                col_idx,
+                data_start_row,
+                data_end_row,
+            )
+        }
+        "3_color_scale" | "3colorscale" | "three_color_scale" => {
+            reject_unknown_keys(
+                config.keys().map(String::as_str),
+                col_pattern,
+                &format_type,
+                &["type", "min_color", "mid_color", "max_color"],
+            )?;
+            apply_3_color_scale(
+                py,
+                worksheet,
+                col_pattern,
+                config,
+                col_idx,
+                data_start_row,
+                data_end_row,
+            )
+        }
+        "data_bar" | "databar" => {
+            reject_unknown_keys(
+                config.keys().map(String::as_str),
+                col_pattern,
+                &format_type,
+                &["type", "bar_color", "border_color", "solid", "direction"],
+            )?;
+            apply_data_bar(
+                py,
+                worksheet,
+                col_pattern,
+                config,
+                col_idx,
+                data_start_row,
+                data_end_row,
+            )
+        }
+        "icon_set" | "iconset" => {
+            reject_unknown_keys(
+                config.keys().map(String::as_str),
+                col_pattern,
+                &format_type,
+                &["type", "icon_type", "reverse", "icons_only"],
+            )?;
+            apply_icon_set(
+                py,
+                worksheet,
+                col_pattern,
+                config,
+                col_idx,
+                data_start_row,
+                data_end_row,
+            )
+        }
+        "cell" => {
+            reject_unknown_keys(
+                config.keys().map(String::as_str),
+                col_pattern,
+                &format_type,
+                &[
+                    "type",
+                    "criteria",
+                    "format",
+                    "value",
+                    "min_value",
+                    "max_value",
+                ],
+            )?;
+            apply_cell_conditional(
+                py,
+                worksheet,
+                col_pattern,
+                config,
+                col_idx,
+                data_start_row,
+                data_end_row,
+            )
+        }
         _ => Err(format!(
             "Unknown conditional format type '{}'. Valid types: \
              2_color_scale, 3_color_scale, data_bar, icon_set, cell",
@@ -593,4 +667,57 @@ pub(crate) fn apply_conditional_formats(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod reject_unknown_keys_tests {
+    use super::reject_unknown_keys;
+
+    /// A typo'd key (e.g. "min_colour" instead of "min_color") must be
+    /// rejected by name, with the valid keys listed for the resolved type.
+    #[test]
+    fn rejects_typo_key_and_names_it() {
+        let keys = ["type", "min_colour"];
+        let err = reject_unknown_keys(
+            keys.into_iter(),
+            "A:A",
+            "2_color_scale",
+            &["type", "min_color", "max_color"],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("unknown option 'min_colour'"),
+            "error should name the bad key: {}",
+            err
+        );
+        assert!(
+            err.contains("min_color") && err.contains("max_color"),
+            "error should list the valid keys: {}",
+            err
+        );
+        assert!(
+            err.contains("A:A") && err.contains("2_color_scale"),
+            "error should include the range and the resolved type: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn accepts_all_valid_keys() {
+        let keys = ["type", "criteria", "value"];
+        assert!(reject_unknown_keys(
+            keys.into_iter(),
+            "B:B",
+            "cell",
+            &[
+                "type",
+                "criteria",
+                "format",
+                "value",
+                "min_value",
+                "max_value"
+            ],
+        )
+        .is_ok());
+    }
 }

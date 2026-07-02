@@ -222,6 +222,45 @@ fn flush_parallel_chunk(
 // DataFrame support
 // ============================================================================
 
+/// Write a single cell value, tracking its content width when requested.
+///
+/// Shared per-cell body used by both the polars and pandas row-writing loops in
+/// `write_sheet_data`: the only difference between those two engines is how a row's
+/// values are obtained, not how each cell is written.
+#[allow(clippy::too_many_arguments)]
+fn write_row_cell(
+    worksheet: &mut Worksheet,
+    row_idx: u32,
+    col_idx: usize,
+    value: &Bound<'_, PyAny>,
+    date_format: &Format,
+    datetime_format: &Format,
+    col_formats: &[Option<Format>],
+    track_widths: bool,
+    max_lens: &mut [usize],
+) -> Result<(), String> {
+    if track_widths {
+        // Char count, not byte count: width is a visual estimate.
+        let len = value
+            .str()
+            .map(|s| s.to_string_lossy().chars().count())
+            .unwrap_or(0);
+        if len > max_lens[col_idx] {
+            max_lens[col_idx] = len;
+        }
+    }
+    let col = col_idx as u16; // safe: col_count already validated via u16::try_from
+    write_py_value_with_format(
+        worksheet,
+        row_idx,
+        col,
+        value,
+        date_format,
+        datetime_format,
+        col_formats.get(col_idx).and_then(|f| f.as_ref()),
+    )
+}
+
 /// Write DataFrame data and apply all features to a worksheet.
 ///
 /// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
@@ -320,25 +359,16 @@ pub(crate) fn write_sheet_data(
                 .map_err(|e| format!("Failed to collect polars row values: {}", e))?;
 
             for (col_idx, value) in row_tuple.iter().enumerate() {
-                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
-                if track_widths {
-                    // Char count, not byte count: width is a visual estimate.
-                    let len = value
-                        .str()
-                        .map(|s| s.to_string_lossy().chars().count())
-                        .unwrap_or(0);
-                    if len > max_lens[col_idx] {
-                        max_lens[col_idx] = len;
-                    }
-                }
-                write_py_value_with_format(
+                write_row_cell(
                     worksheet,
                     row_idx,
-                    col,
+                    col_idx,
                     value,
                     &date_format,
                     &datetime_format,
-                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
+                    &col_formats,
+                    track_widths,
+                    &mut max_lens,
                 )?;
             }
             row_idx = row_idx
@@ -362,26 +392,16 @@ pub(crate) fn write_sheet_data(
                     .get_item(col_idx)
                     .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
 
-                if track_widths {
-                    // Char count, not byte count: width is a visual estimate.
-                    let len = value
-                        .str()
-                        .map(|s| s.to_string_lossy().chars().count())
-                        .unwrap_or(0);
-                    if len > max_lens[col_idx] {
-                        max_lens[col_idx] = len;
-                    }
-                }
-
-                let col = col_idx as u16; // safe: col_count already validated via u16::try_from
-                write_py_value_with_format(
+                write_row_cell(
                     worksheet,
                     row_idx,
-                    col,
+                    col_idx,
                     &value,
                     &date_format,
                     &datetime_format,
-                    col_formats.get(col_idx).and_then(|f| f.as_ref()),
+                    &col_formats,
+                    track_widths,
+                    &mut max_lens,
                 )?;
             }
             row_idx = row_idx

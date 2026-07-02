@@ -109,6 +109,10 @@ class ValidationOptions(TypedDict, total=False):
     - 'whole_number': Integer between min and max
     - 'decimal': Decimal number between min and max
     - 'text_length': Text length between min and max
+
+    For 'whole_number', 'min'/'max' are bounded to the i32 range
+    (-2147483648..=2147483647); a value outside that range raises ValueError
+    naming the field and range, instead of a misleading generic type error.
     """
 
     type: ValidationType  # Required: validation type
@@ -192,7 +196,12 @@ ChartType = Literal[
 ]
 
 class ChartSeriesOptions(TypedDict, total=False):
-    """Options for one chart data series."""
+    """Options for one chart data series.
+
+    Note: 'values_range'/'values'/'data_range' and 'categories_range'/'categories'
+    must include a sheet name (e.g. 'Sheet1!$B$2:$B$10'); a bare range like
+    '$B$2:$B$10' raises ValueError.
+    """
 
     data_range: str  # Alias for values_range
     values_range: str  # Excel range for series values, e.g. 'Sheet1!$B$2:$B$10'
@@ -206,6 +215,10 @@ class ChartOptions(TypedDict, total=False):
     """Options for native Excel charts.
 
     Note: 'type' and either 'data_range'/'values_range' or 'series' are required at runtime.
+    Note: 'values_range'/'values'/'data_range' and 'categories_range'/'categories'
+    must include a sheet name (e.g. 'Sheet1!$B$2:$B$10'); a bare range raises
+    ValueError. This also applies to a chart-level 'categories_range'/'categories'
+    used as the fallback for series that don't specify their own.
     """
 
     type: ChartType
@@ -277,7 +290,21 @@ class CellValueOptions(TypedDict, total=False):
     wrap_text: bool  # Enable text wrapping within cell
 
 class SheetOptions(TypedDict, total=False):
-    """Per-sheet options for dfs_to_xlsx. All fields are optional."""
+    """Per-sheet options for dfs_to_xlsx. All fields are optional.
+
+    For the dict/list-valued options below (column_widths, header_format,
+    column_formats, conditional_formats, formula_columns, merged_ranges,
+    hyperlinks, comments, validations, rich_text, images, checkboxes,
+    textboxes, charts, sparklines, cells): passing an explicitly empty dict/list for a sheet
+    disables that global default for that sheet rather than falling back to
+    it. Omitting the key entirely (or passing None) still falls back to the
+    global default as before.
+
+    A per-sheet `column_widths: {}` combined with `autofit=True` (global or
+    per-sheet) suppresses autofit for that sheet: the mere presence of a
+    `column_widths` dict, even an empty one, selects the explicit-widths code
+    path instead of calling the autofit routine.
+    """
 
     header: bool
     autofit: bool
@@ -321,6 +348,16 @@ def csv_to_xlsx(
             "auto" - ISO first, then European (DMY), then US (MDY).
             "mdy" or "us" - US format: 01-02-2024 = January 2nd.
             "dmy" or "eu" - European format: 01-02-2024 = February 1st.
+
+    Note:
+        String cells preserve surrounding whitespace (e.g. " padded " is
+        written back exactly as given); type detection trims a private copy
+        of the value to classify it, so a whitespace-padded number like
+        " 123 " is still detected and written as a number.
+        Dates before 1900-03-01 cannot be represented as a correct Excel
+        serial number (Excel's 1900 leap-year bug assumes a phantom
+        1900-02-29) and are written as plain text instead; 1900-03-01 is the
+        first date written as a real Excel date.
 
     Returns:
         Tuple of (rows, columns) written to the Excel file.
@@ -370,6 +407,10 @@ def df_to_xlsx(
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
         freeze_panes: Freeze the header row for easier scrolling (default: False).
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
+            An integer key must be a non-negative index within Excel's column range
+            (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
+            key raises. A key beyond the DataFrame's column count is applied to that
+            column anyway (it is no longer silently ignored).
         table_name: Custom name for the Excel table (requires table_style).
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
@@ -399,6 +440,9 @@ def df_to_xlsx(
         validations: Dict mapping column name/pattern to data validation config.
             Types: 'list' (dropdown), 'whole_number', 'decimal', 'text_length'.
             Example: {'Status': {'type': 'list', 'values': ['Open', 'Closed']}}
+            'whole_number' min/max are bounded to the i32 range (-2147483648..=2147483647);
+            a value outside that range raises ValueError naming the field and range,
+            instead of a misleading generic type error.
         rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
             Example: {'A1': [('Bold', {'bold': True}), ' normal text']}
         images: Dict mapping cell refs to image path or ImageOptions.
@@ -413,7 +457,10 @@ def df_to_xlsx(
                         'font': {'name': 'Arial', 'size': 14, 'bold': True, 'color': '#FF0000'},
                         'fill_color': '#F0F0F0', 'line_color': '#000000',
                         'alt_text': 'Descriptive alt text'}}
-        charts: Dict mapping cell refs to native Excel chart configs.
+        charts: Dict mapping cell refs to native Excel chart configs. 'values_range'/'values'/
+            'data_range' and 'categories_range'/'categories' (including a chart-level
+            'categories_range'/'categories' used as a fallback for series without their own)
+            must include a sheet name (e.g. 'Sheet1!$B$2:$B$10'); a bare range raises ValueError.
             Example: {'D2': {'type': 'bar', 'data_range': 'Sheet1!$B$2:$B$10',
                       'categories_range': 'Sheet1!$A$2:$A$10', 'title': 'Monthly Activity'}}
         sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
@@ -427,6 +474,15 @@ def df_to_xlsx(
             Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
             Cells are written after DataFrame data, so they can overwrite existing values.
             Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
+
+    Note:
+        date/datetime values before 1900-03-01 cannot be represented as a
+        correct Excel serial number (Excel's 1900 leap-year bug assumes a
+        phantom 1900-02-29) and are written as plain text instead;
+        1900-03-01 is the first date written as a real Excel date.
+        Subclasses of datetime.datetime/datetime.date (e.g. pandas Timestamp,
+        or a user-defined subclass) in an object-dtype column are written as
+        real Excel datetimes/dates, not as their str() representation.
 
     Returns:
         Tuple of (rows, columns) written to the Excel file.
@@ -470,6 +526,10 @@ def dfs_to_xlsx(
         table_style: Apply Excel table formatting (default: None).
         freeze_panes: Freeze the header row (default: False).
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
+            An integer key must be a non-negative index within Excel's column range
+            (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
+            key raises. A key beyond the DataFrame's column count is applied to that
+            column anyway (it is no longer silently ignored).
         table_name: Custom name for Excel tables (requires table_style).
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
@@ -491,6 +551,9 @@ def dfs_to_xlsx(
             Cell uses Excel notation (e.g., 'A1'). Display text is optional.
         comments: Dict mapping cell refs to comment text or CommentOptions.
         validations: Dict mapping column name/pattern to data validation config.
+            'whole_number' min/max are bounded to the i32 range (-2147483648..=2147483647);
+            a value outside that range raises ValueError naming the field and range,
+            instead of a misleading generic type error.
         rich_text: Dict mapping cell refs to list of (text, format) tuples or plain strings.
         images: Dict mapping cell refs to image path or ImageOptions.
         checkboxes: Dict mapping cell refs to interactive checkboxes.
@@ -499,7 +562,10 @@ def dfs_to_xlsx(
         textboxes: Dict mapping cell refs to floating text shapes.
             Simple form: {'B2': 'text'}
             Dict form: {'B2': {'text': 'Note', 'width': 200, 'font': {'bold': True}}}
-        charts: Dict mapping cell refs to native Excel chart configs.
+        charts: Dict mapping cell refs to native Excel chart configs. 'values_range'/'values'/
+            'data_range' and 'categories_range'/'categories' (including a chart-level
+            fallback used by series without their own) must include a sheet name
+            (e.g. 'Sheet1!$B$2:$B$10'); a bare range raises ValueError.
         sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config.
             Range key (e.g. 'D2:D10') makes a grouped sparkline; single cell makes one.
             'range' must be sheet-qualified, e.g. 'Sheet1!A2:C10'.
@@ -509,6 +575,15 @@ def dfs_to_xlsx(
         cells: Dict mapping cell refs to values for arbitrary cell writes.
             Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
             Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
+
+    Note:
+        date/datetime values before 1900-03-01 cannot be represented as a
+        correct Excel serial number (Excel's 1900 leap-year bug assumes a
+        phantom 1900-02-29) and are written as plain text instead;
+        1900-03-01 is the first date written as a real Excel date.
+        Subclasses of datetime.datetime/datetime.date in an object-dtype
+        column are written as real Excel datetimes/dates, not as their
+        str() representation.
 
     Returns:
         List of (rows, columns) tuples, one per written sheet.

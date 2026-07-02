@@ -1,7 +1,9 @@
 //! Data validation application helpers.
 
 use crate::parse::matches_pattern;
-use crate::types::{extract_field, ValidationConfig};
+use crate::types::{
+    extract_field, pytype_name, reject_unknown_keys as types_reject_unknown_keys, ValidationConfig,
+};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{DataValidation, DataValidationErrorStyle, Worksheet};
@@ -23,24 +25,44 @@ fn validation_string_field(
     )
 }
 
+/// Delegates to the shared `types::reject_unknown_keys` (no behavior change:
+/// no qualifier, same "unknown option ... Valid: ..." phrasing this already
+/// used).
 fn reject_unknown_keys(
     config: &ValidationConfig,
     col_pattern: &str,
     allowed: &[&str],
 ) -> Result<(), String> {
-    for key in config.keys() {
-        if !allowed.contains(&key.as_str()) {
-            return Err(format!(
-                "validations['{}']: unknown option '{}'. Valid: {}",
-                col_pattern,
-                key,
-                allowed.join(", ")
-            ));
-        }
-    }
-    Ok(())
+    types_reject_unknown_keys(
+        config.keys().map(String::as_str),
+        &format!("validations['{}']", col_pattern),
+        None,
+        allowed,
+    )
 }
 
+/// Every validation type accepts `type` plus the shared input/error
+/// title/message keys; only the type-specific keys (e.g. `values`, or
+/// `min`/`max`) differ. Combine them here instead of indexing into a shared
+/// keys array positionally at each call site.
+fn keys_with(extra: &[&'static str]) -> Vec<&'static str> {
+    let mut keys = vec!["type"];
+    keys.extend_from_slice(extra);
+    keys.extend_from_slice(&[
+        "input_title",
+        "input_message",
+        "error_title",
+        "error_message",
+    ]);
+    keys
+}
+
+/// Extract an `i32` field for `whole_number` validation's `min`/`max`.
+/// rust_xlsxwriter's whole-number validation is bounded to the `i32` range;
+/// a Python int outside it (e.g. `3_000_000_000`) previously surfaced as the
+/// generic "'max' must be an integer, got int" — misleading, since it *is*
+/// an integer, just out of range for this validation type. Distinguish that
+/// case from an actual type mismatch.
 fn validation_i32_field(
     py: Python<'_>,
     config: &ValidationConfig,
@@ -48,14 +70,48 @@ fn validation_i32_field(
     key: &str,
     default: i32,
 ) -> Result<i32, String> {
-    Ok(extract_field(
-        py,
-        config.get(key),
-        &format!("validations['{}']", col_pattern),
+    let Some(entry) = config.get(key) else {
+        return Ok(default);
+    };
+    let bound = entry.bind(py);
+    if bound.is_none() {
+        return Ok(default);
+    }
+    if let Ok(v) = bound.extract::<i32>() {
+        return Ok(v);
+    }
+    if let Ok(v) = bound.extract::<i64>() {
+        return Err(format!(
+            "validations['{}']: '{}' must be within the i32 range ({}..={}) for \
+             whole_number validation, got {}",
+            col_pattern,
+            key,
+            i32::MIN,
+            i32::MAX,
+            v
+        ));
+    }
+    // A Python int too large even for i64 (e.g. 2**70) still needs the
+    // i32-range message, not the misleading generic "must be an integer"
+    // fallback below (it *is* an integer, just wildly out of range). The
+    // value itself may be too large to embed cleanly, so the message omits
+    // it rather than reaching for `str()`.
+    if bound.is_instance_of::<pyo3::types::PyInt>() {
+        return Err(format!(
+            "validations['{}']: '{}' must be within the i32 range ({}..={}) for \
+             whole_number validation, got an out-of-range integer",
+            col_pattern,
+            key,
+            i32::MIN,
+            i32::MAX
+        ));
+    }
+    Err(format!(
+        "validations['{}']: '{}' must be an integer, got {}",
+        col_pattern,
         key,
-        "an integer",
-    )?
-    .unwrap_or(default))
+        pytype_name(bound)
+    ))
 }
 
 fn validation_u32_field(
@@ -123,28 +179,9 @@ pub(crate) fn apply_validations(
             .map_err(|e| format!("validations['{}']: invalid 'type': {}", col_pattern, e))?;
 
         for col_idx in col_indices {
-            const MESSAGE_KEYS: &[&str] = &[
-                "type",
-                "input_title",
-                "input_message",
-                "error_title",
-                "error_message",
-            ];
-
             let validation = match val_type.to_lowercase().as_str() {
                 "list" => {
-                    reject_unknown_keys(
-                        config,
-                        col_pattern,
-                        &[
-                            MESSAGE_KEYS[0],
-                            "values",
-                            MESSAGE_KEYS[1],
-                            MESSAGE_KEYS[2],
-                            MESSAGE_KEYS[3],
-                            MESSAGE_KEYS[4],
-                        ],
-                    )?;
+                    reject_unknown_keys(config, col_pattern, &keys_with(&["values"]))?;
                     // List validation: dropdown with values
                     let values: Vec<String> = config
                         .get("values")
@@ -179,19 +216,7 @@ pub(crate) fn apply_validations(
                         .map_err(|e| format!("Failed to create list validation: {}", e))?
                 }
                 "whole_number" | "whole" | "integer" => {
-                    reject_unknown_keys(
-                        config,
-                        col_pattern,
-                        &[
-                            MESSAGE_KEYS[0],
-                            "min",
-                            "max",
-                            MESSAGE_KEYS[1],
-                            MESSAGE_KEYS[2],
-                            MESSAGE_KEYS[3],
-                            MESSAGE_KEYS[4],
-                        ],
-                    )?;
+                    reject_unknown_keys(config, col_pattern, &keys_with(&["min", "max"]))?;
                     // Whole number validation with between rule
                     let min = validation_i32_field(py, config, col_pattern, "min", i32::MIN)?;
                     let max = validation_i32_field(py, config, col_pattern, "max", i32::MAX)?;
@@ -199,19 +224,7 @@ pub(crate) fn apply_validations(
                         .allow_whole_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
                 }
                 "decimal" | "number" => {
-                    reject_unknown_keys(
-                        config,
-                        col_pattern,
-                        &[
-                            MESSAGE_KEYS[0],
-                            "min",
-                            "max",
-                            MESSAGE_KEYS[1],
-                            MESSAGE_KEYS[2],
-                            MESSAGE_KEYS[3],
-                            MESSAGE_KEYS[4],
-                        ],
-                    )?;
+                    reject_unknown_keys(config, col_pattern, &keys_with(&["min", "max"]))?;
                     // Decimal validation with between rule
                     let min = validation_f64_field(py, config, col_pattern, "min", f64::MIN)?;
                     let max = validation_f64_field(py, config, col_pattern, "max", f64::MAX)?;
@@ -220,19 +233,7 @@ pub(crate) fn apply_validations(
                     )
                 }
                 "text_length" | "textlength" | "length" => {
-                    reject_unknown_keys(
-                        config,
-                        col_pattern,
-                        &[
-                            MESSAGE_KEYS[0],
-                            "min",
-                            "max",
-                            MESSAGE_KEYS[1],
-                            MESSAGE_KEYS[2],
-                            MESSAGE_KEYS[3],
-                            MESSAGE_KEYS[4],
-                        ],
-                    )?;
+                    reject_unknown_keys(config, col_pattern, &keys_with(&["min", "max"]))?;
                     // Text length validation with between rule
                     let min = validation_u32_field(py, config, col_pattern, "min", 0)?;
                     let max = validation_u32_field(py, config, col_pattern, "max", u32::MAX)?;

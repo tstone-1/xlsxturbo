@@ -34,10 +34,14 @@ pub(crate) fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
     for pattern in DATETIME_PATTERNS {
         if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, pattern) {
             let excel_dt = naive_datetime_to_excel(dt);
-            // Excel doesn't support dates before 1900-01-01;
-            // negative/zero serial numbers render as ##### in Excel
-            if excel_dt <= 0.0 {
-                return CellValue::String(trimmed.to_string());
+            // Dates before 1900-03-01 (serial 61) can't be represented
+            // correctly: Excel's serial numbering assumes a phantom
+            // 1900-02-29 that never existed, so `naive_date_to_excel`'s
+            // epoch-based formula is one day ahead of the real Excel
+            // serial for any date in Jan/Feb 1900. Fall back to string
+            // rather than write a date that renders one day late.
+            if excel_dt < 61.0 {
+                return CellValue::String(value.to_string());
             }
             return CellValue::DateTime(excel_dt);
         }
@@ -47,20 +51,30 @@ pub(crate) fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
     for pattern in date_order.patterns() {
         if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, pattern) {
             let excel_date = naive_date_to_excel(date);
-            // Excel doesn't support dates before 1900-01-01 (serial 1);
-            // negative/zero serial numbers render as ##### in Excel
-            if excel_date <= 0.0 {
-                return CellValue::String(trimmed.to_string());
+            // See the comment on the datetime branch above: dates before
+            // 1900-03-01 (serial 61) can't be represented correctly because
+            // of Excel's 1900 leap-year bug, so fall back to string.
+            if excel_date < 61.0 {
+                return CellValue::String(value.to_string());
             }
             return CellValue::Date(excel_date);
         }
     }
 
-    // Default to string
-    CellValue::String(trimmed.to_string())
+    // Default to string. Use the original (untrimmed) value so leading/
+    // trailing whitespace on genuine string cells is preserved; `trimmed`
+    // is only used above for type detection.
+    CellValue::String(value.to_string())
 }
 
-/// Convert NaiveDate to Excel serial date number
+/// Convert NaiveDate to Excel serial date number.
+///
+/// The epoch used here (1899-12-30) only produces the correct Excel serial
+/// for dates on or after 1900-03-01 (serial 61). Excel's serial numbering
+/// assumes a phantom leap day, 1900-02-29, that never actually existed, so
+/// for any date before 1900-03-01 this formula returns a value one day
+/// ahead of what Excel would show. Callers that accept arbitrary dates
+/// must reject results below serial 61 rather than write them as dates.
 pub(crate) fn naive_date_to_excel(date: chrono::NaiveDate) -> f64 {
     // Excel epoch is December 30, 1899 (accounting for the 1900 leap year bug)
     // SAFETY: constant date literal, always valid
