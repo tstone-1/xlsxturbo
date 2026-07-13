@@ -4,7 +4,7 @@
 
 use clap::Parser;
 use std::time::Instant;
-use xlsxturbo::DateOrder;
+use xlsxturbo_core::DateOrder;
 
 #[derive(Parser, Debug)]
 #[command(name = "xlsxturbo")]
@@ -68,14 +68,14 @@ fn main() {
     let start = Instant::now();
 
     let result = if args.parallel {
-        xlsxturbo::convert_csv_to_xlsx_parallel(
+        xlsxturbo_core::convert_csv_to_xlsx_parallel(
             &args.input,
             &args.output,
             &args.sheet_name,
             date_order,
         )
     } else {
-        xlsxturbo::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order)
+        xlsxturbo_core::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order)
     };
 
     match result {

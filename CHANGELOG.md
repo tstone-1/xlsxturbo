@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-07-13
+
+### Fixed
+- Multi-sheet exports reject duplicate effective Excel table names before writing the conflicting sheet, including collisions introduced by sanitization or case differences.
+- Column formats, conditional formats, and validations reject patterns that match no columns instead of silently omitting requested behavior; column-format dictionaries are validated before target resolution.
+- Sheet, merged-range, hyperlink, and rich-text tuples reject surplus elements instead of silently discarding them.
+- The internal Rust library target has a distinct name, so Windows builds no longer produce colliding library/CLI PDB paths; the Cargo package, Python module, and CLI remain `xlsxturbo`.
+
+### Changed
+- Local uv development is pinned to Python 3.14.6, and BUILD.md consistently uses uv commands.
+- CLI documentation includes parallel mode; historical Windows benchmark numbers are explicitly labeled as non-comparable because dispersion was not captured.
+
 ## [0.17.0] - 2026-07-02
 
 ### Added

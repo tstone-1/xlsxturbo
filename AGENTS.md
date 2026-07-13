@@ -28,6 +28,10 @@
 - Plain `cargo test` must work outside maturin. Keep `pyo3/extension-module` enabled through `pyproject.toml` / maturin, not directly in `Cargo.toml`.
 - Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
+- If multiple version-bump commits are awaiting release, tag each released version at its own commit; do not collapse distinct versions into one tag.
+- Linux release wheels intentionally use `manylinux_2_28` with maturin's `--find-interpreter` and PyO3 `abi3-py39`. Do not switch back to automatic manylinux selection without verifying Python 3.9+ abi3 wheels.
+- The release workflow must smoke-test the built Linux, Windows, and macOS wheels before publishing to PyPI.
+- For multi-phase implementation work, run a deep diff review after each completed, verified phase before building the next phase on top of it.
 
 ## Adding a Feature - the 7-Touchpoint Checklist
 
@@ -59,3 +63,6 @@ Scoping notes (intentional, do not "fix" by widening):
 - The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the README performance table and `--json` for machine-readable output.
 - The parallel CSV conversion suite is `benchmarks/benchmark_parallel.py`.
 - README performance numbers are system-specific and should identify the machine, OS, Python version, and run methodology.
+- Keep comparisons reproducible and fair: seed generated data, use native-fast dtypes for every compared library, perform warmup runs, report medians and standard deviations, and keep both benchmark suites methodologically aligned.
+- Prefer honest, reproducible results over flattering headline numbers, including when a fairer method reduces the reported speedup.
+- Generate measured documentation claims (benchmark results, variance, counts, and similar values) from their source script when practical; avoid hand-maintained factoids that silently become stale.

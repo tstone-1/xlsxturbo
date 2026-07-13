@@ -167,7 +167,10 @@ pub(crate) fn apply_validations(
             .collect();
 
         if col_indices.is_empty() {
-            continue;
+            return Err(format!(
+                "validations['{}']: pattern matched no columns",
+                col_pattern
+            ));
         }
 
         // Get validation type

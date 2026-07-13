@@ -1,6 +1,6 @@
 [package]
 name = "xlsxturbo"
-version = "0.17.0"
+version = "0.17.1"
 edition = "2021"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 license = "MIT"
@@ -9,7 +9,7 @@ keywords = ["excel", "xlsx", "csv", "converter", "performance"]
 categories = ["command-line-utilities", "encoding"]
 
 [lib]
-name = "xlsxturbo"
+name = "xlsxturbo_core"
 crate-type = ["cdylib", "rlib"]
 
 [features]

@@ -54,7 +54,7 @@ pub(crate) fn apply_images(
 
         // Apply options if provided
         if let Some(opts) = &config.options {
-            const IMAGE_KEYS: &[&str] = &["path", "scale_width", "scale_height", "alt_text"];
+            const IMAGE_KEYS: &[&str] = &["scale_width", "scale_height", "alt_text"];
             for key in opts.keys() {
                 if !IMAGE_KEYS.contains(&key.as_str()) {
                     return Err(format!(

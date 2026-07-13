@@ -30,6 +30,7 @@ use extract::{
     extract_rich_text, extract_sheet_info, extract_sparklines, extract_textboxes,
     extract_validations,
 };
+use parse::sanitize_table_name;
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
@@ -466,7 +467,8 @@ fn version() -> &'static str {
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
 ///     column_widths: Dict mapping column index or "_all" to width in characters (default: None)
 ///                    Example: {0: 20, "_all": 50} sets col A to 20, caps others at 50
-///     table_name: Name for Excel table (default: auto-generated)
+///     table_name: Name for Excel table (default: auto-generated). Effective names
+///         must be unique across the workbook after sanitization.
 ///     header_format: Dict with header cell formatting options (default: None)
 ///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
@@ -586,6 +588,7 @@ fn dfs_to_xlsx<'py>(
     let output_path = path_arg_to_string(output_path, "output_path")?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
+    let mut table_names: HashMap<String, String> = HashMap::new();
 
     let opts = extract_options(&RawOptions {
         column_widths,
@@ -624,6 +627,19 @@ fn dfs_to_xlsx<'py>(
             .or_else(|| table_name.clone());
         let effective_row_heights: Option<&HashMap<u32, f64>> =
             sheet_config.row_heights.as_ref().or(row_heights.as_ref());
+
+        if !constant_memory && effective_header && effective_table_style.is_some() {
+            if let Some(name) = effective_table_name.as_deref() {
+                let sanitized = sanitize_table_name(name);
+                let key = sanitized.to_ascii_lowercase();
+                if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
+                        sanitized, previous_sheet, sheet_name
+                    )));
+                }
+            }
+        }
 
         // Merge per-sheet complex options with global defaults (references, no cloning needed)
         let effective_opts = sheet_config.merge_with(&opts);

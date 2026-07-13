@@ -69,6 +69,16 @@ class TestErrorPaths:
         with pytest.raises(TypeError, match=r"column_formats.*expected dict"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_formats={"A": "bold"})  # type: ignore[arg-type]  # value must be a dict
 
+    def test_column_format_pattern_must_match(self, tmp_xlsx: str) -> None:
+        """Column format patterns that match no columns raise an error."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError, match=r"column_formats.*Missing.*matched no columns"):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                column_formats={"Missing": {"bold": True}},
+            )
+
     def test_invalid_rich_text_segment_raises_error(self, tmp_xlsx: str) -> None:
         """Invalid rich_text segment (not string or tuple) raises clear error."""
         df = pd.DataFrame({"A": [1]})
@@ -117,6 +127,16 @@ class TestErrorPaths:
         with pytest.raises(TypeError, match=r"merged_ranges.*format must be a dict"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, merged_ranges=[("A1:B1", "Title", "bold")])  # type: ignore[arg-type]  # tuple format must be a dict
 
+    def test_merged_range_tuple_rejects_extra_items(self, tmp_xlsx: str) -> None:
+        """Merged-range tuples require their documented exact arity."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError, match="exactly 2 or 3 elements"):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                merged_ranges=[("A1:B1", "Title", {"bold": True}, "ignored")],  # type: ignore[list-item]
+            )
+
     def test_wrong_type_hyperlinks_raises_error(self, tmp_xlsx: str) -> None:
         """Passing a dict instead of list for hyperlinks raises TypeError."""
         df = pd.DataFrame({"A": [1]})
@@ -126,11 +146,31 @@ class TestErrorPaths:
         assert "expected list" in message.lower()
         assert "hyperlinks" in message
 
+    def test_hyperlink_tuple_rejects_extra_items(self, tmp_xlsx: str) -> None:
+        """Hyperlink tuples require their documented exact arity."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError, match="exactly 2 or 3 elements"):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                hyperlinks=[("A1", "https://example.com", "Example", "ignored")],  # type: ignore[list-item]
+            )
+
     def test_invalid_rich_text_not_list_raises_error(self, tmp_xlsx: str) -> None:
         """Invalid rich_text value (not a list) raises clear error."""
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(TypeError, match="expected list"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={"A1": "not_a_list"})  # type: ignore[arg-type]  # value must be a list
+
+    def test_rich_text_tuple_rejects_extra_items(self, tmp_xlsx: str) -> None:
+        """Rich-text segment tuples require exactly text and format."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError, match="tuple must have exactly 2 elements"):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                rich_text={"A1": [("Bold", {"bold": True}, "ignored")]},  # type: ignore[list-item]
+            )
 
     def test_dfs_to_xlsx_per_sheet_invalid_dict_option_raises(self, tmp_xlsx: str) -> None:
         """Per-sheet dict options reject wrong container types."""
@@ -162,6 +202,13 @@ class TestErrorPaths:
         # the third tuple item must be a dict; a str is intentionally invalid.
         bad_sheets = [(df, "Sheet1", "not_a_dict")]
         with pytest.raises(TypeError, match="Sheet options must be a dict"):
+            xlsxturbo.dfs_to_xlsx(bad_sheets, tmp_xlsx)  # type: ignore[arg-type]
+
+    def test_dfs_to_xlsx_sheet_tuple_rejects_extra_items(self, tmp_xlsx: str) -> None:
+        """Sheet tuples require their documented two- or three-item shape."""
+        df = pd.DataFrame({"A": [1]})
+        bad_sheets = [(df, "Sheet1", {}, "ignored")]
+        with pytest.raises(ValueError, match="exactly 2 or 3 elements"):
             xlsxturbo.dfs_to_xlsx(bad_sheets, tmp_xlsx)  # type: ignore[arg-type]
 
     def test_dfs_to_xlsx_per_sheet_unknown_option_raises(self, tmp_xlsx: str) -> None:

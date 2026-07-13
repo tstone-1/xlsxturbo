@@ -143,9 +143,12 @@ pub(crate) fn extract_sheet_info<'py>(
 ) -> PyResult<(Bound<'py, PyAny>, String, SheetConfig)> {
     let len: usize = sheet_tuple.len()?;
 
-    if len < 2 {
+    if !(2..=3).contains(&len) {
         return Err(pyo3::exceptions::PyValueError::new_err(
-            "Sheet tuple must have at least 2 elements: (df, sheet_name)",
+            format!(
+                "Sheet tuple must have exactly 2 or 3 elements, got {}: (df, sheet_name[, options_dict])",
+                len
+            ),
         ));
     }
 
@@ -406,10 +409,11 @@ pub(crate) fn extract_merged_ranges(
 
     for item in py_list.iter() {
         let tuple_len = item.len()?;
-        if tuple_len < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "merged_ranges tuple must have at least 2 elements: (range, text)",
-            ));
+        if !(2..=3).contains(&tuple_len) {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "merged_ranges tuple must have exactly 2 or 3 elements, got {}",
+                tuple_len
+            )));
         }
 
         let range_str: String = item.get_item(0)?.extract()?;
@@ -448,10 +452,11 @@ pub(crate) fn extract_hyperlinks(
 
     for item in py_list.iter() {
         let tuple_len = item.len()?;
-        if tuple_len < 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "hyperlinks tuple must have at least 2 elements: (cell_ref, url)",
-            ));
+        if !(2..=3).contains(&tuple_len) {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "hyperlinks tuple must have exactly 2 or 3 elements, got {}",
+                tuple_len
+            )));
         }
 
         let cell_ref: String = item.get_item(0)?.extract()?;
@@ -555,24 +560,28 @@ pub(crate) fn extract_rich_text(
             for (idx, item) in list.iter().enumerate() {
                 // Check if item is a tuple (text, format_dict) or just a string
                 if let Ok(tuple) = item.cast::<pyo3::types::PyTuple>() {
+                    if tuple.len() != 2 {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "rich_text['{}']: segment {} tuple must have exactly 2 elements, got {}",
+                            cell_str,
+                            idx,
+                            tuple.len()
+                        )));
+                    }
                     let text: String = tuple.get_item(0)?.extract()?;
-                    let format_dict = if tuple.len() >= 2 {
-                        let fmt_item = tuple.get_item(1)?;
-                        if fmt_item.is_none() {
-                            None
-                        } else {
-                            let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
-                                pyo3::exceptions::PyTypeError::new_err(format!(
-                                    "rich_text['{}']: segment {} format must be a dict, got {}",
-                                    cell_str,
-                                    idx,
-                                    pytype_name(&fmt_item)
-                                ))
-                            })?;
-                            Some(pydict_to_hashmap(dict)?)
-                        }
-                    } else {
+                    let fmt_item = tuple.get_item(1)?;
+                    let format_dict = if fmt_item.is_none() {
                         None
+                    } else {
+                        let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
+                            pyo3::exceptions::PyTypeError::new_err(format!(
+                                "rich_text['{}']: segment {} format must be a dict, got {}",
+                                cell_str,
+                                idx,
+                                pytype_name(&fmt_item)
+                            ))
+                        })?;
+                        Some(pydict_to_hashmap(dict)?)
                     };
                     segments.push((text, format_dict));
                 } else if let Ok(text) = item.extract::<String>() {

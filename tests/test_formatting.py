@@ -249,6 +249,17 @@ class TestTableName:
         assert len(ws.tables) == 0
         wb.close()
 
+    def test_duplicate_global_table_name_raises_before_save(self, tmp_xlsx: str) -> None:
+        """Reject a global table name reused by multiple table-bearing sheets."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError, match=r"Duplicate table name.*Sheet1.*Sheet2"):
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Sheet1"), (df, "Sheet2")],
+                tmp_xlsx,
+                table_style="Medium2",
+                table_name="Shared Table",
+            )
+
 
 class TestHeaderFormat:
     """Tests for header_format parameter."""
@@ -412,9 +423,10 @@ class TestRowHeights:
         wb.close()
 
     def test_row_heights_ignored_in_constant_memory(self, tmp_xlsx: str) -> None:
-        """Silently ignore row heights in constant memory mode."""
+        """Warn and ignore row heights in constant memory mode."""
         df = pd.DataFrame({"A": [1]})
-        xlsxturbo.df_to_xlsx(df, tmp_xlsx, constant_memory=True, row_heights={0: 50})
+        with pytest.warns(RuntimeWarning, match="row_heights"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, constant_memory=True, row_heights={0: 50})
         assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)

@@ -118,3 +118,13 @@ class TestValidations:
         # Should have validations on the score columns
         assert len(ws.data_validations.dataValidation) > 0
         wb.close()
+
+    def test_validation_pattern_must_match(self, tmp_xlsx: str) -> None:
+        """Validation patterns that match no columns raise an error."""
+        df = pd.DataFrame({"Score": [85]})
+        with pytest.raises(ValueError, match=r"validations.*Missing.*matched no columns"):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                validations={"Missing": {"type": "whole_number", "min": 0, "max": 100}},
+            )

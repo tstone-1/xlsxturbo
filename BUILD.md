@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - Rust toolchain (stable): https://rustup.rs/
-- Python 3.9+
-- maturin: `pip install maturin`
+- Python 3.9+ (Python 3.14.6 is pinned for local development)
+- uv: https://docs.astral.sh/uv/
 
 ## Local Development
 
@@ -15,10 +15,9 @@
 git clone https://github.com/tstone-1/xlsxturbo.git
 cd xlsxturbo
 
-# Install in development mode
-pip install -e ".[dev]"
-# Or with maturin:
-maturin develop --release
+# Create/sync the pinned environment and build the extension
+uv sync --extra dev
+uv run maturin develop --release
 ```
 
 ### Running Tests
@@ -28,7 +27,7 @@ maturin develop --release
 cargo test
 
 # Python integration tests
-pytest tests/
+uv run pytest tests/
 ```
 
 ### Code Quality Checks
@@ -59,19 +58,19 @@ cargo clippy -- -D warnings
 cargo test
 
 # 4. Build release
-maturin develop --release
+uv run maturin develop --release
 
 # 5. Python tests
-pytest tests/
+uv run pytest tests/
 
 # 6. Ruff (Python lint)
-ruff check python tests benchmarks
+uv run ruff check python tests benchmarks
 
 # 7. Bandit (Python security)
-bandit -c pyproject.toml -r python
+uv run bandit -c pyproject.toml -r python
 
 # 8. Pyright (Python types)
-pyright
+uv run pyright
 ```
 
 All 8 steps must succeed before pushing.
@@ -157,7 +156,7 @@ After pushing the tag:
 
 1. Go to: https://pypi.org/project/xlsxturbo/
 2. Verify new version appears
-3. Test installation: `pip install xlsxturbo==X.Y.Z`
+3. Test installation in a disposable environment: `uv run --with xlsxturbo==X.Y.Z python -c "import xlsxturbo; print(xlsxturbo.__version__)"`
 
 ## Troubleshooting
 
@@ -187,9 +186,9 @@ cargo clippy -- -D warnings
 If changes aren't reflected after `maturin develop`:
 
 ```bash
-# Uninstall and reinstall
-pip uninstall xlsxturbo -y
-pip install .
+# Resync and rebuild the editable extension
+uv sync --extra dev
+uv run maturin develop --release
 ```
 
 ## GitHub Actions Summary

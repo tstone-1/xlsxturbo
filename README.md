@@ -233,6 +233,8 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 ```
 
 > **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, and `sparklines`.
+>
+> Column patterns in `column_formats`, `conditional_formats`, and `validations` must match at least one DataFrame column. A zero-match exact name or wildcard raises `ValueError` instead of silently omitting the requested behavior.
 
 ### Column Formatting
 
@@ -1142,6 +1144,7 @@ xlsxturbo input.csv output.xlsx [OPTIONS]
   - `auto`: ISO first, then European, then US
   - `mdy` or `us`: US format (01-02-2024 = January 2)
   - `dmy` or `eu`: European format (01-02-2024 = February 1)
+- `-p, --parallel`: Use multi-core CSV processing (faster for large files, uses more memory)
 - `-v, --verbose`: Show progress information
 
 ### Examples
@@ -1163,7 +1166,9 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 
 *All libraries use default settings; outputs differ in styling (e.g. polars auto-sizes columns and bolds headers by default, while xlsxturbo writes bare cells unless asked).*
 
-### Windows 11 / AMD Ryzen 9
+### Historical Windows 11 / AMD Ryzen 9
+
+*Historical result retained for reference. Dispersion and output-size measurements were not captured, so this table is not directly comparable to the current reproducible benchmark below.*
 
 | Library | Time (s) | Rows/sec | vs xlsxturbo |
 |---------|----------|----------|--------------|
@@ -1172,7 +1177,7 @@ xlsxturbo sales.csv report.xlsx -d eu -v --sheet-name "Q4 Sales"
 | pandas + xlsxwriter | 27.66 | 3,615 | 5.8x |
 | pandas + openpyxl | 35.36 | 2,828 | 7.4x |
 
-*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads). Median of 3 runs after warmup.*
+*Test system: Windows 11, Python 3.14, AMD Ryzen 9 (32 threads). Median of 3 runs after warmup; standard deviation was not recorded.*
 
 ### macOS / MacBook
 

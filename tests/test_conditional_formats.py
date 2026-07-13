@@ -139,6 +139,19 @@ class TestConditionalFormatting:
         assert len(ws.conditional_formatting) >= 1
         wb.close()
 
+    def test_conditional_format_pattern_must_match(self, tmp_xlsx: str) -> None:
+        """Conditional-format patterns that match no columns raise an error."""
+        df = pd.DataFrame({"Score": [10]})
+        with pytest.raises(
+            ValueError,
+            match=r"conditional_formats.*Missing.*matched no columns",
+        ):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                conditional_formats={"Missing": {"type": "data_bar"}},
+            )
+
 
 class TestCellConditionalFormat:
     """Tests for rule-based conditional formatting (v0.12.0)."""

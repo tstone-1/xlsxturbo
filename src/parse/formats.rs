@@ -318,14 +318,30 @@ pub(crate) fn build_column_formats(
     columns: &[String],
     column_formats: &IndexMap<String, HashMap<String, Py<PyAny>>>,
 ) -> Result<Vec<Option<Format>>, String> {
+    let mut parsed_formats = Vec::with_capacity(column_formats.len());
+    for (pattern, fmt_dict) in column_formats {
+        let format = parse_column_format(py, fmt_dict)
+            .map_err(|e| format!("column_formats['{}']: {}", pattern, e))?;
+        if !columns
+            .iter()
+            .any(|column| matches_pattern(column, pattern))
+        {
+            return Err(format!(
+                "column_formats['{}']: pattern matched no columns",
+                pattern
+            ));
+        }
+        parsed_formats.push((pattern, format));
+    }
+
     let mut formats = Vec::with_capacity(columns.len());
 
     for col_name in columns {
         // Find the first matching pattern (order preserved by IndexMap)
-        let mut matched_format: Option<Format> = None;
-        for (pattern, fmt_dict) in column_formats {
+        let mut matched_format = None;
+        for (pattern, format) in &parsed_formats {
             if matches_pattern(col_name, pattern) {
-                matched_format = Some(parse_column_format(py, fmt_dict)?);
+                matched_format = Some(format.clone());
                 break;
             }
         }

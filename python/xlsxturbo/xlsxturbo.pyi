@@ -412,6 +412,7 @@ def df_to_xlsx(
             key raises. A key beyond the DataFrame's column count is applied to that
             column anyway (it is no longer silently ignored).
         table_name: Custom name for the Excel table (requires table_style).
+            Effective table names must be unique across the workbook after sanitization.
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
@@ -423,8 +424,10 @@ def df_to_xlsx(
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             First matching pattern wins (order preserved).
+            Every pattern must match at least one column or ValueError is raised.
         conditional_formats: Dict mapping column names to conditional format configs.
             Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'.
+            Every name or pattern must match at least one column.
             Example: {'score': {'type': '2_color_scale', 'min_color': '#FF0000', 'max_color': '#00FF00'}}
         formula_columns: Dict mapping new column names to Excel formula templates.
             Use {row} placeholder for the current row number (1-based Excel row).
@@ -438,6 +441,7 @@ def df_to_xlsx(
         comments: Dict mapping cell refs to comment text or CommentOptions.
             Example: {'A1': 'Simple note'} or {'A1': {'text': 'Note', 'author': 'John'}}
         validations: Dict mapping column name/pattern to data validation config.
+            Every name or pattern must match at least one column.
             Types: 'list' (dropdown), 'whole_number', 'decimal', 'text_length'.
             Example: {'Status': {'type': 'list', 'values': ['Open', 'Closed']}}
             'whole_number' min/max are bounded to the i32 range (-2147483648..=2147483647);
@@ -530,7 +534,8 @@ def dfs_to_xlsx(
             (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
             key raises. A key beyond the DataFrame's column count is applied to that
             column anyway (it is no longer silently ignored).
-        table_name: Custom name for Excel tables (requires table_style).
+        table_name: Custom name for Excel tables (requires table_style). Effective
+            table names must be unique across the workbook after sanitization.
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode (default: False).
@@ -541,8 +546,10 @@ def dfs_to_xlsx(
             header_format, and column_formats remain supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
+            Every pattern must match at least one column or ValueError is raised.
         conditional_formats: Dict mapping column names to conditional format configs.
             Supported types: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'.
+            Every name or pattern must match at least one column.
         formula_columns: Dict mapping new column names to Excel formula templates.
             Use {row} placeholder for the current row number (1-based Excel row).
         merged_ranges: List of (range, text) or (range, text, format) tuples to merge cells.
@@ -551,6 +558,7 @@ def dfs_to_xlsx(
             Cell uses Excel notation (e.g., 'A1'). Display text is optional.
         comments: Dict mapping cell refs to comment text or CommentOptions.
         validations: Dict mapping column name/pattern to data validation config.
+            Every name or pattern must match at least one column.
             'whole_number' min/max are bounded to the i32 range (-2147483648..=2147483647);
             a value outside that range raises ValueError naming the field and range,
             instead of a misleading generic type error.

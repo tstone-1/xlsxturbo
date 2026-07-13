@@ -648,7 +648,10 @@ pub(crate) fn apply_conditional_formats(
             .collect();
 
         if col_indices.is_empty() {
-            continue;
+            return Err(format!(
+                "conditional_formats['{}']: pattern matched no columns",
+                col_pattern
+            ));
         }
 
         for config in configs {

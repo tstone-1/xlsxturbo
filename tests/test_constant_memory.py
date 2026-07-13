@@ -29,26 +29,26 @@ class TestConstantMemoryMode:
         assert ws["B2"].value == 100
         wb.close()
 
-    def test_constant_memory_silently_disables_features(self, tmp_xlsx: str) -> None:
-        """Features are silently disabled in constant memory mode (no crash)."""
+    def test_constant_memory_warns_when_disabling_features(self, tmp_xlsx: str) -> None:
+        """Features are disabled with one actionable warning and no crash."""
         df = pd.DataFrame({"Score": [1, 2, 3]})
-        rows, _cols = xlsxturbo.df_to_xlsx(
-            df,
-            tmp_xlsx,
-            constant_memory=True,
-            # All these should be silently ignored:
-            table_style="Medium9",
-            freeze_panes=True,
-            autofit=True,
-            row_heights={0: 30},
-            conditional_formats={"Score": {"type": "data_bar", "bar_color": "#638EC6"}},
-            formula_columns={"Double": "=A{row}*2"},
-            merged_ranges=[("A1:A1", "Merge")],
-            hyperlinks=[("A1", "https://example.com", "Link")],
-            comments={"A1": "Comment"},
-            validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
-            rich_text={"B1": [("Bold", {"bold": True})]},
-        )
+        with pytest.warns(RuntimeWarning, match="constant_memory=True disables these features"):
+            rows, _cols = xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                constant_memory=True,
+                table_style="Medium9",
+                freeze_panes=True,
+                autofit=True,
+                row_heights={0: 30},
+                conditional_formats={"Score": {"type": "data_bar", "bar_color": "#638EC6"}},
+                formula_columns={"Double": "=A{row}*2"},
+                merged_ranges=[("A1:A1", "Merge")],
+                hyperlinks=[("A1", "https://example.com", "Link")],
+                comments={"A1": "Comment"},
+                validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
+                rich_text={"B1": [("Bold", {"bold": True})]},
+            )
         assert rows > 0
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
