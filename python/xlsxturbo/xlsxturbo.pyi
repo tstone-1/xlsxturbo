@@ -300,10 +300,13 @@ class SheetOptions(TypedDict, total=False):
     it. Omitting the key entirely (or passing None) still falls back to the
     global default as before.
 
-    A per-sheet `column_widths: {}` combined with `autofit=True` (global or
-    per-sheet) suppresses autofit for that sheet: the mere presence of a
-    `column_widths` dict, even an empty one, selects the explicit-widths code
-    path instead of calling the autofit routine.
+    A per-sheet `column_widths` dict combined with `autofit=True` (global or
+    per-sheet) no longer suppresses autofit: explicit widths win for the
+    columns they name, and every other column is still autofitted. An
+    `'_all'` entry caps the autofit width for those other columns instead of
+    overriding it. An explicitly empty `column_widths: {}` for a sheet has no
+    explicit widths to apply, so the sheet is autofitted exactly as if
+    `column_widths` had been omitted.
     """
 
     header: bool
@@ -403,6 +406,10 @@ def df_to_xlsx(
         sheet_name: Name of the worksheet (default: "Sheet1").
         header: Include column names as header row (default: True).
         autofit: Automatically adjust column widths to fit content (default: False).
+            Combined with column_widths: explicit widths win for the columns
+            they name; every other column is still autofitted (rather than
+            left at Excel's default width). Add an '_all' entry in
+            column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
         freeze_panes: Freeze the header row for easier scrolling (default: False).
@@ -410,7 +417,10 @@ def df_to_xlsx(
             An integer key must be a non-negative index within Excel's column range
             (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
             key raises. A key beyond the DataFrame's column count is applied to that
-            column anyway (it is no longer silently ignored).
+            column anyway (it is no longer silently ignored). With autofit=True and
+            no '_all' key: listed columns get the explicit width, unlisted columns
+            are autofitted. With autofit=True and an '_all' key: '_all' caps the
+            autofit width for unlisted columns instead of overriding it.
         table_name: Custom name for the Excel table (requires table_style).
             Effective table names must be unique across the workbook after sanitization.
         header_format: Dict of header cell formatting options.
@@ -527,13 +537,20 @@ def dfs_to_xlsx(
         output_path: Path for the output XLSX file.
         header: Include column names as header row (default: True).
         autofit: Automatically adjust column widths (default: False).
+            Combined with column_widths: explicit widths win for the columns
+            they name; every other column is still autofitted (rather than
+            left at Excel's default width). Add an '_all' entry in
+            column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
         freeze_panes: Freeze the header row (default: False).
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
             An integer key must be a non-negative index within Excel's column range
             (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
             key raises. A key beyond the DataFrame's column count is applied to that
-            column anyway (it is no longer silently ignored).
+            column anyway (it is no longer silently ignored). With autofit=True and
+            no '_all' key: listed columns get the explicit width, unlisted columns
+            are autofitted. With autofit=True and an '_all' key: '_all' caps the
+            autofit width for unlisted columns instead of overriding it.
         table_name: Custom name for Excel tables (requires table_style). Effective
             table names must be unique across the workbook after sanitization.
         header_format: Dict of header cell formatting options.

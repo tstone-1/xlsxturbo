@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -103,6 +104,33 @@ class TestV10AllFeatures:
         )
         assert Path(path).exists()
 
+        wb = load_workbook(path)
+        ws = active_ws(wb)
+        # comments: both the plain-string and dict forms must land as real notes.
+        assert ws["A1"].comment is not None
+        assert "Names column" in ws["A1"].comment.text
+        b1_comment = ws["B1"].comment
+        assert b1_comment is not None
+        assert "Scores" in b1_comment.text
+        assert b1_comment.author == "Test"
+        # validations: a whole-number range must be registered on the Score column.
+        assert len(ws.data_validations.dataValidation) > 0
+        dv = ws.data_validations.dataValidation[0]
+        assert dv.type == "whole"
+        assert dv.formula1 == "0"
+        assert dv.formula2 == "100"
+        wb.close()
+
+        with zipfile.ZipFile(path) as zf:
+            # rich_text: the bold and plain segments must both reach sharedStrings.xml.
+            shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
+            assert "Legend:" in shared
+            assert "student scores" in shared
+            assert "<b/>" in shared
+            # images: an embedded picture must actually be present in the package.
+            media = [n for n in zf.namelist() if n.startswith("xl/media/")]
+            assert media, "no embedded image found in xl/media/"
+
     def test_new_features_with_dfs_to_xlsx(self, tmp_xlsx: str) -> None:
         """New features work with dfs_to_xlsx."""
         df1 = pd.DataFrame({"A": [1, 2]})
@@ -115,3 +143,17 @@ class TestV10AllFeatures:
             tmp_xlsx,
         )
         assert Path(tmp_xlsx).exists()
+
+        wb = load_workbook(tmp_xlsx)
+        # Sheet1: the per-sheet comment must land on its own sheet.
+        sheet1 = wb["Sheet1"]
+        assert sheet1["A1"].comment is not None
+        assert "First sheet header" in sheet1["A1"].comment.text
+        # Sheet2: the per-sheet validation must be registered, independent of Sheet1.
+        sheet2 = wb["Sheet2"]
+        assert len(sheet2.data_validations.dataValidation) > 0
+        dv = sheet2.data_validations.dataValidation[0]
+        assert dv.type == "whole"
+        assert dv.formula1 == "0"
+        assert dv.formula2 == "10"
+        wb.close()

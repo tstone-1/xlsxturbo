@@ -1,10 +1,7 @@
 //! Conditional formatting application helpers.
 
 use crate::parse::{matches_pattern, parse_color, parse_column_format, parse_icon_type};
-use crate::types::{
-    extract_field, pydict_to_hashmap, reject_unknown_keys as types_reject_unknown_keys,
-    ConditionalFormatConfigs,
-};
+use crate::types::{ConditionalFormatConfigs, OptionMap};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
     ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,
@@ -37,130 +34,34 @@ macro_rules! add_viz_cf {
 
 /// Extract an optional color field from a conditional format config.
 /// None values are treated as unset. Wrong types error with context.
-fn cf_optional_color(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-    key: &str,
-) -> Result<Option<u32>, String> {
-    let Some(color_str) = extract_field::<String>(
-        py,
-        config.get(key),
-        &format!("conditional_formats['{}']", col_pattern),
-        key,
-        "a color string",
-    )?
-    else {
+fn cf_optional_color(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<u32>, String> {
+    let Some(color_str) = view.string(key)? else {
         return Ok(None);
     };
     parse_color(&color_str).map(Some)
 }
 
-/// Extract an optional bool field from a conditional format config.
-fn cf_optional_bool(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-    key: &str,
-) -> Result<Option<bool>, String> {
-    extract_field(
-        py,
-        config.get(key),
-        &format!("conditional_formats['{}']", col_pattern),
-        key,
-        "a bool",
-    )
-}
-
-/// Extract a required string field.
-fn cf_required_string(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-    key: &str,
-) -> Result<String, String> {
-    config
-        .get(key)
-        .ok_or_else(|| {
-            format!(
-                "conditional_formats['{}']: missing '{}' key",
-                col_pattern, key
-            )
-        })?
-        .bind(py)
-        .extract::<String>()
-        .map_err(|e| {
-            format!(
-                "conditional_formats['{}']: invalid '{}': {}",
-                col_pattern, key, e
-            )
-        })
-}
-
-/// Extract a required f64 field.
-fn cf_required_f64(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-    key: &str,
-) -> Result<f64, String> {
-    config
-        .get(key)
-        .ok_or_else(|| {
-            format!(
-                "conditional_formats['{}']: missing '{}' key",
-                col_pattern, key
-            )
-        })?
-        .bind(py)
-        .extract::<f64>()
-        .map_err(|e| {
-            format!(
-                "conditional_formats['{}']: invalid '{}': {}",
-                col_pattern, key, e
-            )
-        })
-}
-
 /// Parse the optional `format` dict on a cell-rule conditional format config.
-fn parse_cf_format(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    col_pattern: &str,
-) -> Result<Option<Format>, String> {
-    let Some(obj) = config.get("format") else {
-        return Ok(None);
-    };
-    let bound = obj.bind(py);
-    if bound.is_none() {
-        return Ok(None);
+fn parse_cf_format(view: &OptionMap<'_, '_>) -> Result<Option<Format>, String> {
+    match view.dict("format")? {
+        Some(map) => Ok(Some(parse_column_format(view.py(), &map, view.context())?)),
+        None => Ok(None),
     }
-    let fmt_dict = bound.cast::<pyo3::types::PyDict>().map_err(|_| {
-        format!(
-            "conditional_formats['{}']: 'format' must be a dict",
-            col_pattern
-        )
-    })?;
-    let map = pydict_to_hashmap(fmt_dict)
-        .map_err(|e| format!("conditional_formats['{}']: {}", col_pattern, e))?;
-    parse_column_format(py, &map).map(Some)
 }
 
 /// Apply a 2-color-scale conditional format.
 fn apply_2_color_scale(
-    py: Python<'_>,
+    view: &OptionMap<'_, '_>,
     worksheet: &mut Worksheet,
-    col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
     col_idx: u16,
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormat2ColorScale::new();
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "min_color")? {
+    if let Some(c) = cf_optional_color(view, "min_color")? {
         cf = cf.set_minimum_color(c);
     }
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "max_color")? {
+    if let Some(c) = cf_optional_color(view, "max_color")? {
         cf = cf.set_maximum_color(c);
     }
     add_viz_cf!(
@@ -176,22 +77,20 @@ fn apply_2_color_scale(
 
 /// Apply a 3-color-scale conditional format.
 fn apply_3_color_scale(
-    py: Python<'_>,
+    view: &OptionMap<'_, '_>,
     worksheet: &mut Worksheet,
-    col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
     col_idx: u16,
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormat3ColorScale::new();
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "min_color")? {
+    if let Some(c) = cf_optional_color(view, "min_color")? {
         cf = cf.set_minimum_color(c);
     }
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "mid_color")? {
+    if let Some(c) = cf_optional_color(view, "mid_color")? {
         cf = cf.set_midpoint_color(c);
     }
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "max_color")? {
+    if let Some(c) = cf_optional_color(view, "max_color")? {
         cf = cf.set_maximum_color(c);
     }
     add_viz_cf!(
@@ -207,46 +106,35 @@ fn apply_3_color_scale(
 
 /// Apply a data-bar conditional format.
 fn apply_data_bar(
-    py: Python<'_>,
+    view: &OptionMap<'_, '_>,
     worksheet: &mut Worksheet,
-    col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
     col_idx: u16,
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormatDataBar::new();
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "bar_color")? {
+    if let Some(c) = cf_optional_color(view, "bar_color")? {
         cf = cf.set_fill_color(c);
     }
-    if let Some(c) = cf_optional_color(py, config, col_pattern, "border_color")? {
+    if let Some(c) = cf_optional_color(view, "border_color")? {
         cf = cf.set_border_color(c);
     }
-    if cf_optional_bool(py, config, col_pattern, "solid")?.unwrap_or(false) {
+    if view.bool("solid")?.unwrap_or(false) {
         cf = cf.set_solid_fill(true);
     }
-    if let Some(obj) = config.get("direction") {
-        let bound = obj.bind(py);
-        if !bound.is_none() {
-            let s = bound.extract::<String>().map_err(|_| {
-                format!(
-                    "conditional_formats['{}']: 'direction' must be a string",
-                    col_pattern
-                )
-            })?;
-            let dir = match s.to_lowercase().as_str() {
-                "left_to_right" | "ltr" => ConditionalFormatDataBarDirection::LeftToRight,
-                "right_to_left" | "rtl" => ConditionalFormatDataBarDirection::RightToLeft,
-                "context" | "" => ConditionalFormatDataBarDirection::Context,
-                _ => {
-                    return Err(format!(
-                        "Unknown direction '{}'. Valid: left_to_right, right_to_left, context",
-                        s
-                    ));
-                }
-            };
-            cf = cf.set_direction(dir);
-        }
+    if let Some(s) = view.string("direction")? {
+        let dir = match s.to_lowercase().as_str() {
+            "left_to_right" | "ltr" => ConditionalFormatDataBarDirection::LeftToRight,
+            "right_to_left" | "rtl" => ConditionalFormatDataBarDirection::RightToLeft,
+            "context" | "" => ConditionalFormatDataBarDirection::Context,
+            _ => {
+                return Err(format!(
+                    "Unknown direction '{}'. Valid: left_to_right, right_to_left, context",
+                    s
+                ));
+            }
+        };
+        cf = cf.set_direction(dir);
     }
     add_viz_cf!(
         worksheet,
@@ -261,31 +149,20 @@ fn apply_data_bar(
 
 /// Apply an icon-set conditional format.
 fn apply_icon_set(
-    py: Python<'_>,
+    view: &OptionMap<'_, '_>,
     worksheet: &mut Worksheet,
-    col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
     col_idx: u16,
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormatIconSet::new();
-    if let Some(obj) = config.get("icon_type") {
-        let bound = obj.bind(py);
-        if !bound.is_none() {
-            let s = bound.extract::<String>().map_err(|_| {
-                format!(
-                    "conditional_formats['{}']: 'icon_type' must be a string",
-                    col_pattern
-                )
-            })?;
-            cf = cf.set_icon_type(parse_icon_type(&s)?);
-        }
+    if let Some(s) = view.string("icon_type")? {
+        cf = cf.set_icon_type(parse_icon_type(&s)?);
     }
-    if cf_optional_bool(py, config, col_pattern, "reverse")?.unwrap_or(false) {
+    if view.bool("reverse")?.unwrap_or(false) {
         cf = cf.reverse_icons(true);
     }
-    if cf_optional_bool(py, config, col_pattern, "icons_only")?.unwrap_or(false) {
+    if view.bool("icons_only")?.unwrap_or(false) {
         cf = cf.show_icons_only(true);
     }
     add_viz_cf!(
@@ -301,15 +178,14 @@ fn apply_icon_set(
 
 /// Apply a cell-rule conditional format, dispatching by criteria family.
 fn apply_cell_conditional(
-    py: Python<'_>,
+    view: &OptionMap<'_, '_>,
     worksheet: &mut Worksheet,
     col_pattern: &str,
-    config: &HashMap<String, Py<PyAny>>,
     col_idx: u16,
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
-    let criteria: String = config
+    let criteria: String = view
         .get("criteria")
         .ok_or_else(|| {
             format!(
@@ -317,7 +193,7 @@ fn apply_cell_conditional(
                 col_pattern
             )
         })?
-        .bind(py)
+        .bind(view.py())
         .extract()
         .map_err(|e| {
             format!(
@@ -326,7 +202,7 @@ fn apply_cell_conditional(
             )
         })?;
 
-    let fmt = parse_cf_format(py, config, col_pattern)?;
+    let fmt = parse_cf_format(view)?;
     let criteria_lower = criteria.to_lowercase();
 
     // Blank / no-blank
@@ -361,27 +237,17 @@ fn apply_cell_conditional(
     // Text rules (require string 'value')
     if let Some(rule) = match criteria_lower.as_str() {
         "containing" | "contains" | "text_contains" => Some(ConditionalFormatTextRule::Contains(
-            cf_required_string(py, config, col_pattern, "value")?,
+            view.required_string("value")?,
         )),
-        "not_containing" | "not containing" | "does_not_contain" | "does not contain" => {
-            Some(ConditionalFormatTextRule::DoesNotContain(
-                cf_required_string(py, config, col_pattern, "value")?,
-            ))
-        }
-        "begins_with" | "begins with" | "starts_with" | "starts with" => {
-            Some(ConditionalFormatTextRule::BeginsWith(cf_required_string(
-                py,
-                config,
-                col_pattern,
-                "value",
-            )?))
-        }
-        "ends_with" | "ends with" => Some(ConditionalFormatTextRule::EndsWith(cf_required_string(
-            py,
-            config,
-            col_pattern,
-            "value",
-        )?)),
+        "not_containing" | "not containing" | "does_not_contain" | "does not contain" => Some(
+            ConditionalFormatTextRule::DoesNotContain(view.required_string("value")?),
+        ),
+        "begins_with" | "begins with" | "starts_with" | "starts with" => Some(
+            ConditionalFormatTextRule::BeginsWith(view.required_string("value")?),
+        ),
+        "ends_with" | "ends with" => Some(ConditionalFormatTextRule::EndsWith(
+            view.required_string("value")?,
+        )),
         _ => None,
     } {
         add_cell_cf!(
@@ -399,12 +265,12 @@ fn apply_cell_conditional(
     // Range rules (require numeric min_value/max_value)
     if let Some(rule) = match criteria_lower.as_str() {
         "between" => Some(ConditionalFormatCellRule::Between(
-            cf_required_f64(py, config, col_pattern, "min_value")?,
-            cf_required_f64(py, config, col_pattern, "max_value")?,
+            view.required_f64("min_value")?,
+            view.required_f64("max_value")?,
         )),
         "not_between" | "not between" => Some(ConditionalFormatCellRule::NotBetween(
-            cf_required_f64(py, config, col_pattern, "min_value")?,
-            cf_required_f64(py, config, col_pattern, "max_value")?,
+            view.required_f64("min_value")?,
+            view.required_f64("max_value")?,
         )),
         _ => None,
     } {
@@ -422,13 +288,13 @@ fn apply_cell_conditional(
 
     // Single-value comparison rules. Preserve numeric vs string in the Excel rule
     // so "ERROR" matches as text and 100 matches as number.
-    let value_obj = config.get("value").ok_or_else(|| {
+    let value_obj = view.get("value").ok_or_else(|| {
         format!(
             "conditional_formats['{}']: missing 'value' key",
             col_pattern
         )
     })?;
-    let bound = value_obj.bind(py);
+    let bound = value_obj.bind(view.py());
 
     macro_rules! make_rule {
         ($variant:ident) => {
@@ -480,32 +346,12 @@ fn apply_cell_conditional(
     Ok(())
 }
 
-/// Reject any config key not in `allowed` for the given (already-resolved)
-/// conditional format type. Unlike `validations`, conditional format configs
-/// are dispatched to one of five type-specific families with disjoint key
-/// sets, so the valid-keys list — and thus the error — is per-type; the
-/// format type is passed to the shared helper as its `qualifier`.
-///
-/// Takes a plain string-key iterator rather than the `HashMap<String,
-/// Py<PyAny>>` config directly, so this — the actual validation policy — is
-/// unit-testable without a Python interpreter (this crate's `cargo test`
-/// does not embed one; only the caller needs the PyO3-typed config).
-fn reject_unknown_keys<'a>(
-    keys: impl Iterator<Item = &'a str>,
-    col_pattern: &str,
-    format_type: &str,
-    allowed: &[&str],
-) -> Result<(), String> {
-    types_reject_unknown_keys(
-        keys,
-        &format!("conditional_formats['{}']", col_pattern),
-        Some(format_type),
-        allowed,
-    )
-}
-
 /// Apply a single conditional format config to a column range.
-/// Dispatches by `type` to a family-specific helper.
+/// Dispatches by `type` to a family-specific helper. Unlike `validations`,
+/// conditional format configs are dispatched to one of five type-specific
+/// families with disjoint key sets, so the valid-keys list — and thus the
+/// unknown-key error — is per-type; the resolved format type is passed to
+/// `OptionMap::reject_unknown_for` as its qualifier.
 fn apply_single_conditional_format(
     py: Python<'_>,
     worksheet: &mut Worksheet,
@@ -515,7 +361,13 @@ fn apply_single_conditional_format(
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
-    let format_type: String = config
+    let view = OptionMap::new(
+        py,
+        config,
+        format!("conditional_formats['{}']", col_pattern),
+    );
+
+    let format_type: String = view
         .get("type")
         .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
         .bind(py)
@@ -529,77 +381,32 @@ fn apply_single_conditional_format(
 
     match format_type.to_lowercase().as_str() {
         "2_color_scale" | "2colorscale" | "two_color_scale" => {
-            reject_unknown_keys(
-                config.keys().map(String::as_str),
-                col_pattern,
-                &format_type,
-                &["type", "min_color", "max_color"],
-            )?;
-            apply_2_color_scale(
-                py,
-                worksheet,
-                col_pattern,
-                config,
-                col_idx,
-                data_start_row,
-                data_end_row,
-            )
+            view.reject_unknown_for(&format_type, &["type", "min_color", "max_color"])?;
+            apply_2_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "3_color_scale" | "3colorscale" | "three_color_scale" => {
-            reject_unknown_keys(
-                config.keys().map(String::as_str),
-                col_pattern,
+            view.reject_unknown_for(
                 &format_type,
                 &["type", "min_color", "mid_color", "max_color"],
             )?;
-            apply_3_color_scale(
-                py,
-                worksheet,
-                col_pattern,
-                config,
-                col_idx,
-                data_start_row,
-                data_end_row,
-            )
+            apply_3_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "data_bar" | "databar" => {
-            reject_unknown_keys(
-                config.keys().map(String::as_str),
-                col_pattern,
+            view.reject_unknown_for(
                 &format_type,
                 &["type", "bar_color", "border_color", "solid", "direction"],
             )?;
-            apply_data_bar(
-                py,
-                worksheet,
-                col_pattern,
-                config,
-                col_idx,
-                data_start_row,
-                data_end_row,
-            )
+            apply_data_bar(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "icon_set" | "iconset" => {
-            reject_unknown_keys(
-                config.keys().map(String::as_str),
-                col_pattern,
+            view.reject_unknown_for(
                 &format_type,
                 &["type", "icon_type", "reverse", "icons_only"],
             )?;
-            apply_icon_set(
-                py,
-                worksheet,
-                col_pattern,
-                config,
-                col_idx,
-                data_start_row,
-                data_end_row,
-            )
+            apply_icon_set(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "cell" => {
-            reject_unknown_keys(
-                config.keys().map(String::as_str),
-                col_pattern,
+            view.reject_unknown_for(
                 &format_type,
                 &[
                     "type",
@@ -611,10 +418,9 @@ fn apply_single_conditional_format(
                 ],
             )?;
             apply_cell_conditional(
-                py,
+                &view,
                 worksheet,
                 col_pattern,
-                config,
                 col_idx,
                 data_start_row,
                 data_end_row,
@@ -672,55 +478,7 @@ pub(crate) fn apply_conditional_formats(
     Ok(())
 }
 
-#[cfg(test)]
-mod reject_unknown_keys_tests {
-    use super::reject_unknown_keys;
-
-    /// A typo'd key (e.g. "min_colour" instead of "min_color") must be
-    /// rejected by name, with the valid keys listed for the resolved type.
-    #[test]
-    fn rejects_typo_key_and_names_it() {
-        let keys = ["type", "min_colour"];
-        let err = reject_unknown_keys(
-            keys.into_iter(),
-            "A:A",
-            "2_color_scale",
-            &["type", "min_color", "max_color"],
-        )
-        .unwrap_err();
-        assert!(
-            err.contains("unknown option 'min_colour'"),
-            "error should name the bad key: {}",
-            err
-        );
-        assert!(
-            err.contains("min_color") && err.contains("max_color"),
-            "error should list the valid keys: {}",
-            err
-        );
-        assert!(
-            err.contains("A:A") && err.contains("2_color_scale"),
-            "error should include the range and the resolved type: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn accepts_all_valid_keys() {
-        let keys = ["type", "criteria", "value"];
-        assert!(reject_unknown_keys(
-            keys.into_iter(),
-            "B:B",
-            "cell",
-            &[
-                "type",
-                "criteria",
-                "format",
-                "value",
-                "min_value",
-                "max_value"
-            ],
-        )
-        .is_ok());
-    }
-}
+// Unknown-key rejection policy (including the qualifier/"Valid for <type>"
+// phrasing) is unit-tested once, without a Python interpreter, in
+// `types::reject_unknown_keys_tests` — the single source of truth this
+// module's `OptionMap::reject_unknown_for` calls delegate to.

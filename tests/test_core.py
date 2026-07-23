@@ -90,6 +90,61 @@ class TestPolarsSupport:
         wb.close()
 
 
+class TestBooleanDtype:
+    """Tests for pure-bool-dtype columns (write.rs write_py_value_with_format).
+
+    A pandas DataFrame whose column is entirely bool-typed yields `np.bool_`
+    scalars from `df.values` (a plain object-dtype/mixed column yields real
+    Python `bool` instead). Before the numpy-bool branch was added, those
+    scalars fell through to the numpy-scalar-int fallback via `__index__`
+    and were written as the numbers 0/1 rather than Excel booleans.
+    """
+
+    def test_pure_bool_dtype_pandas_dataframe_writes_excel_booleans(self, tmp_xlsx: str) -> None:
+        """A pandas DataFrame with a pure bool dtype column writes real Excel booleans."""
+        df = pd.DataFrame({"flag": [True, False]})
+        assert df["flag"].dtype == bool
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].data_type == "b"
+        assert ws["A2"].value is True
+        assert ws["A3"].data_type == "b"
+        assert ws["A3"].value is False
+        wb.close()
+
+    def test_polars_boolean_column_writes_excel_booleans(self, tmp_xlsx: str) -> None:
+        """A polars DataFrame with a Boolean column writes real Excel booleans."""
+        df = pl.DataFrame({"flag": [True, False]})
+        assert df["flag"].dtype == pl.Boolean
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].data_type == "b"
+        assert ws["A2"].value is True
+        assert ws["A3"].data_type == "b"
+        assert ws["A3"].value is False
+        wb.close()
+
+    def test_mixed_dtype_dataframe_bool_column_still_writes_booleans(self, tmp_xlsx: str) -> None:
+        """A mixed-dtype DataFrame's bool column still writes real Excel booleans.
+
+        Regression guard for the pre-existing (already-working) path: mixed
+        dtypes keep object-dtype columns holding real Python `bool` values,
+        which the `PyBool` cast handles directly, distinct from the
+        `np.bool_` scalar path pure-bool-dtype columns exercise above.
+        """
+        df = pd.DataFrame({"flag": [True, False], "count": [1, 2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].data_type == "b"
+        assert ws["A2"].value is True
+        assert ws["A3"].data_type == "b"
+        assert ws["A3"].value is False
+        wb.close()
+
+
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
 

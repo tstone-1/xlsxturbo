@@ -104,14 +104,14 @@ class TestColumnWidthCap:
         assert w_long <= 21, f"Long col width {w_long} should be <= 21"
         wb.close()
 
-    def test_empty_column_widths_suppresses_autofit_per_sheet(self, tmp_xlsx: str) -> None:
-        """A per-sheet column_widths={} combined with autofit=True suppresses autofit for that sheet.
+    def test_empty_column_widths_does_not_suppress_autofit_per_sheet(self, tmp_xlsx: str) -> None:
+        """A per-sheet column_widths={} combined with autofit=True no longer suppresses autofit.
 
-        This is a pre-existing interplay, not a new behavior change: the mere
-        presence of a `column_widths` dict (even an empty one, with no '_all'
-        key) selects the plain apply_column_widths branch instead of calling
-        `worksheet.autofit()`, so an empty per-sheet override silently turns
-        autofit off for that sheet.
+        `column_widths` (even present-but-empty) used to select the plain
+        `apply_column_widths` branch instead of calling `worksheet.autofit()`,
+        silently turning autofit off for that sheet. With no explicit widths
+        to apply, an empty dict is now equivalent to omitting `column_widths`
+        entirely: the sheet is still autofitted.
         """
         df = pd.DataFrame({"VeryLongColumnName": ["y" * 100]})
         xlsxturbo.dfs_to_xlsx(
@@ -121,8 +121,53 @@ class TestColumnWidthCap:
         )
         wb = load_workbook(tmp_xlsx)
         width = wb["S1"].column_dimensions["A"].width
-        # Default Excel width (~8.43), not autofit-expanded to fit the long content.
-        assert width is None or width < 15
+        assert width is not None
+        assert width > 15, f"Autofitted column A width {width} should exceed the Excel default"
+        wb.close()
+
+    def test_autofit_with_explicit_width_for_one_column(self, tmp_xlsx: str) -> None:
+        """autofit=True with a column_widths override for one column still autofits the rest.
+
+        Regression test: `column_widths={0: 25}` with no '_all' key used to
+        drop autofit for every other column entirely (W1). Column A keeps the
+        explicit width; column B is autofitted to its (longer) content.
+        """
+        df = pd.DataFrame({
+            "A": ["x"],
+            "B": ["y" * 60],
+        })
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, autofit=True, column_widths={0: 25})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        w_a = ws.column_dimensions["A"].width
+        w_b = ws.column_dimensions["B"].width
+        assert w_a is not None
+        assert abs(w_a - 25) < 1, f"Explicit column A width {w_a} should be ~25"
+        assert w_b is not None
+        assert w_b > w_a, f"Autofitted column B width {w_b} should exceed column A's explicit width"
+        wb.close()
+
+    def test_explicit_width_smaller_than_autofit_wins(self, tmp_xlsx: str) -> None:
+        """An explicit width narrower than the autofit width is kept, not enlarged.
+
+        Pins the apply order in `apply_worksheet_features` (convert.rs):
+        `worksheet.autofit()` runs first and the explicit `column_widths` are
+        applied on top. rust_xlsxwriter lets an autofit width override a user
+        width when the autofit width is greater, so applying autofit *after*
+        the explicit widths would silently widen this column to ~60 and only
+        this ordering (explicit-last) keeps it at 10. The sibling test above
+        passes under either order; this one fails if the calls are swapped.
+        """
+        df = pd.DataFrame({
+            "A": ["y" * 60],
+            "B": ["x"],
+        })
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, autofit=True, column_widths={0: 10})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        w_a = ws.column_dimensions["A"].width
+        assert w_a is not None
+        assert abs(w_a - 10) < 1, f"Explicit column A width {w_a} should stay ~10 despite wide content"
         wb.close()
 
     def test_column_widths_negative_key_raises(self, tmp_xlsx: str) -> None:

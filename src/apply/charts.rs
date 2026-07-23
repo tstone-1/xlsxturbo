@@ -1,12 +1,10 @@
 //! Native Excel chart application helpers.
 
 use crate::parse::parse_cell_ref;
-use crate::types::{
-    extract_field, pydict_to_hashmap, reject_unknown_keys as types_reject_unknown_keys, ChartConfig,
-};
+use crate::types::{pydict_to_hashmap, ChartConfig, OptionMap};
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Chart, ChartDataTable, ChartLegendPosition, ChartType, Worksheet};
-use std::collections::HashMap;
 
 fn parse_chart_type(chart_type: &str) -> Result<ChartType, String> {
     match chart_type.to_lowercase().as_str() {
@@ -56,66 +54,6 @@ fn parse_legend_position(position: &str) -> Result<ChartLegendPosition, String> 
     }
 }
 
-fn chart_string_field(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    cell_ref: &str,
-    key: &str,
-) -> Result<Option<String>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("charts['{}']", cell_ref),
-        key,
-        "a string",
-    )
-}
-
-fn chart_u32_field(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    cell_ref: &str,
-    key: &str,
-) -> Result<Option<u32>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("charts['{}']", cell_ref),
-        key,
-        "a non-negative integer",
-    )
-}
-
-fn chart_u8_field(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    cell_ref: &str,
-    key: &str,
-) -> Result<Option<u8>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("charts['{}']", cell_ref),
-        key,
-        "an integer in the range 0-255",
-    )
-}
-
-fn chart_bool_field(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    cell_ref: &str,
-    key: &str,
-) -> Result<Option<bool>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("charts['{}']", cell_ref),
-        key,
-        "a bool",
-    )
-}
-
 /// Look up the first of `keys` that is present in `config`, returning the
 /// matching key name alongside its string value so callers can report which
 /// key a validation error applies to.
@@ -125,14 +63,12 @@ fn chart_bool_field(
 /// int while `values_range` is already a valid string) still raises its type
 /// error instead of being silently skipped because an earlier alias won.
 fn first_present_string_field(
-    py: Python<'_>,
-    config: &HashMap<String, Py<PyAny>>,
-    cell_ref: &str,
+    view: &OptionMap<'_, '_>,
     keys: &[&'static str],
 ) -> Result<Option<(&'static str, String)>, String> {
     let mut found: Option<(&'static str, String)> = None;
     for &key in keys {
-        let value = chart_string_field(py, config, cell_ref, key)?;
+        let value = view.string(key)?;
         if found.is_none() {
             if let Some(v) = value {
                 found = Some((key, v));
@@ -160,35 +96,26 @@ fn require_sheet_qualified(cell_ref: &str, key: &str, value: &str) -> Result<(),
 }
 
 fn add_chart_series(
-    py: Python<'_>,
     chart: &mut Chart,
     cell_ref: &str,
-    config: &HashMap<String, Py<PyAny>>,
+    view: &OptionMap<'_, '_>,
     default_categories: Option<&str>,
 ) -> Result<(), String> {
-    let (values_key, values) = first_present_string_field(
-        py,
-        config,
-        cell_ref,
-        &["values_range", "values", "data_range"],
-    )?
-    .ok_or_else(|| {
-        format!(
-            "charts['{}']: chart series requires 'values_range', 'values', or 'data_range'",
-            cell_ref
-        )
-    })?;
+    let (values_key, values) =
+        first_present_string_field(view, &["values_range", "values", "data_range"])?.ok_or_else(
+            || {
+                format!(
+                    "charts['{}']: chart series requires 'values_range', 'values', or 'data_range'",
+                    cell_ref
+                )
+            },
+        )?;
     require_sheet_qualified(cell_ref, values_key, &values)?;
 
     // Categories are optional; only validate sheet-qualification when a
     // categories range is actually present (explicit or via the chart-level
     // default, which was already validated when it was computed).
-    let categories = match first_present_string_field(
-        py,
-        config,
-        cell_ref,
-        &["categories_range", "categories"],
-    )? {
+    let categories = match first_present_string_field(view, &["categories_range", "categories"])? {
         Some((key, v)) => {
             require_sheet_qualified(cell_ref, key, &v)?;
             Some(v)
@@ -196,12 +123,7 @@ fn add_chart_series(
         None => default_categories.map(str::to_string),
     };
 
-    let name = chart_string_field(py, config, cell_ref, "name")?.or(chart_string_field(
-        py,
-        config,
-        cell_ref,
-        "series_name",
-    )?);
+    let name = view.string("name")?.or(view.string("series_name")?);
 
     let series = chart.add_series().set_values(values.as_str());
     if let Some(cat) = categories {
@@ -218,7 +140,7 @@ fn add_chart_series(
 pub(crate) fn apply_charts(
     py: Python<'_>,
     worksheet: &mut Worksheet,
-    charts: &HashMap<String, ChartConfig>,
+    charts: &IndexMap<String, ChartConfig>,
 ) -> Result<(), String> {
     const CHART_KEYS: &[&str] = &[
         "type",
@@ -255,14 +177,11 @@ pub(crate) fn apply_charts(
 
     for (cell_ref, config) in charts {
         let (row, col) = parse_cell_ref(cell_ref)?;
-        types_reject_unknown_keys(
-            config.keys().map(String::as_str),
-            &format!("charts['{}']", cell_ref),
-            None,
-            CHART_KEYS,
-        )?;
+        let view = OptionMap::new(py, config, format!("charts['{}']", cell_ref));
+        view.reject_unknown(CHART_KEYS)?;
 
-        let chart_type = chart_string_field(py, config, cell_ref, "type")?
+        let chart_type = view
+            .string("type")?
             .ok_or_else(|| format!("charts['{}']: missing 'type' key", cell_ref))?;
         let mut chart = Chart::new(parse_chart_type(&chart_type)?);
 
@@ -285,18 +204,14 @@ pub(crate) fn apply_charts(
             // Chart-level categories fallback used by any series item that
             // doesn't specify its own; computed once (not per series item)
             // and validated up front since it is reused unchanged.
-            let default_categories = match first_present_string_field(
-                py,
-                config,
-                cell_ref,
-                &["categories_range", "categories"],
-            )? {
-                Some((key, v)) => {
-                    require_sheet_qualified(cell_ref, key, &v)?;
-                    Some(v)
-                }
-                None => None,
-            };
+            let default_categories =
+                match first_present_string_field(&view, &["categories_range", "categories"])? {
+                    Some((key, v)) => {
+                        require_sheet_qualified(cell_ref, key, &v)?;
+                        Some(v)
+                    }
+                    None => None,
+                };
 
             for (idx, item) in series_list.iter().enumerate() {
                 let series_dict = item.cast::<pyo3::types::PyDict>().map_err(|_| {
@@ -304,56 +219,55 @@ pub(crate) fn apply_charts(
                 })?;
                 let series_config = pydict_to_hashmap(series_dict)
                     .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;
-                types_reject_unknown_keys(
-                    series_config.keys().map(String::as_str),
-                    &format!("charts['{}']: series item {}", cell_ref, idx),
-                    None,
-                    SERIES_KEYS,
-                )?;
-                add_chart_series(
+                let series_view = OptionMap::new(
                     py,
+                    &series_config,
+                    format!("charts['{}']: series item {}", cell_ref, idx),
+                );
+                series_view.reject_unknown(SERIES_KEYS)?;
+                add_chart_series(
                     &mut chart,
                     cell_ref,
-                    &series_config,
+                    &series_view,
                     default_categories.as_deref(),
                 )?;
             }
         } else {
-            add_chart_series(py, &mut chart, cell_ref, config, None)?;
+            add_chart_series(&mut chart, cell_ref, &view, None)?;
         }
 
-        if let Some(title) = chart_string_field(py, config, cell_ref, "title")? {
+        if let Some(title) = view.string("title")? {
             chart.title().set_name(title.as_str());
         }
-        if let Some(name) = chart_string_field(py, config, cell_ref, "x_axis_name")? {
+        if let Some(name) = view.string("x_axis_name")? {
             chart.x_axis().set_name(name.as_str());
         }
-        if let Some(name) = chart_string_field(py, config, cell_ref, "y_axis_name")? {
+        if let Some(name) = view.string("y_axis_name")? {
             chart.y_axis().set_name(name.as_str());
         }
-        if let Some(width) = chart_u32_field(py, config, cell_ref, "width")? {
+        if let Some(width) = view.u32("width")? {
             chart.set_width(width);
         }
-        if let Some(height) = chart_u32_field(py, config, cell_ref, "height")? {
+        if let Some(height) = view.u32("height")? {
             chart.set_height(height);
         }
-        if let Some(style) = chart_u8_field(py, config, cell_ref, "style")? {
+        if let Some(style) = view.u8("style")? {
             chart.set_style(style);
         }
-        if chart_bool_field(py, config, cell_ref, "show_data_table")?.unwrap_or(false) {
+        if view.bool("show_data_table")?.unwrap_or(false) {
             chart.set_data_table(&ChartDataTable::default());
         }
-        if !chart_bool_field(py, config, cell_ref, "show_legend")?.unwrap_or(true) {
+        if !view.bool("show_legend")?.unwrap_or(true) {
             chart.legend().set_hidden();
         }
-        if let Some(position) = chart_string_field(py, config, cell_ref, "legend_position")? {
+        if let Some(position) = view.string("legend_position")? {
             let parsed = parse_legend_position(&position)
                 .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;
             chart.legend().set_position(parsed);
         }
 
-        let x_offset = chart_u32_field(py, config, cell_ref, "x_offset")?.unwrap_or(0);
-        let y_offset = chart_u32_field(py, config, cell_ref, "y_offset")?.unwrap_or(0);
+        let x_offset = view.u32("x_offset")?.unwrap_or(0);
+        let y_offset = view.u32("y_offset")?.unwrap_or(0);
         worksheet
             .insert_chart_with_offset(row, col, &chart, x_offset, y_offset)
             .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;

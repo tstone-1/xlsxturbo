@@ -15,7 +15,14 @@ import xlsxturbo
 from tests.helpers import HAS_OPENPYXL, TINY_PNG_B64, active_ws, load_workbook
 
 if TYPE_CHECKING:
-    from xlsxturbo.xlsxturbo import ChartOptions, SparklineOptions, TextboxOptions
+    from xlsxturbo.xlsxturbo import (
+        ChartOptions,
+        CheckboxOptions,
+        CommentOptions,
+        ImageOptions,
+        SparklineOptions,
+        TextboxOptions,
+    )
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
@@ -685,3 +692,86 @@ class TestSparklines:
         assert 'minAxisType="custom"' in xml
         assert 'dateAxis="1"' in xml
         assert "<xm:f>Sheet1!A1:C1</xm:f>" in xml  # the supplied date range
+
+
+class TestDeterministicFeatureMapOrder:
+    """Regression tests for N3: feature maps must preserve Python dict order.
+
+    Rust's `std::collections::HashMap` seeds a fresh random hasher per
+    instance, so two otherwise-identical `df_to_xlsx` calls used to be able
+    to emit images/comments/checkboxes/textboxes in a different order in the
+    generated XML even within the same process. The cell_ref-keyed feature
+    maps (images, checkboxes, textboxes, comments, charts, sparklines,
+    rich_text) now use `IndexMap`, which preserves insertion order
+    deterministically. These tests build the same options twice in one
+    process (so a per-instance random hash seed would show up as a diff) and
+    assert the emitted XML parts are byte-for-byte identical.
+    """
+
+    def test_images_and_comments_order_is_stable_across_runs(
+        self, tmp_xlsx_factory: Callable[..., str]
+    ) -> None:
+        """Two writes with the same images/comments dicts emit identical drawing/comment XML."""
+        df = pd.DataFrame({"A": [1, 2, 3, 4]})
+        png_path = tmp_xlsx_factory(".png")
+        with Path(png_path).open("wb") as f:
+            f.write(base64.b64decode(TINY_PNG_B64))
+
+        # Insertion order deliberately out of cell-reference order, so a
+        # HashMap's random iteration order would be very likely to visibly
+        # reorder at least one of these two 4-entry maps between the two runs.
+        images: dict[str, str | ImageOptions] = {
+            "D1": png_path,
+            "B1": png_path,
+            "F1": png_path,
+            "H1": png_path,
+        }
+        comments: dict[str, str | CommentOptions] = {
+            "A1": "one",
+            "C1": "two",
+            "E1": "three",
+            "G1": "four",
+        }
+
+        path1 = tmp_xlsx_factory()
+        path2 = tmp_xlsx_factory()
+        xlsxturbo.df_to_xlsx(df, path1, images=images, comments=comments)
+        xlsxturbo.df_to_xlsx(df, path2, images=images, comments=comments)
+
+        with zipfile.ZipFile(path1) as zf1, zipfile.ZipFile(path2) as zf2:
+            drawing1 = zf1.read("xl/drawings/drawing1.xml")
+            drawing2 = zf2.read("xl/drawings/drawing1.xml")
+            comments_xml1 = zf1.read("xl/comments1.xml")
+            comments_xml2 = zf2.read("xl/comments1.xml")
+
+        assert drawing1 == drawing2, "image placement order must be reproducible across runs"
+        assert comments_xml1 == comments_xml2, "comment order must be reproducible across runs"
+
+    def test_checkboxes_and_textboxes_order_is_stable_across_runs(
+        self, tmp_xlsx_factory: Callable[..., str]
+    ) -> None:
+        """Two writes with the same checkboxes/textboxes dicts emit identical drawing XML."""
+        df = pd.DataFrame({"A": [1, 2, 3, 4]})
+        checkboxes: dict[str, bool | CheckboxOptions] = {
+            "D1": True,
+            "B1": False,
+            "F1": True,
+            "H1": False,
+        }
+        textboxes: dict[str, str | TextboxOptions] = {
+            "C1": "one",
+            "E1": "two",
+            "G1": "three",
+            "I1": "four",
+        }
+
+        path1 = tmp_xlsx_factory()
+        path2 = tmp_xlsx_factory()
+        xlsxturbo.df_to_xlsx(df, path1, checkboxes=checkboxes, textboxes=textboxes)
+        xlsxturbo.df_to_xlsx(df, path2, checkboxes=checkboxes, textboxes=textboxes)
+
+        with zipfile.ZipFile(path1) as zf1, zipfile.ZipFile(path2) as zf2:
+            drawing1 = zf1.read("xl/drawings/drawing1.xml")
+            drawing2 = zf2.read("xl/drawings/drawing1.xml")
+
+        assert drawing1 == drawing2, "checkbox/textbox order must be reproducible across runs"

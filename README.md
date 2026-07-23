@@ -174,6 +174,8 @@ xlsxturbo.df_to_xlsx(df, "mixed.xlsx", column_widths={0: 15, '_all': 30})
 xlsxturbo.df_to_xlsx(df, "fitted.xlsx", autofit=True, column_widths={'_all': 25})
 ```
 
+When `autofit=True` is combined with `column_widths` that names specific columns and has no `'_all'` key, the named columns get their explicit widths and every other column is autofitted to its content. Add `'_all'` back in to cap the autofitted columns instead of leaving them uncapped.
+
 ### Named Excel Tables
 
 Set custom names for Excel tables:
@@ -680,6 +682,7 @@ xlsxturbo.df_to_xlsx(df, "validated.xlsx",
 - Validations apply to the data rows of the specified column
 - Column patterns work: `'score_*': {...}` matches all columns starting with `score_`
 - If only `min` or only `max` is specified, the other defaults to the type's extreme value
+- `whole_number` `min`/`max` are bounded to the i32 range (-2147483648 to 2147483647); a value outside that range raises `ValueError` naming the field and range
 - List validation values are limited to 255 total characters (Excel limitation)
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
@@ -915,7 +918,7 @@ xlsxturbo.df_to_xlsx(df, "charts.xlsx",
 
 **Notes:**
 - Charts are native Excel chart objects, not static images
-- Ranges must use Excel notation, including the sheet name when needed
+- Value/category ranges must include a sheet name (e.g. `'Sheet1!$B$2:$B$10'`); a bare range like `'$B$2:$B$10'` raises `ValueError`
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
@@ -1130,6 +1133,10 @@ xlsxturbo.csv_to_xlsx("eu_data.csv", "output.xlsx", date_order="eu")   # Februar
 # - "mdy" or "us": US format (MM-DD-YYYY)
 # - "dmy" or "eu": European format (DD-MM-YYYY)
 ```
+
+### Formula Injection
+
+CSV and DataFrame string values are always written as literal string cells, never as formulas. A value starting with `=`, `+`, `-`, or `@` is stored as-is and does not execute in Excel. The only ways to produce a live formula are the explicit `formula_columns` option and the `hyperlinks` option; nothing else in xlsxturbo interprets cell content as a formula.
 
 ## CLI Usage
 

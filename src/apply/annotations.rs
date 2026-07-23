@@ -2,9 +2,9 @@
 
 use crate::parse::{parse_cell_range, parse_cell_ref, parse_header_format};
 use crate::types::{Comment, Hyperlink, MergedRange};
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Format, Note, Worksheet};
-use std::collections::HashMap;
 
 /// Apply merged ranges to worksheet
 pub(crate) fn apply_merged_ranges(
@@ -17,7 +17,8 @@ pub(crate) fn apply_merged_ranges(
 
         // Build format if provided
         let format = if let Some(fmt_dict) = format_dict {
-            let parsed = parse_header_format(py, fmt_dict)?;
+            let parsed =
+                parse_header_format(py, fmt_dict, &format!("merged_ranges['{}']", range_str))?;
             Some(parsed)
         } else {
             None
@@ -65,7 +66,7 @@ pub(crate) fn apply_hyperlinks(
 /// Apply comments/notes to worksheet
 pub(crate) fn apply_comments(
     worksheet: &mut Worksheet,
-    comments: &HashMap<String, Comment>,
+    comments: &IndexMap<String, Comment>,
 ) -> Result<(), String> {
     for (cell_ref, (text, author)) in comments {
         let (row, col) = parse_cell_ref(cell_ref)?;

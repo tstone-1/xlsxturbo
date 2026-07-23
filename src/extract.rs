@@ -35,13 +35,33 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "cells",
 ];
 
-/// Helper: extract an optional scalar field from a Python dict into a SheetConfig field
+/// Helper: extract an optional scalar field from a Python dict into a SheetConfig field.
+///
+/// `$opts` is a `Bound<PyAny>`, so `.get_item($key)` goes through the mapping
+/// protocol and raises a Python `KeyError` for a missing key rather than
+/// returning `Ok(None)` — that specific error is the expected "option not
+/// given" case and is swallowed here, same as before. Any *other* error
+/// (e.g. a non-string-keyed options mapping) now propagates instead of being
+/// silently discarded, and a wrong-typed value produces a context-rich
+/// `TypeError` naming the option and the received type (via `pytype_name`)
+/// instead of falling through to pyo3's generic conversion error.
 macro_rules! extract_scalar {
-    ($opts:expr, $config:expr, $key:literal, $field:ident) => {
-        if let Ok(val) = $opts.get_item($key) {
-            if !val.is_none() {
-                $config.$field = Some(val.extract()?);
+    ($opts:expr, $config:expr, $key:literal, $field:ident, $type_desc:literal) => {
+        match $opts.get_item($key) {
+            Ok(val) => {
+                if !val.is_none() {
+                    $config.$field = Some(val.extract().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(format!(
+                            "sheet option '{}' must be {}, got {}",
+                            $key,
+                            $type_desc,
+                            pytype_name(&val)
+                        ))
+                    })?);
+                }
             }
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>($opts.py()) => {}
+            Err(e) => return Err(e),
         }
     };
 }
@@ -170,11 +190,17 @@ pub(crate) fn extract_sheet_info<'py>(
         let mut config = SheetConfig::default();
 
         // Extract scalar fields
-        extract_scalar!(opts, config, "header", header);
-        extract_scalar!(opts, config, "autofit", autofit);
-        extract_scalar!(opts, config, "freeze_panes", freeze_panes);
-        extract_scalar!(opts, config, "row_heights", row_heights);
-        extract_scalar!(opts, config, "table_name", table_name);
+        extract_scalar!(opts, config, "header", header, "a bool");
+        extract_scalar!(opts, config, "autofit", autofit, "a bool");
+        extract_scalar!(opts, config, "freeze_panes", freeze_panes, "a bool");
+        extract_scalar!(
+            opts,
+            config,
+            "row_heights",
+            row_heights,
+            "a dict mapping row index (int) to height (number)"
+        );
+        extract_scalar!(opts, config, "table_name", table_name, "a string");
 
         // table_style needs special handling: None means "explicitly no style"
         if let Ok(val) = opts.get_item("table_style") {
@@ -481,10 +507,11 @@ pub(crate) fn extract_hyperlinks(
 
 /// Extract comments from Python dict
 /// Supports: {'A1': 'text'} or {'A1': {'text': 'note', 'author': 'John'}}
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_comments(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Comment>> {
-    let mut comments: HashMap<String, Comment> = HashMap::new();
+) -> PyResult<IndexMap<String, Comment>> {
+    let mut comments: IndexMap<String, Comment> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -539,7 +566,7 @@ pub(crate) fn extract_validations(
             return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "validations['{}']: expected dict, got {}",
                 col_str,
-                config.get_type().name()?
+                pytype_name(&config)
             )));
         }
     }
@@ -547,10 +574,11 @@ pub(crate) fn extract_validations(
 }
 
 /// Extract rich_text from Python dict (cell_ref -> list of segments)
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_rich_text(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, Vec<RichTextSegment>>> {
-    let mut rich_text: HashMap<String, Vec<RichTextSegment>> = HashMap::new();
+) -> PyResult<IndexMap<String, Vec<RichTextSegment>>> {
+    let mut rich_text: IndexMap<String, Vec<RichTextSegment>> = IndexMap::new();
 
     for (cell_ref, segments_list) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -592,7 +620,7 @@ pub(crate) fn extract_rich_text(
                         "rich_text['{}']: segment {} must be a string or tuple (text, format_dict), got {}",
                         cell_str,
                         idx,
-                        item.get_type().name()?
+                        pytype_name(&item)
                     )));
                 }
             }
@@ -600,7 +628,7 @@ pub(crate) fn extract_rich_text(
             return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "rich_text['{}']: expected list of segments, got {}",
                 cell_str,
-                segments_list.get_type().name()?
+                pytype_name(&segments_list)
             )));
         }
 
@@ -613,10 +641,11 @@ pub(crate) fn extract_rich_text(
 }
 
 /// Extract images from Python dict (cell_ref -> path or config dict)
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_images(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, ImageConfig>> {
-    let mut images: HashMap<String, ImageConfig> = HashMap::new();
+) -> PyResult<IndexMap<String, ImageConfig>> {
+    let mut images: IndexMap<String, ImageConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -661,10 +690,11 @@ pub(crate) fn extract_images(
 /// Extract checkboxes from Python dict (cell_ref -> bool or config dict)
 /// Simple form: {'A1': True}
 /// Dict form: {'A1': {'checked': True, 'format': {...}}}
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_checkboxes(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, CheckboxConfig>> {
-    let mut checkboxes: HashMap<String, CheckboxConfig> = HashMap::new();
+) -> PyResult<IndexMap<String, CheckboxConfig>> {
+    let mut checkboxes: IndexMap<String, CheckboxConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -730,10 +760,11 @@ pub(crate) fn extract_checkboxes(
 /// Extract textboxes from Python dict (cell_ref -> text or config dict)
 /// Simple form: {'A1': 'Some text'}
 /// Dict form: {'A1': {'text': 'Some text', 'width': 200, 'height': 100, 'font': {...}, ...}}
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_textboxes(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, TextboxConfig>> {
-    let mut textboxes: HashMap<String, TextboxConfig> = HashMap::new();
+) -> PyResult<IndexMap<String, TextboxConfig>> {
+    let mut textboxes: IndexMap<String, TextboxConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -778,10 +809,11 @@ pub(crate) fn extract_textboxes(
 }
 
 /// Extract charts from Python dict (cell_ref -> chart options dict)
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_charts(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, ChartConfig>> {
-    let mut charts: HashMap<String, ChartConfig> = HashMap::new();
+) -> PyResult<IndexMap<String, ChartConfig>> {
+    let mut charts: IndexMap<String, ChartConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
@@ -799,10 +831,11 @@ pub(crate) fn extract_charts(
 }
 
 /// Extract sparklines from Python dict (location ref -> sparkline options dict)
+/// Uses IndexMap to preserve insertion order so output is reproducible.
 pub(crate) fn extract_sparklines(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
-) -> PyResult<HashMap<String, SparklineConfig>> {
-    let mut sparklines: HashMap<String, SparklineConfig> = HashMap::new();
+) -> PyResult<IndexMap<String, SparklineConfig>> {
+    let mut sparklines: IndexMap<String, SparklineConfig> = IndexMap::new();
 
     for (loc_ref, value) in py_dict.iter() {
         let loc_str: String = loc_ref.extract()?;

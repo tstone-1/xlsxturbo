@@ -37,7 +37,7 @@ uv run pytest tests/
 cargo fmt --check
 
 # Linter (must pass with no warnings)
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 
 # Format code (if check fails)
 cargo fmt
@@ -52,7 +52,7 @@ Before pushing to main or creating a PR, verify all checks pass locally:
 cargo fmt --check
 
 # 2. Linter (no warnings)
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 
 # 3. Rust tests
 cargo test
@@ -170,7 +170,7 @@ cargo fmt --check
 cargo fmt
 
 # Check clippy warnings
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
 
 ### Release Workflow Fails

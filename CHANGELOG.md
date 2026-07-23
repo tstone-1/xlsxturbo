@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2] - 2026-07-23
+
+### Fixed
+- Pure-bool-dtype DataFrame columns (a pandas column whose dtype is entirely `bool`, or a polars `Boolean` column) now write real Excel booleans instead of the numbers 1/0. The `np.bool_`/`np.bool` scalar these columns yield satisfies `__index__` and was previously falling through to the numeric fallback before the boolean check.
+- `autofit=True` combined with a `column_widths` dict that names specific columns but has no `'_all'` key now still autofits the remaining columns, instead of silently leaving them at Excel's default width.
+- The `dfs_to_xlsx` duplicate-table-name pre-check no longer false-positives when two empty DataFrames share a `table_name`/`table_style`, since neither actually creates a table (matching the existing `row_count > 0` gate on table creation).
+- Save failures (`df_to_xlsx`, `dfs_to_xlsx`, and CSV conversion) now include the output path in the error message.
+- `dfs_to_xlsx` write-phase errors and `constant_memory` disabled-feature warnings now name the failing/affected sheet.
+
+### Changed
+- A per-sheet `column_widths={}` no longer suppresses `autofit` for that sheet: an explicitly empty dict now disables only the widths option, matching the "empty dict/list disables this option" convention already used elsewhere. `column_widths` combined with `autofit=True` and no `'_all'` key now autofits every column not explicitly listed, rather than dropping autofit entirely once any `column_widths` key was present.
+- Wrong-typed per-sheet scalar options (e.g. `{"header": "yes"}`) now raise a context-rich `TypeError` naming the option and the offending type, instead of a generic pyo3 conversion error.
+- Unknown-key error phrasing is unified through a single shared helper across `apply/*` and `parse/formats.rs` (previously "unknown font option", "Unknown format option", and similar messages varied by feature).
+- Format-dict errors (header format, column formats, rich text, merged-range/border formats) now carry the owning feature/cell-ref context, e.g. `column_formats['price_*']: ...` instead of a bare `format option '...'`.
+- `dfs_to_xlsx` rejects an empty `sheets` list instead of silently writing a blank workbook.
+- A textbox font flag explicitly set to `None` (e.g. `font={"bold": None}`) is now treated as absent, matching the None-means-absent convention used by every other optional field, instead of raising a type error.
+
+### Internal
+- Consolidated per-feature option-dict extraction (charts, sparklines, validations, images/checkboxes/textboxes, conditional formats, format dicts) behind a single `OptionMap` view in `types.rs`, removing roughly 400 lines of near-duplicate `<feature>_string_field`/`<feature>_bool_field` wrapper functions.
+- The cell-ref-keyed feature maps (`comments`, `rich_text`, `images`, `checkboxes`, `textboxes`, `charts`, `sparklines`) now use `IndexMap` instead of `HashMap`, so their iteration order follows Python dict insertion order and generated workbook XML is reproducible byte-for-byte across runs with the same input.
+- New `tests/test_option_coverage.py`: a completeness-guarded test that writes a minimal workbook per per-sheet option and asserts an observable effect, so an option that is accepted/extracted but never applied in `apply_worksheet_features` fails a test instead of shipping silently.
+- CI clippy now runs with `--all-targets`; `actions/setup-python` bumped v6 -> v7 across CI and release workflows.
+- Integration tests (`tests/test_integration.py`) now read back comments, validations, rich text, and images via openpyxl/zipfile instead of only asserting the output file exists.
+- README documents that CSV/DataFrame string values are always written as literal text, never interpreted as formulas (formula injection note).
+
 ## [0.17.1] - 2026-07-13
 
 ### Fixed

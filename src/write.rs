@@ -210,6 +210,17 @@ pub(crate) fn write_py_value_with_format(
         return write_str(worksheet, row, col, "", column_format);
     }
 
+    // numpy scalar bool. Checked after the `PyBool` cast above (which only
+    // matches real Python bool) and before the generic int/float fallbacks
+    // below, since `np.bool_`/`np.bool` satisfies `__index__` and would
+    // otherwise be silently written as the number 0/1. The type name is
+    // "bool_" on numpy 1.x and "bool" on numpy 2.x.
+    if type_name == "bool_" || type_name == "bool" {
+        if let Ok(val) = value.extract::<bool>() {
+            return write_bool(worksheet, row, col, val, column_format);
+        }
+    }
+
     if type_name == "datetime64" {
         let us_since_epoch: i64 = value
             .call_method1("astype", ("datetime64[us]",))

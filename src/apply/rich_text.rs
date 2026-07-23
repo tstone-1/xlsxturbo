@@ -2,18 +2,19 @@
 
 use crate::parse::{parse_cell_ref, parse_rich_text_format};
 use crate::types::RichTextSegment;
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Format, Worksheet};
-use std::collections::HashMap;
 
 /// Apply rich text to worksheet
 pub(crate) fn apply_rich_text(
     py: Python<'_>,
     worksheet: &mut Worksheet,
-    rich_text: &HashMap<String, Vec<RichTextSegment>>,
+    rich_text: &IndexMap<String, Vec<RichTextSegment>>,
 ) -> Result<(), String> {
     for (cell_ref, segments) in rich_text {
         let (row, col) = parse_cell_ref(cell_ref)?;
+        let context = format!("rich_text['{}']", cell_ref);
 
         // Build formats and strings separately
         let mut formats: Vec<Format> = Vec::new();
@@ -21,7 +22,7 @@ pub(crate) fn apply_rich_text(
 
         for (text, format_dict) in segments {
             if let Some(fmt_dict) = format_dict {
-                let format = parse_rich_text_format(py, fmt_dict)?;
+                let format = parse_rich_text_format(py, fmt_dict, &context)?;
                 formats.push(format);
             } else {
                 formats.push(Format::new());

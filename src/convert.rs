@@ -93,7 +93,7 @@ pub fn convert_csv_to_xlsx(
     // Save workbook
     workbook
         .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
 
     Ok((row_count, col_count))
 }
@@ -170,7 +170,7 @@ pub fn convert_csv_to_xlsx_parallel(
 
     workbook
         .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
 
     Ok((row_count, col_count))
 }
@@ -261,6 +261,29 @@ fn write_row_cell(
     )
 }
 
+/// Get a DataFrame's row count without reading its data.
+///
+/// Shared by `write_sheet_data` (to decide whether to write a table) and the
+/// `dfs_to_xlsx` duplicate-table-name pre-check (which must mirror the same
+/// row_count > 0 condition that gates table creation, so two empty
+/// DataFrames sharing a table name don't false-positive as a conflict).
+pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String> {
+    if df.hasattr("shape").unwrap_or(false) {
+        let shape = df
+            .getattr("shape")
+            .map_err(|e| format!("Failed to get DataFrame shape: {}", e))?;
+        let shape_tuple: (usize, usize) = shape
+            .extract()
+            .map_err(|e| format!("Failed to extract DataFrame shape: {}", e))?;
+        Ok(shape_tuple.0)
+    } else {
+        df.call_method0("__len__")
+            .map_err(|e| format!("Failed to get DataFrame length: {}", e))?
+            .extract()
+            .map_err(|e| format!("Failed to extract DataFrame length: {}", e))
+    }
+}
+
 /// Write DataFrame data and apply all features to a worksheet.
 ///
 /// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
@@ -269,6 +292,7 @@ fn write_row_cell(
 pub(crate) fn write_sheet_data(
     py: Python<'_>,
     worksheet: &mut Worksheet,
+    sheet_name: &str,
     df: &Bound<'_, PyAny>,
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
@@ -279,7 +303,7 @@ pub(crate) fn write_sheet_data(
 
     // Parse header format if provided
     let header_fmt = if let Some(fmt_dict) = opts.header_format {
-        Some(parse_header_format(py, fmt_dict)?)
+        Some(parse_header_format(py, fmt_dict, "header_format")?)
     } else {
         None
     };
@@ -326,20 +350,7 @@ pub(crate) fn write_sheet_data(
     }
 
     // Get row count
-    let row_count: usize = if df.hasattr("shape").unwrap_or(false) {
-        let shape = df
-            .getattr("shape")
-            .map_err(|e| format!("Failed to get DataFrame shape: {}", e))?;
-        let shape_tuple: (usize, usize) = shape
-            .extract()
-            .map_err(|e| format!("Failed to extract DataFrame shape: {}", e))?;
-        shape_tuple.0
-    } else {
-        df.call_method0("__len__")
-            .map_err(|e| format!("Failed to get DataFrame length: {}", e))?
-            .extract()
-            .map_err(|e| format!("Failed to extract DataFrame length: {}", e))?
-    };
+    let row_count: usize = dataframe_row_count(df)?;
 
     if is_polars {
         // Polars: iterate using rows()
@@ -424,6 +435,7 @@ pub(crate) fn write_sheet_data(
     let total_col_count = apply_worksheet_features(
         py,
         worksheet,
+        sheet_name,
         &columns,
         col_count,
         row_idx,
@@ -453,7 +465,7 @@ pub(crate) fn write_configured_sheet(
     worksheet
         .set_name(sheet_name)
         .map_err(|e| format!("Failed to set sheet name '{}': {}", sheet_name, e))?;
-    write_sheet_data(py, worksheet, df, config, opts)
+    write_sheet_data(py, worksheet, sheet_name, df, config, opts)
 }
 
 /// Complex feature options that still work under `constant_memory` because they
@@ -468,6 +480,7 @@ const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &["column_widths", "header_format"
 /// this warning — only the handful of scalar flags are listed by hand.
 fn warn_constant_memory_skips(
     py: Python<'_>,
+    sheet_name: &str,
     config: &WriteConfig<'_>,
     opts: &EffectiveOpts<'_>,
 ) -> Result<(), String> {
@@ -500,7 +513,8 @@ fn warn_constant_memory_skips(
         .import("warnings")
         .map_err(|e| format!("Failed to import warnings: {}", e))?;
     let msg = format!(
-        "constant_memory=True disables these features: {}",
+        "sheet '{}': constant_memory=True disables these features: {}",
+        sheet_name,
         disabled.join(", ")
     );
     let runtime_warning = py
@@ -517,12 +531,14 @@ fn warn_constant_memory_skips(
 ///
 /// Handles: table formatting, formula columns, conditional formats, freeze panes,
 /// column widths/autofit, row heights, merged ranges, hyperlinks, comments,
-/// validations, rich text, and images. All features except column widths are
-/// skipped in constant_memory mode.
+/// validations, rich text, images, checkboxes, textboxes, native Excel charts,
+/// sparklines, and arbitrary cell writes. All features except column widths,
+/// header format, and column formats are skipped in constant_memory mode.
 #[allow(clippy::too_many_arguments)]
 fn apply_worksheet_features(
     py: Python<'_>,
     worksheet: &mut Worksheet,
+    sheet_name: &str,
     columns: &[String],
     col_count: u16,
     last_row_idx: u32,
@@ -535,7 +551,7 @@ fn apply_worksheet_features(
     // In constant_memory mode, only column widths (without autofit) are supported.
     // Warn about every other requested feature right here, next to the skip.
     if config.constant_memory {
-        warn_constant_memory_skips(py, config, opts)?;
+        warn_constant_memory_skips(py, sheet_name, config, opts)?;
         if let Some(widths) = opts.column_widths {
             apply_column_widths(worksheet, col_count, widths)?;
         }
@@ -610,6 +626,12 @@ fn apply_worksheet_features(
     if let Some(widths) = opts.column_widths {
         if config.autofit && widths.contains_key("_all") {
             apply_column_widths_with_autofit_cap(worksheet, col_count, widths, content_widths)?;
+        } else if config.autofit {
+            // No "_all" cap: autofit every column to its content first, then
+            // apply the explicit widths on top so listed columns win and the
+            // rest still get autofitted instead of being silently skipped.
+            worksheet.autofit();
+            apply_column_widths(worksheet, col_count, widths)?;
         } else {
             apply_column_widths(worksheet, col_count, widths)?;
         }
@@ -748,7 +770,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
 
     workbook
         .save(output_path)
-        .map_err(|e| format!("Failed to save workbook: {}", e))?;
+        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
 
     Ok(result)
 }

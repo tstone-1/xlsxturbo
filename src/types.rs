@@ -158,8 +158,9 @@ pub(crate) fn pytype_name(v: &Bound<'_, PyAny>) -> String {
 /// A present value of the wrong type yields `Err(on_err(bound))`, letting the
 /// caller build a context-rich message (e.g. embedding `pytype_name(bound)`).
 ///
-/// This is the single shared implementation behind the per-feature
-/// `*_field` extractor helpers in `apply/*` and `parse/formats.rs`.
+/// This is the single shared implementation behind [`extract_field`] and,
+/// through it, every [`OptionMap`] typed accessor used by `apply/*` and
+/// `parse/formats.rs`.
 pub(crate) fn extract_opt<'py, T, F>(
     py: Python<'py>,
     entry: Option<&Py<PyAny>>,
@@ -183,9 +184,11 @@ where
 /// form `"<context>: '<key>' must be <type_desc>, got <actual>"`.
 ///
 /// Thin wrapper over [`extract_opt`] that centralizes the per-feature error
-/// phrasing so the `apply/*` and `parse/formats` field helpers can't drift —
-/// some used to include the offending type and some didn't. `context` is the
-/// already-formatted option locator (e.g. `"charts['D2']"`).
+/// phrasing so call sites can't drift — some used to include the offending
+/// type and some didn't. `context` is the already-formatted option locator
+/// (e.g. `"charts['D2']"`). The sole caller is [`OptionMap::field`]; other
+/// code should extract through an `OptionMap` instead of calling this
+/// directly.
 pub(crate) fn extract_field<'py, T>(
     py: Python<'py>,
     entry: Option<&Py<PyAny>>,
@@ -207,15 +210,167 @@ where
     })
 }
 
+/// A context-bound view over a raw `HashMap<String, Py<PyAny>>` option dict,
+/// centralizing the "extract typed field, on wrong type produce a context-rich
+/// error" pattern.
+///
+/// Before this existed, every blob-extracted feature (charts, sparklines,
+/// validations, images/checkboxes/textboxes, conditional formats, format
+/// dicts) hand-rolled its own near-identical family of `<feature>_string_field`
+/// / `<feature>_bool_field` / ... free functions on top of [`extract_opt`],
+/// each repeating the same "build the context string, call extract_opt, map
+/// the error" boilerplate (~400 lines total across `apply/*` and
+/// `parse/formats.rs`). `OptionMap` holds the context once and exposes typed
+/// accessors, so a new call site is one line instead of a new wrapper
+/// function. See `AGENTS.md` (7-touchpoint checklist, touchpoint 4) for when
+/// to reach for this vs. eager typed extraction at extract time.
+pub(crate) struct OptionMap<'py, 'm> {
+    py: Python<'py>,
+    map: &'m HashMap<String, Py<PyAny>>,
+    context: String,
+}
+
+impl<'py, 'm> OptionMap<'py, 'm> {
+    /// Build a view over `map` whose errors are prefixed with `context`
+    /// (e.g. `"charts['D2']"` or `"textboxes['B2']: font"`).
+    pub(crate) fn new(
+        py: Python<'py>,
+        map: &'m HashMap<String, Py<PyAny>>,
+        context: String,
+    ) -> Self {
+        Self { py, map, context }
+    }
+
+    /// The context string every error from this view is prefixed with.
+    pub(crate) fn context(&self) -> &str {
+        &self.context
+    }
+
+    /// The GIL token this view was built with, for call sites that need to
+    /// hand off to a helper taking `Python<'py>` directly (e.g. a nested
+    /// format-dict parser).
+    pub(crate) fn py(&self) -> Python<'py> {
+        self.py
+    }
+
+    /// Raw entry lookup, for call sites that need to hand-extract (e.g. a
+    /// required field with bespoke wording, or a value that may be either a
+    /// string or a number).
+    pub(crate) fn get(&self, key: &str) -> Option<&'m Py<PyAny>> {
+        self.map.get(key)
+    }
+
+    fn field<T>(&self, key: &str, type_desc: &str) -> Result<Option<T>, String>
+    where
+        T: for<'a> FromPyObject<'a, 'py>,
+    {
+        extract_field(self.py, self.map.get(key), &self.context, key, type_desc)
+    }
+
+    /// Extract an optional string field. Missing or `None` yields `Ok(None)`.
+    pub(crate) fn string(&self, key: &str) -> Result<Option<String>, String> {
+        self.field(key, "a string")
+    }
+
+    /// Extract an optional bool field. Missing or `None` yields `Ok(None)`.
+    pub(crate) fn bool(&self, key: &str) -> Result<Option<bool>, String> {
+        self.field(key, "a bool")
+    }
+
+    /// Extract an optional f64 (number) field. Missing or `None` yields `Ok(None)`.
+    pub(crate) fn f64(&self, key: &str) -> Result<Option<f64>, String> {
+        self.field(key, "a number")
+    }
+
+    /// Extract an optional i64 (integer) field. Missing or `None` yields `Ok(None)`.
+    pub(crate) fn i64(&self, key: &str) -> Result<Option<i64>, String> {
+        self.field(key, "an integer")
+    }
+
+    /// Extract an optional u32 (non-negative integer) field.
+    pub(crate) fn u32(&self, key: &str) -> Result<Option<u32>, String> {
+        self.field(key, "a non-negative integer")
+    }
+
+    /// Extract an optional u8 (0-255 integer) field.
+    pub(crate) fn u8(&self, key: &str) -> Result<Option<u8>, String> {
+        self.field(key, "an integer in the range 0-255")
+    }
+
+    /// Extract a required string field: missing/`None` is an error naming the key.
+    pub(crate) fn required_string(&self, key: &str) -> Result<String, String> {
+        self.string(key)?
+            .ok_or_else(|| format!("{}: missing '{}' key", self.context, key))
+    }
+
+    /// Extract a required f64 field: missing/`None` is an error naming the key.
+    pub(crate) fn required_f64(&self, key: &str) -> Result<f64, String> {
+        self.f64(key)?
+            .ok_or_else(|| format!("{}: missing '{}' key", self.context, key))
+    }
+
+    /// Extract an optional nested-dict field into a plain `HashMap`. Missing
+    /// or `None` yields `Ok(None)`; a present non-dict value is a context-rich
+    /// error naming the key and the received type.
+    pub(crate) fn dict(&self, key: &str) -> Result<Option<HashMap<String, Py<PyAny>>>, String> {
+        let Some(obj) = self.map.get(key) else {
+            return Ok(None);
+        };
+        let bound = obj.bind(self.py);
+        if bound.is_none() {
+            return Ok(None);
+        }
+        let inner = bound.cast::<pyo3::types::PyDict>().map_err(|_| {
+            format!(
+                "{}: '{}' must be a dict, got {}",
+                self.context,
+                key,
+                pytype_name(bound)
+            )
+        })?;
+        pydict_to_hashmap(inner)
+            .map(Some)
+            .map_err(|e| format!("{}: {}", self.context, e))
+    }
+
+    /// Reject any key not in `allowed`, using this view's context and no
+    /// qualifier (see [`reject_unknown_keys`]).
+    pub(crate) fn reject_unknown(&self, allowed: &[&str]) -> Result<(), String> {
+        reject_unknown_keys(
+            self.map.keys().map(String::as_str),
+            &self.context,
+            None,
+            allowed,
+        )
+    }
+
+    /// Reject any key not in `allowed`, using this view's context and
+    /// `qualifier` (e.g. a resolved conditional-format type) to narrow the
+    /// "Valid for `<qualifier>`" listing (see [`reject_unknown_keys`]).
+    pub(crate) fn reject_unknown_for(
+        &self,
+        qualifier: &str,
+        allowed: &[&str],
+    ) -> Result<(), String> {
+        reject_unknown_keys(
+            self.map.keys().map(String::as_str),
+            &self.context,
+            Some(qualifier),
+            allowed,
+        )
+    }
+}
+
 /// Reject the first key not in `allowed`, producing a context-rich error that
 /// names the feature/ref and lists valid keys.
 ///
 /// Single source of truth for the "unknown option" phrasing used across
-/// `extract.rs` (comments/checkboxes/cells dict forms), `apply/charts.rs`
-/// (top-level and series-item chart keys), `apply/conditional_formats.rs`
-/// (per-type key sets), and `apply/validations.rs` (per-validation-type key
-/// sets). `qualifier`, when present, names the more specific thing `allowed`
-/// applies to (e.g. a conditional format type) and is rendered as "Valid for
+/// `extract.rs` (comments/checkboxes/cells dict forms) and, via
+/// [`OptionMap::reject_unknown`]/[`OptionMap::reject_unknown_for`], every
+/// blob-extracted `apply/*` feature (charts, sparklines, validations,
+/// images/checkboxes/textboxes, conditional formats) and `parse/formats.rs`.
+/// `qualifier`, when present, names the more specific thing `allowed` applies
+/// to (e.g. a conditional format type) and is rendered as "Valid for
 /// `<qualifier>`"; when `None` it renders as plain "Valid".
 ///
 /// Pure string-key logic (no PyO3 types) so it is unit-testable without a
@@ -329,14 +484,19 @@ pub(crate) struct SheetConfig {
     pub(crate) formula_columns: Option<IndexMap<String, String>>, // Column name -> formula template (ordered)
     pub(crate) merged_ranges: Option<Vec<MergedRange>>,           // (range, text, format)
     pub(crate) hyperlinks: Option<Vec<Hyperlink>>, // (cell, url, optional display_text)
-    pub(crate) comments: Option<HashMap<String, Comment>>, // cell_ref -> (text, author)
+    // The following feature maps use `IndexMap` (not `HashMap`) so their
+    // iteration order follows Python dict insertion order — a `HashMap`'s
+    // random iteration order would make generated workbooks non-reproducible
+    // byte-for-byte across runs (the XML parts list objects in insertion
+    // order).
+    pub(crate) comments: Option<IndexMap<String, Comment>>, // cell_ref -> (text, author)
     pub(crate) validations: Option<IndexMap<String, ValidationConfig>>, // column name/pattern -> validation config
-    pub(crate) rich_text: Option<HashMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
-    pub(crate) images: Option<HashMap<String, ImageConfig>>,
-    pub(crate) checkboxes: Option<HashMap<String, CheckboxConfig>>,
-    pub(crate) textboxes: Option<HashMap<String, TextboxConfig>>,
-    pub(crate) charts: Option<HashMap<String, ChartConfig>>, // cell_ref -> chart options
-    pub(crate) sparklines: Option<HashMap<String, SparklineConfig>>, // location ref -> sparkline options
+    pub(crate) rich_text: Option<IndexMap<String, Vec<RichTextSegment>>>, // cell_ref -> segments
+    pub(crate) images: Option<IndexMap<String, ImageConfig>>,
+    pub(crate) checkboxes: Option<IndexMap<String, CheckboxConfig>>,
+    pub(crate) textboxes: Option<IndexMap<String, TextboxConfig>>,
+    pub(crate) charts: Option<IndexMap<String, ChartConfig>>, // cell_ref -> chart options
+    pub(crate) sparklines: Option<IndexMap<String, SparklineConfig>>, // location ref -> sparkline options
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -469,14 +629,14 @@ define_options! {
     formula_columns: IndexMap<String, String>,
     merged_ranges: Vec<MergedRange>,
     hyperlinks: Vec<Hyperlink>,
-    comments: HashMap<String, Comment>,
+    comments: IndexMap<String, Comment>,
     validations: IndexMap<String, ValidationConfig>,
-    rich_text: HashMap<String, Vec<RichTextSegment>>,
-    images: HashMap<String, ImageConfig>,
-    checkboxes: HashMap<String, CheckboxConfig>,
-    textboxes: HashMap<String, TextboxConfig>,
-    charts: HashMap<String, ChartConfig>,
-    sparklines: HashMap<String, SparklineConfig>,
+    rich_text: IndexMap<String, Vec<RichTextSegment>>,
+    images: IndexMap<String, ImageConfig>,
+    checkboxes: IndexMap<String, CheckboxConfig>,
+    textboxes: IndexMap<String, TextboxConfig>,
+    charts: IndexMap<String, ChartConfig>,
+    sparklines: IndexMap<String, SparklineConfig>,
     cells: Vec<CellWrite>,
 }
 

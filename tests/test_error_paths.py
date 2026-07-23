@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL
+from tests.helpers import HAS_OPENPYXL, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
@@ -219,12 +221,97 @@ class TestErrorPaths:
         with pytest.raises(ValueError, match="Unknown sheet option 'tabel_style'"):
             xlsxturbo.dfs_to_xlsx(bad_sheets, tmp_xlsx)  # type: ignore[arg-type]
 
+    def test_dfs_to_xlsx_per_sheet_header_wrong_type_raises(self, tmp_xlsx: str) -> None:
+        """A wrong-typed per-sheet scalar option names the option and the received type.
+
+        Exercises the per-sheet `header` option, which is extracted from the
+        options dict via the `extract_scalar!` macro in `src/extract.rs`
+        (distinct from the top-level `header` kwarg below, which pyo3 types
+        and converts directly). The macro must propagate a context-rich error
+        naming both `header` and the offending Python type instead of the
+        default pyo3 conversion error.
+        """
+        df = pd.DataFrame({"A": [1]})
+        # "yes" is intentionally the wrong type for the bool-typed 'header' option.
+        bad_sheets = [(df, "Sheet1", {"header": "yes"})]
+        with pytest.raises(TypeError, match=r"header.*bool.*str"):
+            xlsxturbo.dfs_to_xlsx(bad_sheets, tmp_xlsx)  # type: ignore[arg-type]
+
+    def test_df_to_xlsx_header_wrong_type_raises(self, tmp_xlsx: str) -> None:
+        """A wrong-typed top-level `header` kwarg still raises a clear TypeError.
+
+        Unlike the per-sheet option above, the top-level `header` kwarg is
+        typed directly in the pyo3 function signature, so pyo3's own argument
+        conversion rejects it before any of our Rust code runs; the message
+        does not carry our `<option>: ...` context phrasing, but it must
+        still identify both the expected and the offending type.
+        """
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(TypeError) as exc_info:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, header="yes")  # type: ignore[arg-type]
+        message = str(exc_info.value).lower()
+        assert "bool" in message
+        assert "str" in message
+
     def test_cells_wrap_text_wrong_type_raises(self, tmp_xlsx: str) -> None:
         """Invalid cells wrap_text type raises a clear TypeError."""
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(TypeError, match=r"wrap_text.*bool"):
             # wrap_text must be a bool; "yes" is intentionally the wrong type.
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells={"B1": {"value": "x", "wrap_text": "yes"}})  # type: ignore[arg-type]
+
+    def test_dfs_to_xlsx_write_error_names_the_failing_sheet(self, tmp_xlsx: str) -> None:
+        """A per-sheet write-phase error (raised inside write_sheet_data) names its sheet.
+
+        `column_formats` validation runs inside `write_sheet_data` (via
+        `build_column_formats`), not during the up-front option extraction,
+        so its error is a good probe for the `sheet '<name>': ` prefix that
+        `dfs_to_xlsx` adds around each sheet's write result.
+        """
+        df1 = pd.DataFrame({"A": [1]})
+        df2 = pd.DataFrame({"B": [2]})
+        sheets = [
+            (df1, "Sheet1"),
+            # "Missing" matches no column on Sheet2, which is intentionally invalid.
+            (df2, "Sheet2", {"column_formats": {"Missing": {"bold": True}}}),
+        ]
+        with pytest.raises(ValueError, match=r"sheet 'Sheet2'.*column_formats.*Missing"):
+            xlsxturbo.dfs_to_xlsx(sheets, tmp_xlsx)
+
+    def test_dfs_to_xlsx_empty_dataframes_same_table_name_succeeds(self, tmp_xlsx: str) -> None:
+        """Two empty DataFrames sharing a table_name/table_style do not false-positive as a conflict.
+
+        A table is only actually created when `row_count > 0` (the same gate
+        `apply_worksheet_features` uses), so the duplicate-table-name
+        pre-check must skip empty sheets too, matching that behavior.
+        """
+        df1 = pd.DataFrame({"A": pd.Series([], dtype="int64")})
+        df2 = pd.DataFrame({"B": pd.Series([], dtype="int64")})
+        sheets = [
+            (df1, "Sheet1", {"table_style": "Medium2", "table_name": "SharedTable"}),
+            (df2, "Sheet2", {"table_style": "Medium2", "table_name": "SharedTable"}),
+        ]
+        result = xlsxturbo.dfs_to_xlsx(sheets, tmp_xlsx)  # type: ignore[arg-type]
+        assert len(result) == 2
+        wb = load_workbook(tmp_xlsx)
+        # Neither sheet has any data rows, so neither gets an actual Excel table.
+        assert len(wb["Sheet1"].tables) == 0
+        assert len(wb["Sheet2"].tables) == 0
+        wb.close()
+
+    def test_dfs_to_xlsx_empty_sheets_list_raises(self, tmp_xlsx: str) -> None:
+        """dfs_to_xlsx rejects an empty sheets list instead of silently writing a blank workbook."""
+        with pytest.raises(ValueError, match="at least one sheet"):
+            xlsxturbo.dfs_to_xlsx([], tmp_xlsx)
+
+    def test_df_to_xlsx_save_error_includes_output_path(self, tmp_path: Path) -> None:
+        """A save failure (e.g. a nonexistent output directory) names the output path."""
+        df = pd.DataFrame({"A": [1]})
+        bad_path = str(tmp_path / "does_not_exist_dir" / "out.xlsx")
+        with pytest.raises(ValueError, match="Failed to save") as exc_info:
+            xlsxturbo.df_to_xlsx(df, bad_path)
+        message = str(exc_info.value)
+        assert bad_path in message
 
     def test_bytes_fspath_output_path_raises_clear_message(self) -> None:
         """A path-like object whose __fspath__ returns bytes is rejected with a clear message.

@@ -22,7 +22,7 @@ mod write;
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel};
 pub use types::DateOrder;
 
-use convert::{convert_dataframe_to_xlsx, write_configured_sheet};
+use convert::{convert_dataframe_to_xlsx, dataframe_row_count, write_configured_sheet};
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
@@ -253,17 +253,30 @@ fn csv_to_xlsx(
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
+///              Combined with column_widths: explicit widths win for the columns
+///              they name; every other column is still autofitted (rather than
+///              left at Excel's default width). Add an "_all" entry in
+///              column_widths to cap the autofit width instead of overriding it.
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
-///     column_widths: Dict mapping column index (0-based) to width in characters (default: None)
-///                    Example: {0: 20, 1: 15, 3: 30} sets widths for columns A, B, and D
+///     column_widths: Dict mapping column index (0-based) or "_all" to width in characters
+///                    (default: None). Example: {0: 20, 1: 15, 3: 30} sets widths for columns
+///                    A, B, and D. An integer key must be a non-negative index within Excel's
+///                    column range (0..=16383); a negative key, a key beyond 16383, or a
+///                    non-integer/non-"_all" key raises. With autofit=True and no "_all" key:
+///                    listed columns get the explicit width, unlisted columns are autofitted.
+///                    With autofit=True and an "_all" key: "_all" caps the autofit width for
+///                    unlisted columns instead of overriding it.
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///                  Example: {0: 20, 5: 30} sets heights for specific rows
 ///     constant_memory: Use constant memory mode for large files (default: False).
-///                      Reduces memory usage but disables table_style, freeze_panes,
-///                      row_heights, and autofit features.
+///                      Emits a RuntimeWarning and disables: table_style, freeze_panes,
+///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
+///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
+///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
+///                      Plain column_widths, header_format, and column_formats remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -271,7 +284,7 @@ fn csv_to_xlsx(
 ///     conditional_formats: Dict mapping column names/patterns to conditional format configs (default: None)
 ///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
-///     table_name: Custom name for the Excel table (default: auto-generated).
+///     table_name: Custom name for the Excel table (requires table_style; default: auto-generated).
 ///                 Must be alphanumeric/underscore, max 255 chars.
 ///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
 ///                      Use {row} as placeholder for the current row number.
@@ -286,6 +299,9 @@ fn csv_to_xlsx(
 ///                  Types: list, whole_number, decimal, text_length
 ///                  (aliases accepted, e.g. integer/number/length — see README).
 ///                  Example: {"status": {"type": "list", "values": ["Open", "Closed"]}}
+///                  For "whole_number", min/max are bounded to the i32 range
+///                  (-2147483648..=2147483647); a value outside that range raises
+///                  ValueError naming the field and range.
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///                Example: {"A1": [("Bold text", {"bold": True}), (" normal text",)]}
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
@@ -301,6 +317,10 @@ fn csv_to_xlsx(
 ///                            "fill_color": "#F0F0F0", "line_color": "#000000",
 ///                            "alt_text": "Descriptive alt text"}}
 ///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
+///             "data_range"/"values_range"/"values" and "categories_range"/"categories"
+///             (including a chart-level fallback used by series without their own)
+///             must include a sheet name (e.g. "Sheet1!$B$2:$B$10"); a bare range
+///             raises ValueError.
 ///             Example: {"D2": {"type": "bar", "data_range": "Sheet1!$B$2:$B$10",
 ///                       "categories_range": "Sheet1!$A$2:$A$10", "title": "Monthly Activity"}}
 ///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
@@ -461,18 +481,33 @@ fn version() -> &'static str {
 ///     output_path: Path for the output XLSX file
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
+///              Combined with column_widths: explicit widths win for the columns
+///              they name; every other column is still autofitted (rather than
+///              left at Excel's default width). Add an "_all" entry in
+///              column_widths to cap the autofit width instead of overriding it.
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
 ///     freeze_panes: Freeze the header row for easier scrolling (default: False)
 ///     column_widths: Dict mapping column index or "_all" to width in characters (default: None)
-///                    Example: {0: 20, "_all": 50} sets col A to 20, caps others at 50
-///     table_name: Name for Excel table (default: auto-generated). Effective names
-///         must be unique across the workbook after sanitization.
+///                    Example: {0: 20, "_all": 50} sets col A to 20, caps others at 50. An
+///                    integer key must be a non-negative index within Excel's column range
+///                    (0..=16383); a negative key, a key beyond 16383, or a
+///                    non-integer/non-"_all" key raises. With autofit=True and no "_all"
+///                    key: listed columns get the explicit width, unlisted columns are
+///                    autofitted. With autofit=True and an "_all" key: "_all" caps the
+///                    autofit width for unlisted columns instead of overriding it.
+///     table_name: Name for Excel table (requires table_style; default: auto-generated).
+///         Effective names must be unique across the workbook after sanitization.
 ///     header_format: Dict with header cell formatting options (default: None)
 ///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///     constant_memory: Use constant memory mode for large files (default: False).
+///                      Emits a RuntimeWarning and disables: table_style, freeze_panes,
+///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
+///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
+///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
+///                      Plain column_widths, header_format, and column_formats remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -488,6 +523,9 @@ fn version() -> &'static str {
 ///     validations: Dict mapping column names/patterns to validation configs (default: None).
 ///                  Types: list, whole_number, decimal, text_length
 ///                  (aliases accepted, e.g. integer/number/length — see README).
+///                  For "whole_number", min/max are bounded to the i32 range
+///                  (-2147483648..=2147483647); a value outside that range raises
+///                  ValueError naming the field and range.
 ///     rich_text: Dict mapping cell refs to lists of formatted text segments (default: None).
 ///     images: Dict mapping cell refs to image paths or config dicts (default: None).
 ///     checkboxes: Dict mapping cell refs to checkbox state (bool) or config dict (default: None).
@@ -495,6 +533,10 @@ fn version() -> &'static str {
 ///     textboxes: Dict mapping cell refs to floating text shapes (default: None).
 ///                Example: {"B2": "text"} or {"B2": {"text": "Note", "width": 200, "font": {"bold": True}}}
 ///     charts: Dict mapping cell refs to native Excel chart configs (default: None).
+///             "data_range"/"values_range"/"values" and "categories_range"/"categories"
+///             (including a chart-level fallback used by series without their own)
+///             must include a sheet name (e.g. "Sheet1!$B$2:$B$10"); a bare range
+///             raises ValueError.
 ///     sparklines: Dict mapping a location ref to a sparkline (mini in-cell chart) config (default: None).
 ///                 Range key (e.g. "D2:D10") makes a grouped sparkline; single cell makes one.
 ///                 "range" must be sheet-qualified, e.g. "Sheet1!A2:C10".
@@ -586,6 +628,11 @@ fn dfs_to_xlsx<'py>(
     sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
+    if sheets.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "dfs_to_xlsx requires at least one sheet, got an empty list",
+        ));
+    }
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
     let mut table_names: HashMap<String, String> = HashMap::new();
@@ -628,15 +675,25 @@ fn dfs_to_xlsx<'py>(
         let effective_row_heights: Option<&HashMap<u32, f64>> =
             sheet_config.row_heights.as_ref().or(row_heights.as_ref());
 
+        // A table is only actually created when there's at least one data row
+        // (see the `row_count > 0` gate in `apply_worksheet_features`), so an
+        // empty DataFrame never claims a table name here either — otherwise
+        // two empty sheets sharing a table name would false-positive as a
+        // conflict.
         if !constant_memory && effective_header && effective_table_style.is_some() {
-            if let Some(name) = effective_table_name.as_deref() {
-                let sanitized = sanitize_table_name(name);
-                let key = sanitized.to_ascii_lowercase();
-                if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
-                        sanitized, previous_sheet, sheet_name
-                    )));
+            let row_count = dataframe_row_count(&df).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("sheet '{}': {}", sheet_name, e))
+            })?;
+            if row_count > 0 {
+                if let Some(name) = effective_table_name.as_deref() {
+                    let sanitized = sanitize_table_name(name);
+                    let key = sanitized.to_ascii_lowercase();
+                    if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
+                            sanitized, previous_sheet, sheet_name
+                        )));
+                    }
                 }
             }
         }
@@ -662,7 +719,9 @@ fn dfs_to_xlsx<'py>(
             &sheet_config_write,
             effective_opts,
         )
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        .map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("sheet '{}': {}", sheet_name, e))
+        })?;
 
         stats.push(result);
     }
@@ -671,9 +730,12 @@ fn dfs_to_xlsx<'py>(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     // Save workbook
-    workbook
-        .save(&output_path)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Failed to save: {}", e)))?;
+    workbook.save(&output_path).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "Failed to save workbook to '{}': {}",
+            output_path, e
+        ))
+    })?;
 
     Ok(stats)
 }

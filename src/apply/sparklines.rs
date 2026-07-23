@@ -6,10 +6,10 @@
 //! range — via [`Worksheet::add_sparkline_group`].
 
 use crate::parse::{parse_cell_range, parse_cell_ref, parse_color_enum};
-use crate::types::{extract_field, SparklineConfig};
+use crate::types::{OptionMap, SparklineConfig};
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Sparkline, SparklineType, Worksheet};
-use std::collections::HashMap;
 
 const SPARKLINE_KEYS: &[&str] = &[
     "range",
@@ -52,83 +52,16 @@ fn parse_sparkline_type(sparkline_type: &str) -> Result<SparklineType, String> {
     }
 }
 
-fn spark_string(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    loc: &str,
-    key: &str,
-) -> Result<Option<String>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("sparklines['{}']", loc),
-        key,
-        "a string",
-    )
-}
-
-fn spark_bool(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    loc: &str,
-    key: &str,
-) -> Result<Option<bool>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("sparklines['{}']", loc),
-        key,
-        "a bool",
-    )
-}
-
-fn spark_i64(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    loc: &str,
-    key: &str,
-) -> Result<Option<i64>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("sparklines['{}']", loc),
-        key,
-        "an integer",
-    )
-}
-
-fn spark_f64(
-    py: Python<'_>,
-    opts: &HashMap<String, Py<PyAny>>,
-    loc: &str,
-    key: &str,
-) -> Result<Option<f64>, String> {
-    extract_field(
-        py,
-        opts.get(key),
-        &format!("sparklines['{}']", loc),
-        key,
-        "a number",
-    )
-}
-
 fn build_sparkline(
     py: Python<'_>,
     loc: &str,
-    config: &HashMap<String, Py<PyAny>>,
+    config: &SparklineConfig,
 ) -> Result<Sparkline, String> {
-    for key in config.keys() {
-        if !SPARKLINE_KEYS.contains(&key.as_str()) {
-            return Err(format!(
-                "sparklines['{}']: unknown option '{}'. Valid: {}",
-                loc,
-                key,
-                SPARKLINE_KEYS.join(", ")
-            ));
-        }
-    }
+    let view = OptionMap::new(py, config, format!("sparklines['{}']", loc));
+    view.reject_unknown(SPARKLINE_KEYS)?;
 
-    let range = spark_string(py, config, loc, "range")?
+    let range = view
+        .string("range")?
         .ok_or_else(|| format!("sparklines['{}']: missing required 'range' key", loc))?;
     // rust_xlsxwriter requires a sheet-qualified range string (like charts);
     // a bare range silently yields an empty data range, so reject it early.
@@ -140,12 +73,12 @@ fn build_sparkline(
     }
     let mut sparkline = Sparkline::new().set_range(range.as_str());
 
-    if let Some(sparkline_type) = spark_string(py, config, loc, "type")? {
+    if let Some(sparkline_type) = view.string("type")? {
         let parsed = parse_sparkline_type(&sparkline_type)
             .map_err(|e| format!("sparklines['{}']: {}", loc, e))?;
         sparkline = sparkline.set_type(parsed);
     }
-    if let Some(style) = spark_i64(py, config, loc, "style")? {
+    if let Some(style) = view.i64("style")? {
         if !(1..=36).contains(&style) {
             return Err(format!(
                 "sparklines['{}']: 'style' must be in the range 1-36, got {}",
@@ -159,7 +92,7 @@ fn build_sparkline(
     // without obscuring which key maps to which rust_xlsxwriter setter.
     macro_rules! apply_bool {
         ($key:literal, $method:ident) => {
-            if let Some(enable) = spark_bool(py, config, loc, $key)? {
+            if let Some(enable) = view.bool($key)? {
                 sparkline = sparkline.$method(enable);
             }
         };
@@ -180,7 +113,7 @@ fn build_sparkline(
     // Color setters all take `impl Into<Color>`.
     macro_rules! apply_color {
         ($key:literal, $method:ident) => {
-            if let Some(color_str) = spark_string(py, config, loc, $key)? {
+            if let Some(color_str) = view.string($key)? {
                 let color = parse_color_enum(&color_str)
                     .map_err(|e| format!("sparklines['{}']: '{}': {}", loc, $key, e))?;
                 sparkline = sparkline.$method(color);
@@ -195,16 +128,16 @@ fn build_sparkline(
     apply_color!("negative_points_color", set_negative_points_color);
     apply_color!("markers_color", set_markers_color);
 
-    if let Some(weight) = spark_f64(py, config, loc, "line_weight")? {
+    if let Some(weight) = view.f64("line_weight")? {
         sparkline = sparkline.set_line_weight(weight);
     }
-    if let Some(max) = spark_f64(py, config, loc, "custom_max")? {
+    if let Some(max) = view.f64("custom_max")? {
         sparkline = sparkline.set_custom_max(max);
     }
-    if let Some(min) = spark_f64(py, config, loc, "custom_min")? {
+    if let Some(min) = view.f64("custom_min")? {
         sparkline = sparkline.set_custom_min(min);
     }
-    if let Some(date_range) = spark_string(py, config, loc, "date_range")? {
+    if let Some(date_range) = view.string("date_range")? {
         if !date_range.contains('!') {
             return Err(format!(
                 "sparklines['{}']: 'date_range' must include a sheet name, e.g. 'Sheet1!{}'",
@@ -221,7 +154,7 @@ fn build_sparkline(
 pub(crate) fn apply_sparklines(
     py: Python<'_>,
     worksheet: &mut Worksheet,
-    sparklines: &HashMap<String, SparklineConfig>,
+    sparklines: &IndexMap<String, SparklineConfig>,
 ) -> Result<(), String> {
     for (loc, config) in sparklines {
         let sparkline = build_sparkline(py, loc, config)?;

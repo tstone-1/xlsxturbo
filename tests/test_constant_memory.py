@@ -128,7 +128,9 @@ class TestConstantMemoryWarning:
         The skip-warning is emitted inside write_sheet_data, which runs once
         per sheet, so table_style set on both sheets of a two-sheet workbook
         produces two separate RuntimeWarnings (one per sheet), not a single
-        workbook-level warning.
+        workbook-level warning. Each warning also names its own sheet so a
+        multi-sheet workbook doesn't leave the user guessing which sheet's
+        options were skipped.
         """
         df1 = pd.DataFrame({"A": [1, 2]})
         df2 = pd.DataFrame({"B": [3, 4]})
@@ -141,9 +143,12 @@ class TestConstantMemoryWarning:
                 table_style="Medium2",
             )
             assert len(w) == 2
+            messages = [str(warning.message) for warning in w]
             for warning in w:
                 assert issubclass(warning.category, RuntimeWarning)
                 assert "table_style" in str(warning.message)
+            assert any("'S1'" in message for message in messages)
+            assert any("'S2'" in message for message in messages)
         wb = load_workbook(tmp_xlsx)
         assert wb["S1"]["A2"].value == 1
         assert wb["S2"]["A2"].value == 3
