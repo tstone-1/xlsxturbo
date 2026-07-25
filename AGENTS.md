@@ -50,10 +50,16 @@
 
 The Python tree (`python/`, `tests/`, `benchmarks/`) must stay clean under ruff, bandit, and pyright, with docstrings and type annotations on all functions. Config lives in `pyproject.toml`; the tools are in the `dev` optional-deps. These same three gates also run in CI (`python-lint` job in `.github/workflows/ci.yml`). Run from the repo root using the project-local `.venv`:
 
-- `.venv/Scripts/ruff.exe check python tests benchmarks`
-- `.venv/Scripts/bandit.exe -c pyproject.toml -r python`
-- `.venv/Scripts/pyright.exe`
-- `.venv/Scripts/python.exe -m pytest tests/ -q`
+On Windows the venv's executables live in `.venv\Scripts\`, on macOS/Linux in `.venv/bin/` — this repo is worked on from both, so use the pair for the machine you are on:
+
+| Gate | Windows | macOS / Linux |
+|------|---------|---------------|
+| ruff | `.venv\Scripts\ruff.exe check python tests benchmarks` | `.venv/bin/ruff check python tests benchmarks` |
+| bandit | `.venv\Scripts\bandit.exe -c pyproject.toml -r python` | `.venv/bin/bandit -c pyproject.toml -r python` |
+| pyright | `.venv\Scripts\pyright.exe` | `.venv/bin/pyright` |
+| pytest | `.venv\Scripts\python.exe -m pytest tests/ -q` | `.venv/bin/python -m pytest tests/ -q` |
+
+If a tool is missing from the venv, install the dev extras (`uv pip install -e ".[dev]"`) rather than reaching for a system copy; `uvx <tool>` also works for a one-off check and needs no venv.
 
 Scoping notes (intentional, do not "fix" by widening):
 - pyright runs `typeCheckingMode = "standard"` project-wide, with the shipped library raised to strict via the top-level `strict = ["python/xlsxturbo"]` path list. Do not use `executionEnvironments` + `typeCheckingMode` for this — that key is silently ignored by pyright 1.1.x.

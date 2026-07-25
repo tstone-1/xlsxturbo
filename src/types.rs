@@ -292,11 +292,6 @@ impl<'py, 'm> OptionMap<'py, 'm> {
         self.field(key, "a non-negative integer")
     }
 
-    /// Extract an optional u8 (0-255 integer) field.
-    pub(crate) fn u8(&self, key: &str) -> Result<Option<u8>, String> {
-        self.field(key, "an integer in the range 0-255")
-    }
-
     /// Extract a required string field: missing/`None` is an error naming the key.
     pub(crate) fn required_string(&self, key: &str) -> Result<String, String> {
         self.string(key)?
@@ -419,26 +414,53 @@ pub(crate) fn pydict_to_hashmap(
 /// Detect whether a Python object is a Polars or Pandas DataFrame.
 /// Returns true for Polars, false for Pandas.
 /// Errors if the object is neither.
+/// Look up `<module>.DataFrame`, but only for a module that is *already*
+/// imported.
+///
+/// Consulting `sys.modules` rather than importing matters twice over: it keeps
+/// a pandas-only caller from paying to import polars (and vice versa), and it
+/// means this can never be what drags an optional dependency into the process.
+/// If the caller is holding a polars DataFrame, polars is imported by
+/// definition — so nothing reachable is missed.
+fn imported_dataframe_class<'py>(py: Python<'py>, module_name: &str) -> Option<Bound<'py, PyAny>> {
+    let modules = py.import("sys").ok()?.getattr("modules").ok()?;
+    let module = modules.get_item(module_name).ok()?;
+    module.getattr("DataFrame").ok()
+}
+
 pub(crate) fn is_polars_dataframe(df: &Bound<'_, PyAny>) -> Result<bool, String> {
-    // Check the actual module to avoid misidentifying objects that happen to
-    // have similar attributes (e.g., Pydantic models with .schema)
+    // `isinstance` against the real classes, so subclasses are accepted —
+    // geopandas' GeoDataFrame, and anyone's `class MyFrame(pd.DataFrame)`.
+    // Matching on the `__module__` prefix instead used to reject every one of
+    // them (a subclass defined in a script reports `__main__`). This keeps the
+    // property that motivated the prefix check: identification is by type, not
+    // by probing for attributes, so a duck-typed object that merely happens to
+    // have `.columns`/`.schema` (a Pydantic model, say) is still not mistaken
+    // for a DataFrame.
+    let py = df.py();
+    for (module_name, is_polars) in [("polars", true), ("pandas", false)] {
+        if let Some(class) = imported_dataframe_class(py, module_name) {
+            if df.is_instance(&class).unwrap_or(false) {
+                return Ok(is_polars);
+            }
+        }
+    }
+
     let module = df
         .get_type()
         .getattr("__module__")
         .and_then(|m| m.extract::<String>())
         .unwrap_or_else(|_| String::new());
-
-    if module.starts_with("polars") {
-        Ok(true)
-    } else if module.starts_with("pandas") {
-        Ok(false)
+    let qualified = if module.is_empty() {
+        pytype_name(df)
     } else {
-        Err(format!(
-            "Unsupported DataFrame type: {}.{}. Expected pandas or polars DataFrame.",
-            module,
-            pytype_name(df)
-        ))
-    }
+        format!("{}.{}", module, pytype_name(df))
+    };
+    Err(format!(
+        "Unsupported DataFrame type: {}. Expected a pandas or polars DataFrame \
+         (subclasses are accepted).",
+        qualified
+    ))
 }
 
 /// Extract column names from a DataFrame (Polars or Pandas).

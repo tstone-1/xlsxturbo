@@ -446,6 +446,31 @@ class TestCharts:
         with pytest.raises(ValueError, match="Unknown chart type"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
 
+    @pytest.mark.parametrize("style", [0, 49, 200, 300, -1])
+    def test_chart_invalid_style_raises(self, style: int, tmp_xlsx: str) -> None:
+        """A style outside 1-48 is rejected with the 1-48 message.
+
+        Covers values a u8 would silently accept (0, 200) — Excel discards
+        those and rust_xlsxwriter only complains on stderr, where Python
+        cannot see it — as well as values beyond u8 (300) and negatives.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        charts: dict[str, ChartOptions] = {
+            "D2": {"type": "bar", "data_range": "Sheet1!$A$2:$A$3", "style": style}
+        }
+        with pytest.raises(ValueError, match="'style' must be in the range 1-48"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
+
+    def test_chart_valid_style_is_applied(self, tmp_xlsx: str) -> None:
+        """A style inside 1-48 reaches the chart XML."""
+        df = pd.DataFrame({"A": [1, 2]})
+        charts: dict[str, ChartOptions] = {
+            "D2": {"type": "bar", "data_range": "Sheet1!$A$2:$A$3", "style": 42}
+        }
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            assert '<c:style val="42"/>' in zf.read("xl/charts/chart1.xml").decode("utf-8")
+
     def test_chart_series_unknown_key_raises(self, tmp_xlsx: str) -> None:
         """A typo in a series-item key is rejected, not silently dropped."""
         df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6]})

@@ -101,7 +101,7 @@ pub(crate) fn parse_vertical_alignment(align: &str) -> Result<FormatAlign, Strin
 }
 
 /// Parse header format dictionary into rust_xlsxwriter Format
-/// Delegates to parse_format_dict without column-specific options.
+/// Delegates to parse_format_dict at cell scope (no `num_format`).
 /// `context` (e.g. `"header_format"` or `"merged_ranges['A1:B1']"`) is
 /// prepended to any error so it can be traced back to its source option.
 pub(crate) fn parse_header_format(
@@ -109,23 +109,67 @@ pub(crate) fn parse_header_format(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     context: &str,
 ) -> Result<Format, String> {
-    parse_format_dict(py, fmt_dict, false, context)
+    parse_format_dict(py, fmt_dict, FormatScope::Cell, context)
 }
 
 /// Parse a rich text segment format dictionary into rust_xlsxwriter Format.
-/// Rich text segments only carry font-level formatting (bold, italic, color,
-/// size, underline, bg_color). Borders/alignment/wrap/num_format are meaningless
-/// for an inline text run, so we reuse the no-column-options parser.
+///
+/// Rich text segments are inline runs inside one cell, so only font-level
+/// properties reach the XML — borders, alignment and wrapping are cell-level
+/// and Excel drops them. They are rejected rather than accepted-and-ignored,
+/// so a caller finds out instead of wondering why nothing rendered.
 /// `context` (e.g. `"rich_text['A1']"`) is prepended to any error.
 pub(crate) fn parse_rich_text_format(
     py: Python<'_>,
     fmt_dict: &HashMap<String, Py<PyAny>>,
     context: &str,
 ) -> Result<Format, String> {
-    parse_format_dict(py, fmt_dict, false, context)
+    parse_format_dict(py, fmt_dict, FormatScope::Font, context)
 }
 
-/// Keys accepted by `parse_format_dict` regardless of context.
+/// Which format keys are meaningful for the thing being formatted.
+///
+/// The distinction is what Excel actually honours: an inline text run carries
+/// font properties only, a cell adds geometry (borders/alignment/wrap), and a
+/// column/conditional/checkbox format adds a number format on top.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatScope {
+    /// Inline text runs (`rich_text` segments) — font properties only.
+    Font,
+    /// Cell formats without a number format (`header_format`, merged ranges).
+    Cell,
+    /// Cell formats that also accept `num_format`.
+    Column,
+}
+
+impl FormatScope {
+    /// The keys this scope accepts, in the order they should be listed to a
+    /// user whose typo just got rejected.
+    fn valid_keys(self) -> Vec<&'static str> {
+        match self {
+            FormatScope::Font => FORMAT_KEYS_FONT.to_vec(),
+            FormatScope::Cell => FORMAT_KEYS_BASE.to_vec(),
+            FormatScope::Column => {
+                let mut keys = FORMAT_KEYS_BASE.to_vec();
+                keys.extend_from_slice(FORMAT_KEYS_COLUMN);
+                keys
+            }
+        }
+    }
+}
+
+/// Font-level keys — the only ones an inline text run can carry. Kept in sync
+/// with the `RichTextFormat` TypedDict in `python/xlsxturbo/xlsxturbo.pyi`.
+const FORMAT_KEYS_FONT: &[&str] = &[
+    "bold",
+    "italic",
+    "underline",
+    "bg_color",
+    "font_color",
+    "font_size",
+];
+
+/// Keys accepted at `Cell` scope and above: the font keys plus cell geometry.
 const FORMAT_KEYS_BASE: &[&str] = &[
     "bold",
     "italic",
@@ -144,7 +188,7 @@ const FORMAT_KEYS_BASE: &[&str] = &[
     "wrap_text",
 ];
 
-/// Keys accepted only when `include_column_options` is true.
+/// Keys accepted only at `Column` scope.
 const FORMAT_KEYS_COLUMN: &[&str] = &["num_format"];
 
 /// Extract a border field accepting bool (True=thin) or a style name string.
@@ -181,25 +225,23 @@ fn get_border_field(
 }
 
 /// Shared format parser for header, column, and rich-text formats.
-/// When `include_column_options` is true, also handles `num_format`.
+/// `scope` decides which keys are accepted (see [`FormatScope`]).
 /// Unknown keys produce a clear error listing the valid options. `context`
 /// (e.g. `"header_format"` or `"column_formats['price_*']"`) is prepended to
 /// every error so it can be traced back to its source option.
 fn parse_format_dict(
     py: Python<'_>,
     fmt_dict: &HashMap<String, Py<PyAny>>,
-    include_column_options: bool,
+    scope: FormatScope,
     context: &str,
 ) -> Result<Format, String> {
     let view = OptionMap::new(py, fmt_dict, context.to_string());
 
     // Reject unknown keys so typos (e.g. 'color' vs 'font_color') surface
-    // immediately rather than silently producing unformatted output.
-    let mut valid: Vec<&str> = FORMAT_KEYS_BASE.to_vec();
-    if include_column_options {
-        valid.extend_from_slice(FORMAT_KEYS_COLUMN);
-    }
-    view.reject_unknown(&valid)?;
+    // immediately rather than silently producing unformatted output. Keys that
+    // are valid at a wider scope are rejected here too — an alignment on a rich
+    // text run is a typo in the sense that matters: it will never render.
+    view.reject_unknown(&scope.valid_keys())?;
 
     let mut format = Format::new();
 
@@ -227,7 +269,7 @@ fn parse_format_dict(
         format = format.set_font_size(size);
     }
 
-    if include_column_options {
+    if scope == FormatScope::Column {
         if let Some(num_fmt_str) = view.string("num_format")? {
             format = format.set_num_format(&num_fmt_str);
         }
@@ -288,7 +330,7 @@ pub(crate) fn parse_column_format(
     fmt_dict: &HashMap<String, Py<PyAny>>,
     context: &str,
 ) -> Result<Format, String> {
-    parse_format_dict(py, fmt_dict, true, context)
+    parse_format_dict(py, fmt_dict, FormatScope::Column, context)
 }
 
 /// Build a vector of column formats, one for each column.

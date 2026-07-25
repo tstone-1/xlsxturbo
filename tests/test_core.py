@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -950,3 +951,53 @@ class TestDatetimeDateSubclasses:
         assert not isinstance(value, str)
         assert (value.year, value.month, value.day) == (2024, 6, 15)
         wb.close()
+
+
+class TestDataFrameSubclasses:
+    """Subclasses of pandas/polars DataFrame are accepted.
+
+    Detection is an ``isinstance`` check against the real classes rather than a
+    match on the type's ``__module__`` prefix. The prefix test rejected every
+    subclass — a ``class MyFrame(pd.DataFrame)`` defined in a script reports
+    ``__main__`` — while genuinely unrelated objects are still refused, since
+    identification is by type and not by probing for ``.columns``/``.schema``.
+    """
+
+    def test_pandas_subclass_is_accepted(self, tmp_xlsx: str) -> None:
+        """A user-defined pandas.DataFrame subclass writes like its base class."""
+
+        class MyFrame(pd.DataFrame):
+            """A trivial pandas.DataFrame subclass (reports __module__ == test module)."""
+
+        df = MyFrame({"name": ["Alice"], "age": [30]})
+        rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        assert (rows, cols) == (2, 2)
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["A1"].value == "name"
+        assert ws["A2"].value == "Alice"
+        assert ws["B2"].value == 30
+
+    def test_polars_subclass_is_accepted(self, tmp_xlsx: str) -> None:
+        """A polars.DataFrame subclass takes the polars iteration path."""
+
+        class MyPlFrame(pl.DataFrame):
+            """A trivial polars.DataFrame subclass."""
+
+        df = MyPlFrame({"name": ["Bob"], "age": [25]})
+        rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        assert (rows, cols) == (2, 2)
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["A2"].value == "Bob"
+        assert ws["B2"].value == 25
+
+    def test_unrelated_object_still_rejected(self, tmp_xlsx: str) -> None:
+        """An object that merely looks DataFrame-ish is still refused."""
+
+        class NotAFrame:
+            """A duck-typed impostor exposing the attributes a probe would look for."""
+
+            columns: ClassVar[list[str]] = ["a"]
+            shape: ClassVar[tuple[int, int]] = (1, 1)
+
+        with pytest.raises(ValueError, match="Unsupported DataFrame type"):
+            xlsxturbo.df_to_xlsx(NotAFrame(), tmp_xlsx)  # type: ignore[arg-type]

@@ -34,7 +34,7 @@ use parse::sanitize_table_name;
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
-use workbook::apply_defined_names;
+use workbook::{apply_defined_names, save_workbook};
 
 use pyo3::prelude::*;
 use rust_xlsxwriter::Workbook;
@@ -730,12 +730,7 @@ fn dfs_to_xlsx<'py>(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     // Save workbook
-    workbook.save(&output_path).map_err(|e| {
-        pyo3::exceptions::PyValueError::new_err(format!(
-            "Failed to save workbook to '{}': {}",
-            output_path, e
-        ))
-    })?;
+    save_workbook(&mut workbook, &output_path).map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     Ok(stats)
 }

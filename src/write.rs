@@ -129,8 +129,10 @@ pub(crate) fn write_cell(
 ) -> Result<(), XlsxError> {
     match value {
         CellValue::Empty => {
-            // Write empty string rather than leaving cell blank so Excel table
-            // formatting renders consistently. Trade-off: COUNTA will count these.
+            // rust_xlsxwriter emits nothing for an empty string, so this leaves
+            // a genuinely blank cell: no `<c>` element, and COUNTA/COUNTBLANK
+            // treat it as empty. Kept as an explicit write (rather than a skip)
+            // so every cell goes through one path regardless of type.
             worksheet.write_string(row, col, "")?;
         }
         CellValue::Integer(v) => {

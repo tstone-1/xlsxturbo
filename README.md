@@ -234,7 +234,9 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - wrap_text (bool): Enable text wrapping within cell
 ```
 
-> **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, and `sparklines`.
+> **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, `sparklines`, and `rich_text` segment formats.
+>
+> `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `bg_color`, `font_size`). A segment is an inline run inside one cell, so cell-level keys — borders, `align_horizontal`/`align_vertical`, `wrap_text` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.
 >
 > Column patterns in `column_formats`, `conditional_formats`, and `validations` must match at least one DataFrame column. A zero-match exact name or wildcard raises `ValueError` instead of silently omitting the requested behavior.
 
@@ -507,6 +509,10 @@ Formula columns appear after data columns (A=price, B=quantity, C=tax_rate, D=Su
 - Formula columns inherit header formatting if specified
 - Column order is preserved (first formula = first new column)
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
+- Combined with `table_style`, formula columns sit **outside** the Excel table: the table
+  covers the DataFrame columns only, so formula columns get no banded fill, no autofilter
+  dropdown, and are not covered by `column_widths`/`autofit`. Add the calculated column to
+  the DataFrame instead if you need it inside the table.
 
 ### Merged Cells
 
@@ -1212,6 +1218,23 @@ Benchmark scripts can also emit markdown or JSON, which makes it easy to attach 
 | `hello world` | Text | Default |
 
 Supported date formats: `YYYY-MM-DD`, `YYYY/MM/DD`, `DD-MM-YYYY`, `DD/MM/YYYY`, `MM-DD-YYYY`, `MM/DD/YYYY`
+
+DataFrame columns follow the same mapping, with one addition worth knowing: **durations
+(`pandas.Timedelta` / `numpy.timedelta64`) are written as text**, e.g. `86400 seconds`.
+Excel has no duration type — convert to a number in the unit you want first
+(`df["elapsed"].dt.total_seconds()`) and apply a `num_format` such as `[h]:mm:ss` if you
+want it displayed as a duration.
+
+## Output File Safety
+
+Writes are atomic: the workbook is built in a temporary file alongside the destination and
+renamed over it only once it is complete. If a write fails for any reason — an invalid
+chart range, a full disk, a dropped network share — the file already at the output path is
+left exactly as it was, rather than being truncated. Re-exporting over yesterday's report
+can therefore never leave you with neither.
+
+Because the staging file is created in the destination's directory, that directory must
+exist and be writable. When an existing file is replaced, its permissions are preserved.
 
 ## Known Limitations
 

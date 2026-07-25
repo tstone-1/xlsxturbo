@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import stat
+from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
 import pandas as pd
 import pytest
@@ -335,3 +339,110 @@ class TestErrorPaths:
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(TypeError, match="bytes paths are not supported"):
             xlsxturbo.df_to_xlsx(df, BytesPath())  # type: ignore[arg-type]
+
+
+class TestAtomicSave:
+    """The destination file is only ever replaced by a complete workbook.
+
+    ``Workbook::save`` truncates the destination before it serializes and
+    validates, so a failure partway through used to leave a 0-byte file where
+    the caller's previous export was — destroying it as a side effect of an
+    error that was otherwise reported cleanly. Saves are staged through a
+    temporary file in the destination directory and renamed on success.
+    """
+
+    # A chart range naming a sheet that does not exist passes every up-front
+    # check and only fails deep inside serialization, which is exactly the
+    # window this behavior guards. Sheet-qualified ranges are required, so a
+    # mistyped sheet name is an ordinary user error.
+    BAD_CHART: ClassVar[dict[str, dict[str, str]]] = {
+        "D2": {"type": "bar", "data_range": "NoSuchSheet!$A$2:$A$3"}
+    }
+
+    def test_save_failure_leaves_existing_file_untouched(self, tmp_xlsx: str) -> None:
+        """A failed save must not damage the workbook already at that path."""
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        original = Path(tmp_xlsx).read_bytes()
+        assert len(original) > 0
+
+        with pytest.raises(ValueError, match="Failed to save workbook"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=self.BAD_CHART)  # type: ignore[arg-type]
+
+        assert Path(tmp_xlsx).read_bytes() == original, (
+            "a failed save overwrote the previous export"
+        )
+
+    def test_save_failure_creates_no_file(self, tmp_xlsx_factory: Callable[[str], str]) -> None:
+        """A failed save must not leave a stub where there was no file."""
+        target = tmp_xlsx_factory(".xlsx")
+        Path(target).unlink(missing_ok=True)
+        df = pd.DataFrame({"A": [1, 2]})
+
+        with pytest.raises(ValueError, match="Failed to save workbook"):
+            xlsxturbo.df_to_xlsx(df, target, charts=self.BAD_CHART)  # type: ignore[arg-type]
+
+        assert not Path(target).exists()
+
+    def test_multi_sheet_save_failure_leaves_existing_file_untouched(self, tmp_xlsx: str) -> None:
+        """The multi-sheet path stages its save the same way."""
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.dfs_to_xlsx([(df, "S1")], tmp_xlsx)
+        original = Path(tmp_xlsx).read_bytes()
+
+        with pytest.raises(ValueError, match="Failed to save workbook"):
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "S1"), (df, "S2", {"charts": self.BAD_CHART})],  # type: ignore[arg-type]
+                tmp_xlsx,
+            )
+
+        assert Path(tmp_xlsx).read_bytes() == original
+
+    def test_successful_save_replaces_existing_file(self, tmp_xlsx: str) -> None:
+        """Staging must not break the ordinary overwrite path."""
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_xlsx)
+        first = Path(tmp_xlsx).read_bytes()
+
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"B": ["replaced", "rows"]}), tmp_xlsx)
+        assert Path(tmp_xlsx).read_bytes() != first
+
+        wb = load_workbook(tmp_xlsx)
+        ws = wb[wb.sheetnames[0]]
+        assert ws["A1"].value == "B"
+        assert ws["A2"].value == "replaced"
+
+    def test_no_temporary_files_are_left_behind(self, tmp_xlsx: str) -> None:
+        """Neither a successful nor a failed save may litter the output directory."""
+        directory = Path(tmp_xlsx).parent
+        before = set(directory.iterdir())
+
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        with pytest.raises(ValueError, match="Failed to save workbook"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=self.BAD_CHART)  # type: ignore[arg-type]
+
+        new_files = set(directory.iterdir()) - before - {Path(tmp_xlsx)}
+        assert not new_files, f"staging files left behind: {new_files}"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_replacing_a_file_preserves_its_permissions(self, tmp_xlsx: str) -> None:
+        """A re-export keeps the mode of the file it replaces.
+
+        The staging file is created 0600; persisting it unchanged would quietly
+        make every re-export unreadable to a group that could read it before.
+        """
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        Path(tmp_xlsx).chmod(0o640)
+
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [2]}), tmp_xlsx)
+        assert stat.S_IMODE(Path(tmp_xlsx).stat().st_mode) == 0o640
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_new_file_is_group_readable(self, tmp_xlsx_factory: Callable[[str], str]) -> None:
+        """A brand-new export is readable, not locked down to the staging 0600."""
+        target = tmp_xlsx_factory(".xlsx")
+        Path(target).unlink(missing_ok=True)
+
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), target)
+        assert stat.S_IMODE(Path(target).stat().st_mode) & 0o044

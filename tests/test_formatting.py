@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import polars as pl
@@ -390,6 +391,59 @@ class TestHeaderFormat:
 
 class TestRichText:
     """Tests for rich text feature (v0.10.0)."""
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("align_horizontal", "center"),
+            ("align_vertical", "top"),
+            ("wrap_text", True),
+            ("border", True),
+            ("border_left", "thin"),
+            ("border_color", "#FF0000"),
+        ],
+    )
+    def test_rich_text_rejects_cell_level_keys(self, key: str, value: object, tmp_xlsx: str) -> None:
+        """Cell-level format keys are rejected on an inline text run.
+
+        A rich text segment is a run inside one cell, so Excel honours only
+        font properties; borders, alignment and wrapping are cell-level and
+        silently do nothing. Rejecting them tells the caller instead of
+        letting them wonder why nothing rendered.
+        """
+        df = pd.DataFrame({"A": [1]})
+        # Built dynamically, so it cannot be a RichTextFormat at type-check time.
+        segment_format: Any = {key: value}
+        with pytest.raises(ValueError, match=f"unknown option '{key}'"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={"D1": [("text", segment_format)]})
+
+    def test_rich_text_accepts_every_font_key(self, tmp_xlsx: str) -> None:
+        """The font-level keys the stub documents all remain accepted."""
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.df_to_xlsx(
+            df,
+            tmp_xlsx,
+            rich_text={
+                "D1": [
+                    (
+                        "styled",
+                        {
+                            "bold": True,
+                            "italic": True,
+                            "underline": True,
+                            "font_color": "#FF0000",
+                            "bg_color": "#00FF00",
+                            "font_size": 14.0,
+                        },
+                    )
+                ]
+            },
+        )
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
+        assert "<b/>" in shared
+        assert "<i/>" in shared
+        assert "styled" in shared
 
     def test_rich_text_bold(self, tmp_xlsx: str) -> None:
         """Apply rich text with bold formatting."""

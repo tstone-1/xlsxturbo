@@ -125,7 +125,12 @@ class ValidationOptions(TypedDict, total=False):
     error_message: str  # Message for error message
 
 class RichTextFormat(TypedDict, total=False):
-    """Format options for a rich text segment."""
+    """Format options for a rich text segment.
+
+    Font-level keys only. A segment is an inline run inside one cell, so
+    cell-level keys (borders, alignment, wrap_text) would never render and are
+    rejected at runtime; format the cell itself via column_formats or cells.
+    """
 
     bold: bool
     italic: bool
@@ -237,7 +242,7 @@ class ChartOptions(TypedDict, total=False):
     height: int  # Height in pixels
     x_offset: int  # Horizontal offset within the anchor cell (pixels)
     y_offset: int  # Vertical offset within the anchor cell (pixels)
-    style: int  # Excel chart style id, 1-48
+    style: int  # Excel chart style id, 1-48 (validated; out-of-range raises)
     show_data_table: bool  # Show data table under the chart
     show_legend: bool  # Show chart legend (default True)
     legend_position: Literal["right", "left", "top", "bottom", "top_right"]

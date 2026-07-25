@@ -251,8 +251,19 @@ pub(crate) fn apply_charts(
         if let Some(height) = view.u32("height")? {
             chart.set_height(height);
         }
-        if let Some(style) = view.u8("style")? {
-            chart.set_style(style);
+        // Read as i64 and range-check rather than letting `u8` decide: a u8
+        // silently accepts 0 and 200, which Excel discards (rust_xlsxwriter
+        // only complains on stderr, where Python can't see it), and rejects
+        // 300 with a "range 0-255" message that has nothing to do with Excel's
+        // limit. Same guard sparklines have on their own `style`.
+        if let Some(style) = view.i64("style")? {
+            if !(1..=48).contains(&style) {
+                return Err(format!(
+                    "charts['{}']: 'style' must be in the range 1-48, got {}",
+                    cell_ref, style
+                ));
+            }
+            chart.set_style(style as u8);
         }
         if view.bool("show_data_table")?.unwrap_or(false) {
             chart.set_data_table(&ChartDataTable::default());

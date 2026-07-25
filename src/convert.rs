@@ -13,7 +13,7 @@ use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
     WriteConfig,
 };
-use crate::workbook::apply_defined_names;
+use crate::workbook::{apply_defined_names, save_workbook};
 use crate::write::{write_cell, write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
@@ -91,9 +91,7 @@ pub fn convert_csv_to_xlsx(
     }
 
     // Save workbook
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+    save_workbook(&mut workbook, output_path)?;
 
     Ok((row_count, col_count))
 }
@@ -168,9 +166,7 @@ pub fn convert_csv_to_xlsx_parallel(
         )?;
     }
 
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+    save_workbook(&mut workbook, output_path)?;
 
     Ok((row_count, col_count))
 }
@@ -768,9 +764,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
 
     apply_defined_names(&mut workbook, defined_names)?;
 
-    workbook
-        .save(output_path)
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+    save_workbook(&mut workbook, output_path)?;
 
     Ok(result)
 }

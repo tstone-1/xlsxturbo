@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-25
+
+### Added
+- Subclasses of `pandas.DataFrame`/`polars.DataFrame` (e.g. geopandas' `GeoDataFrame`, or a locally defined `class MyFrame(pd.DataFrame)`) are accepted. Detection is an `isinstance` check against the real classes rather than a match on the type's `__module__` prefix, which rejected every subclass — one defined in a script reports `__main__`. Unrelated duck-typed objects are still refused, since identification remains by type rather than by probing for attributes.
+
+### Fixed
+- **Saving is now atomic: a failed write can no longer destroy the file already at the output path.** `Workbook::save` truncates the destination *before* it serializes and validates, so any failure partway through — a chart range naming a sheet that does not exist, a full disk, a dropped network share — left a 0-byte file where the previous export had been, destroying it as a side effect of an error that was otherwise reported cleanly. All four save paths (`df_to_xlsx`, `dfs_to_xlsx`, and both CSV conversions) now build the workbook in a temporary file in the destination's own directory and rename it into place only on success, so the destination is always either the old file or the complete new one. When an existing file is replaced its permissions are preserved. Because the staging file is created next to the destination, that directory must exist and be writable.
+- A save to a nonexistent directory reports `directory '<dir>' does not exist` instead of a raw OS error.
+
+### Changed
+These two tighten validation and can raise where a previous version silently produced output. Both reject values that never had any effect on the resulting file.
+
+- Chart `style` is validated against Excel's documented 1-48 range. Values a `u8` silently accepted (`0`, `200`) reached rust_xlsxwriter, which discarded them and reported it only on stderr where Python cannot see it, so the chart came out with the default style and no error; values above 255 raised a "range 0-255" message that had nothing to do with Excel's limit. Matches the guard sparkline `style` has had since 0.16.1.
+- `rich_text` segment formats reject cell-level keys (`border*`, `align_horizontal`, `align_vertical`, `wrap_text`) instead of accepting and silently ignoring them. A segment is an inline run inside one cell, so only font-level properties reach the XML — the accepted-but-inert keys contradicted both the `RichTextFormat` type stub and the parser's own docstring. Format the cell itself via `column_formats` or `cells` instead.
+
+### Documentation
+- README documents that writes are atomic and what that implies for the output directory; that `formula_columns` combined with `table_style` places the formula columns outside the Excel table (no banded fill, no autofilter, not covered by `column_widths`/`autofit`); and that duration columns (`pandas.Timedelta`/`numpy.timedelta64`) are written as text, with the recommended conversion.
+- The strict-unknown-key note now lists `rich_text` and spells out its font-only key set.
+- `AGENTS.md` gives the lint/type/security gate commands for both Windows and macOS/Linux venv layouts; the previous list was Windows-only.
+
+### Internal
+- New `TestAtomicSave` test class covering the save-failure contract in both the single- and multi-sheet paths: an existing file survives a failed save byte-for-byte, no file is created where none existed, a successful save still replaces, no staging files are left behind, and permissions are preserved.
+- `OptionMap::u8` removed — chart `style` was its only caller and now range-checks via `i64`.
+- The format-dict parser's `include_column_options` bool became a three-way `FormatScope` (`Font`/`Cell`/`Column`), making the rich-text key set a scope rather than a special case.
+
 ## [0.17.2] - 2026-07-23
 
 ### Fixed
@@ -641,6 +666,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for custom sheet names
 - Verbose mode for progress reporting
 
+[0.18.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.18.0
+[0.17.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.17.2
+[0.17.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.17.1
 [0.17.0]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.17.0
 [0.16.2]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.2
 [0.16.1]: https://github.com/tstone-1/xlsxturbo/releases/tag/v0.16.1
