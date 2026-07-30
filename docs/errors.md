@@ -6,8 +6,9 @@ than as a missing style in a spreadsheet somebody else opens next week.
 
 ## What gets raised
 
-Every failure is an `XlsxTurboError`. Catching that one class catches everything this
-library raises, and nothing else:
+Every failure xlsxturbo itself raises is an `XlsxTurboError`. Catching that one class
+catches everything the library validates, and nothing else ([one narrow
+exception](#what-is-not-in-the-hierarchy)):
 
 ```python
 import xlsxturbo

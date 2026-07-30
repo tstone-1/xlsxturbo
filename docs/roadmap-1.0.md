@@ -187,10 +187,20 @@ boundary call is in the harness and turns
 `test_class_is_raised_by_a_real_call[InputDataError]` red, so the outer call is demonstrably
 load-bearing rather than defensive decoration.
 
-Accepted imprecision, stated so nobody mistakes it for an oversight: a dtype problem raised
-deep inside `write_sheet_data` arrives as `ConfigurationError`, not `InputDataError`.
-`InputDataError` covers only frame detection, which is now at the boundary. Chasing the rest
-is exactly the "last fraction of precision" D3 declined.
+Accepted imprecision — **two places, and this list is meant to be complete**, so that nobody
+mistakes either for an oversight and nobody assumes the classification is finer than it is:
+
+1. A **dtype problem** raised deep inside `write_sheet_data` arrives as `ConfigurationError`,
+   not `InputDataError`. `InputDataError` covers only frame detection, which is now at the
+   boundary.
+2. A **mid-write CSV failure** (`convert.rs`, `"Write error at ({}, {}): {}"`) is untagged, so
+   `From<String>` puts it in `ConvertError::Config` and it surfaces as `ConfigurationError` —
+   despite having nothing to do with configuration. Same root cause as the trap noted on the
+   type: untagged is Config.
+
+Chasing either is exactly the "last fraction of precision" D3 declined. The reason to write
+them both down is that a partial list of known imprecisions reads as a complete one, and the
+next maintainer will trust it.
 
 ---
 
@@ -538,18 +548,37 @@ review before Phase 3. **Release:** 0.19.0.
 ### Phase 2 aftermath
 
 Both halves landed and the full gate set is green: `cargo fmt` 0, clippy 0, 80 Rust tests,
-**459 Python tests** (up from 381 — 51 in `test_errors.py`, 27 in `test_types_module.py`),
+**460 Python tests** (up from 381 — 52 in `test_errors.py`, 27 in `test_types_module.py`),
 ruff 0, bandit 0, pyright `0 errors, 0 warnings, 0 informations`, capability matrix current,
-action pins `checked=14 failed=0`, `mkdocs build --strict` clean. Twelve mutations run across
-the two new test modules, twelve caught.
+action pins `checked=14 failed=0`, `cargo audit` clean, `mkdocs build --strict` clean. Twelve
+mutations run across the two new test modules, twelve caught.
 
-Still open, in order:
+Versions are bumped to 0.19.0 in `Cargo.toml`, `pyproject.toml` and `Cargo.lock`, the
+changelog is dated, and everything through `885ddb0` is pushed with CI green.
 
-- **The deep diff review** this phase's gate calls for, before Phase 3 builds on the new
-  public surface. Not yet done.
-- **Release 0.19.0.** Versions in `Cargo.toml` and `pyproject.toml` are still `0.18.0`; the
-  changelog heading is still `## [0.19.0] - Unreleased`.
-- Nothing is pushed yet.
+**The phase-gate review is done** — deep, on the range `833a889..885ddb0`. Verdict APPROVE:
+0 blockers, 4 warnings, 3 nitpicks, all seven fixed in the follow-up commit. Two things from
+it are worth carrying forward rather than leaving in a gitignored report:
+
+- **Three of the four warnings were documentation that lost a race with a fix in the same
+  range** — a Rust doc comment still promising `TypeError` after `InputDataError` was moved to
+  `ValueError`, this very section asserting the release had not happened, and the D6
+  imprecision note listing one imprecision when there were two. None touched runtime
+  behaviour, and all three would have misled the next reader about what is true. That is the
+  bill for a high prose-to-code ratio (`src/errors.rs` is 223 lines, roughly 90 of them
+  comment). The prose earns its place; the lesson is that **when a fix changes a decision,
+  grep for every place that decision is written down** — not just the one you edited.
+- **A self-review has a known blind spot and it should be stated, not assumed away.** This
+  range was authored and reviewed in the same session, which catches mechanical defects and
+  contract drift well and "the whole approach is wrong" badly, because the approach and the
+  reviewer share an author. Worth an independent read (`codex exec`, or a human) before 1.0
+  freezes this surface.
+
+Still open:
+
+- **Tag and publish 0.19.0.** `git tag v0.19.0 && git push origin v0.19.0` triggers the
+  release workflow through to PyPI. Not done — that step is irreversible, since a version
+  number cannot be reused.
 
 Three things worth knowing before Phase 3 starts, none of them obvious from the diff:
 

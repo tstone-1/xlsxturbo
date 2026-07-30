@@ -52,7 +52,11 @@ That matters: a checklist that is weaker than the gate it exists to satisfy buys
 confidence, and the failure then arrives after the push. If you change a gate in CI,
 change it here in the same commit. Two of these once drifted — `ruff` was missing
 `scripts` and `cargo test` was missing `--release` — so a clean local run could still
-go red on `main`.
+go red on `main`. The reconciliation that fixed those then gave steps 6-8 only the
+Unix venv path, which fails on Windows: **a checklist is only as good as its worst
+platform**, so keep both columns below in step.
+
+Platform-independent steps:
 
 ```bash
 # 1. Format check                                    (CI: lint)
@@ -67,19 +71,6 @@ cargo test --release
 # 4. Build the extension into the venv
 maturin develop --release
 
-# 5. Python tests                                    (CI: python-test*)
-.venv/Scripts/python.exe -m pytest tests/ -q        # Windows
-.venv/bin/python -m pytest tests/ -q                # macOS / Linux
-
-# 6. Ruff — note `scripts`                           (CI: python-lint)
-.venv/bin/ruff check python tests benchmarks scripts
-
-# 7. Bandit                                          (CI: python-lint)
-.venv/bin/bandit -c pyproject.toml -r python
-
-# 8. Pyright                                         (CI: python-lint)
-.venv/bin/pyright
-
 # 9. Capability matrix is not stale                  (CI: python-test, via pytest)
 python scripts/gen_capability_matrix.py --check
 
@@ -89,6 +80,17 @@ cargo audit --deny warnings
 # 11. Action pins still name their SHAs              (CI: Action pin comments)
 bash .github/scripts/check-action-pins.sh
 ```
+
+Steps 5-8 run tools from the project-local `.venv`, whose executables live in
+`Scripts/` on Windows and `bin/` on macOS/Linux. This repo is worked on from both, so
+take the column for the machine you are on — the same pair `AGENTS.md` documents:
+
+| # | Gate | CI job | Windows | macOS / Linux |
+|---|------|--------|---------|---------------|
+| 5 | pytest | `python-test*` | `.venv\Scripts\python.exe -m pytest tests/ -q` | `.venv/bin/python -m pytest tests/ -q` |
+| 6 | ruff — note `scripts` | `python-lint` | `.venv\Scripts\ruff.exe check python tests benchmarks scripts` | `.venv/bin/ruff check python tests benchmarks scripts` |
+| 7 | bandit | `python-lint` | `.venv\Scripts\bandit.exe -c pyproject.toml -r python` | `.venv/bin/bandit -c pyproject.toml -r python` |
+| 8 | pyright | `python-lint` | `.venv\Scripts\pyright.exe` | `.venv/bin/pyright` |
 
 Steps 1-9 must succeed before pushing. Steps 10-11 rarely fail from a code change, but
 they are gates on `main`, so a release must not skip them.

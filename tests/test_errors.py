@@ -121,6 +121,22 @@ class TestReachability:
             f"{name} trigger raised {type(caught.value).__name__}: {caught.value}"
         )
 
+    def test_unsupported_frame_in_a_sheet_names_the_sheet(self, tmp_path: Path) -> None:
+        """``dfs_to_xlsx`` says *which* sheet held the unusable frame.
+
+        Covers the second boundary check (`src/lib.rs`, the `dfs_to_xlsx` loop),
+        which the `TRIGGERS` table above cannot reach -- that table maps one
+        trigger per class and its `InputDataError` entry goes through
+        `df_to_xlsx`. Without this, dropping the sheet name from the message, or
+        the whole per-sheet check, breaks no test.
+
+        The prefix is not cosmetic: on a multi-sheet export it is the only thing
+        identifying which frame was wrong.
+        """
+        good = _frame()
+        with pytest.raises(xlsxturbo.InputDataError, match=r"sheet 'B':"):
+            xlsxturbo.dfs_to_xlsx([(good, "A"), ({}, "B")], tmp_path / "o.xlsx")  # type: ignore[list-item]
+
     def test_every_concrete_class_has_a_trigger(self) -> None:
         """No class is exported without a call path in this file that raises it.
 
@@ -182,11 +198,18 @@ class TestHierarchyShape:
             assert issubclass(getattr(xlsxturbo, name), xlsxturbo.XlsxTurboError)
 
     def test_base_catches_everything_the_library_raises(self, tmp_path: Path) -> None:
-        """``except XlsxTurboError`` is sufficient for every trigger."""
+        """``except XlsxTurboError`` is sufficient for every trigger.
+
+        Written as try/except rather than ``pytest.raises`` so the failure names
+        the trigger: a bare "DID NOT RAISE" from inside a loop over five triggers
+        does not say which one stopped raising.
+        """
         for name, trigger in sorted(TRIGGERS.items()):
-            with pytest.raises(xlsxturbo.XlsxTurboError):
+            try:
                 trigger(tmp_path)
-            del name
+            except xlsxturbo.XlsxTurboError:
+                continue
+            pytest.fail(f"{name} trigger raised nothing catchable as XlsxTurboError")
 
     def test_workbook_validation_is_a_configuration_error(self) -> None:
         """The one intentional parent/child pair inside the hierarchy holds."""

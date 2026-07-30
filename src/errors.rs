@@ -193,7 +193,8 @@ pub(crate) fn configuration_type(message: impl Into<String>) -> PyErr {
     raise(|t| &t.configuration_type, message.into())
 }
 
-/// The object passed as data is not a supported DataFrame. Also a `TypeError`.
+/// The object passed as data is not a supported DataFrame. Also a `ValueError` --
+/// deliberately not a `TypeError`; see the class docstring in [`register`] for why.
 pub(crate) fn input_data(message: impl Into<String>) -> PyErr {
     raise(|t| &t.input_data, message.into())
 }

@@ -45,19 +45,17 @@ pub enum ConvertError {
     File(String),
 }
 
-impl ConvertError {
-    /// The human-readable message, whichever variant this is.
-    pub fn message(&self) -> &str {
-        match self {
-            Self::Config(message) | Self::File(message) => message,
-        }
-    }
-}
-
 impl std::fmt::Display for ConvertError {
     /// Writes the message alone; the variant is routing information, not user-facing.
+    ///
+    /// This is the only way to read the message out of a `ConvertError`, on purpose:
+    /// `ConvertError` has to be `pub` because it appears in `convert_csv_to_xlsx`'s
+    /// signature, and a `pub fn message()` alongside it would have been public API with
+    /// no caller outside this impl.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.message())
+        match self {
+            Self::Config(message) | Self::File(message) => f.write_str(message),
+        }
     }
 }
 
