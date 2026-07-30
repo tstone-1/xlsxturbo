@@ -57,6 +57,24 @@ value. Both come from the compiled extension rather than from package metadata, 
 makes them the right thing to report in a bug report — they describe the binary that
 actually ran.
 
+## Exceptions
+
+Six classes, all exported from `xlsxturbo`:
+
+```
+XlsxTurboError                  # base -- catches everything the library raises
+├── ConfigurationError          # also ValueError
+│   └── WorkbookValidationError
+├── ConfigurationTypeError      # also TypeError
+├── InputDataError              # also ValueError
+└── FileError                   # also OSError and ValueError
+```
+
+Each one keeps the builtin exception its failures raised before 0.19.0, so
+`except ValueError` and `except TypeError` behave as they always did. See
+[Errors and warnings](errors.md) for which failures land where, and for the two places the
+classification is deliberately coarser than the class names suggest.
+
 ## Option value types
 
 Options fall into a few recurring shapes, and knowing which one you are looking at

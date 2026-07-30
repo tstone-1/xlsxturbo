@@ -51,7 +51,7 @@ macro_rules! extract_scalar {
             Ok(val) => {
                 if !val.is_none() {
                     $config.$field = Some(val.extract().map_err(|_| {
-                        pyo3::exceptions::PyTypeError::new_err(format!(
+                        crate::errors::configuration_type(format!(
                             "sheet option '{}' must be {}, got {}",
                             $key,
                             $type_desc,
@@ -76,7 +76,7 @@ macro_rules! extract_dict_field {
         if let Ok(val) = $opts.get_item($key) {
             if !val.is_none() {
                 let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
+                    crate::errors::configuration_type(format!(
                         "sheet option '{}' must be a dict, got {}",
                         $key,
                         pytype_name(&val)
@@ -97,7 +97,7 @@ macro_rules! extract_list_field {
         if let Ok(val) = $opts.get_item($key) {
             if !val.is_none() {
                 let list = val.cast::<pyo3::types::PyList>().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
+                    crate::errors::configuration_type(format!(
                         "sheet option '{}' must be a list, got {}",
                         $key,
                         pytype_name(&val)
@@ -113,13 +113,13 @@ macro_rules! extract_list_field {
 fn validate_sheet_option_keys(opts: &Bound<'_, pyo3::types::PyDict>) -> PyResult<()> {
     for key in opts.keys().iter() {
         let key_str: String = key.extract().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "Sheet option keys must be strings, got {}",
                 pytype_name(&key)
             ))
         })?;
         if !SHEET_OPTION_NAMES.contains(&key_str.as_str()) {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(crate::errors::configuration(format!(
                 "Unknown sheet option '{}'. Valid keys: {}",
                 key_str,
                 SHEET_OPTION_NAMES.join(", ")
@@ -143,7 +143,7 @@ fn reject_unknown_dict_keys(
     let mut key_strs: Vec<String> = Vec::with_capacity(dict.len());
     for key in dict.keys().iter() {
         let key_str: String = key.extract().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "{}: keys must be strings, got {}",
                 context,
                 pytype_name(&key)
@@ -152,7 +152,7 @@ fn reject_unknown_dict_keys(
         key_strs.push(key_str);
     }
     types_reject_unknown_keys(key_strs.iter().map(String::as_str), context, None, allowed)
-        .map_err(pyo3::exceptions::PyValueError::new_err)
+        .map_err(crate::errors::configuration)
 }
 
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
@@ -164,7 +164,7 @@ pub(crate) fn extract_sheet_info<'py>(
     let len: usize = sheet_tuple.len()?;
 
     if !(2..=3).contains(&len) {
-        return Err(pyo3::exceptions::PyValueError::new_err(
+        return Err(crate::errors::configuration(
             format!(
                 "Sheet tuple must have exactly 2 or 3 elements, got {}: (df, sheet_name[, options_dict])",
                 len
@@ -181,7 +181,7 @@ pub(crate) fn extract_sheet_info<'py>(
             return Ok((df, sheet_name, SheetConfig::default()));
         }
         let opts_dict = opts.cast::<pyo3::types::PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "Sheet options must be a dict, got {}",
                 pytype_name(&opts)
             ))
@@ -292,13 +292,13 @@ const MAX_COLUMN_INDEX: i64 = 16_383;
 /// share identical messages modulo that label.
 fn validate_column_widths_index(i: i64, label: &str) -> PyResult<()> {
     if i < 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(crate::errors::configuration(format!(
             "column_widths['{}']: must be a non-negative column index",
             label
         )));
     }
     if i > MAX_COLUMN_INDEX {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(crate::errors::configuration(format!(
             "column_widths['{}']: exceeds Excel's maximum column index ({}, i.e. column XFD)",
             label, MAX_COLUMN_INDEX
         )));
@@ -327,7 +327,7 @@ pub(crate) fn extract_column_widths(
                 s
             } else {
                 let i: i64 = s.parse().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
+                    crate::errors::configuration_type(format!(
                         "column_widths['{}']: must be an integer column index or the string \
                          '_all', got a non-numeric string",
                         s
@@ -341,7 +341,7 @@ pub(crate) fn extract_column_widths(
                 .str()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|_| "?".to_string());
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            return Err(crate::errors::configuration_type(format!(
                 "column_widths['{}']: must be an integer column index or the string '_all', got {}",
                 key_repr,
                 pytype_name(&k)
@@ -368,7 +368,7 @@ pub(crate) fn extract_column_formats(
     for (pattern, fmt_dict) in py_dict.iter() {
         let pattern_str: String = pattern.extract()?;
         let inner_dict = fmt_dict.cast::<pyo3::types::PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "column_formats['{}']: expected dict, got {}",
                 pattern_str,
                 pytype_name(&fmt_dict)
@@ -392,7 +392,7 @@ pub(crate) fn extract_conditional_formats(
             let mut configs = Vec::new();
             for (i, item) in list.iter().enumerate() {
                 let d = item.cast::<pyo3::types::PyDict>().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
+                    crate::errors::configuration_type(format!(
                         "conditional_formats['{}']: list item {} must be a dict",
                         col_str, i
                     ))
@@ -403,7 +403,7 @@ pub(crate) fn extract_conditional_formats(
         } else if let Ok(inner_dict) = fmt_value.cast::<pyo3::types::PyDict>() {
             cond_fmts.insert(col_str, vec![pydict_to_hashmap(inner_dict)?]);
         } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            return Err(crate::errors::configuration_type(format!(
                 "conditional_formats['{}']: value must be a dict or list of dicts",
                 col_str
             )));
@@ -436,7 +436,7 @@ pub(crate) fn extract_merged_ranges(
     for item in py_list.iter() {
         let tuple_len = item.len()?;
         if !(2..=3).contains(&tuple_len) {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(crate::errors::configuration(format!(
                 "merged_ranges tuple must have exactly 2 or 3 elements, got {}",
                 tuple_len
             )));
@@ -449,7 +449,7 @@ pub(crate) fn extract_merged_ranges(
             let fmt_item = item.get_item(2)?;
             if !fmt_item.is_none() {
                 let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(format!(
+                    crate::errors::configuration_type(format!(
                         "merged_ranges['{}']: format must be a dict, got {}",
                         range_str,
                         pytype_name(&fmt_item)
@@ -479,7 +479,7 @@ pub(crate) fn extract_hyperlinks(
     for item in py_list.iter() {
         let tuple_len = item.len()?;
         if !(2..=3).contains(&tuple_len) {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(crate::errors::configuration(format!(
                 "hyperlinks tuple must have exactly 2 or 3 elements, got {}",
                 tuple_len
             )));
@@ -527,7 +527,7 @@ pub(crate) fn extract_comments(
             let text: String = inner_dict
                 .get_item("text")?
                 .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
+                    crate::errors::configuration(format!(
                         "Comment at '{}' missing 'text' key",
                         cell_str
                     ))
@@ -563,7 +563,7 @@ pub(crate) fn extract_validations(
         if let Ok(inner_dict) = config.cast::<pyo3::types::PyDict>() {
             validations.insert(col_str, pydict_to_hashmap(inner_dict)?);
         } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            return Err(crate::errors::configuration_type(format!(
                 "validations['{}']: expected dict, got {}",
                 col_str,
                 pytype_name(&config)
@@ -589,7 +589,7 @@ pub(crate) fn extract_rich_text(
                 // Check if item is a tuple (text, format_dict) or just a string
                 if let Ok(tuple) = item.cast::<pyo3::types::PyTuple>() {
                     if tuple.len() != 2 {
-                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        return Err(crate::errors::configuration(format!(
                             "rich_text['{}']: segment {} tuple must have exactly 2 elements, got {}",
                             cell_str,
                             idx,
@@ -602,7 +602,7 @@ pub(crate) fn extract_rich_text(
                         None
                     } else {
                         let dict = fmt_item.cast::<pyo3::types::PyDict>().map_err(|_| {
-                            pyo3::exceptions::PyTypeError::new_err(format!(
+                            crate::errors::configuration_type(format!(
                                 "rich_text['{}']: segment {} format must be a dict, got {}",
                                 cell_str,
                                 idx,
@@ -616,7 +616,7 @@ pub(crate) fn extract_rich_text(
                     // Plain string segment
                     segments.push((text, None));
                 } else {
-                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    return Err(crate::errors::configuration_type(format!(
                         "rich_text['{}']: segment {} must be a string or tuple (text, format_dict), got {}",
                         cell_str,
                         idx,
@@ -625,7 +625,7 @@ pub(crate) fn extract_rich_text(
                 }
             }
         } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            return Err(crate::errors::configuration_type(format!(
                 "rich_text['{}']: expected list of segments, got {}",
                 cell_str,
                 pytype_name(&segments_list)
@@ -656,7 +656,7 @@ pub(crate) fn extract_images(
             let path: String = inner_dict
                 .get_item("path")?
                 .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
+                    crate::errors::configuration(format!(
                         "Image at '{}' missing 'path' key",
                         cell_str
                     ))
@@ -709,7 +709,7 @@ pub(crate) fn extract_checkboxes(
             let checked: bool = inner_dict
                 .get_item("checked")?
                 .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
+                    crate::errors::configuration(format!(
                         "checkboxes['{}'] dict missing 'checked' key",
                         cell_str
                     ))
@@ -721,7 +721,7 @@ pub(crate) fn extract_checkboxes(
                 } else if let Ok(d) = fmt.cast::<pyo3::types::PyDict>() {
                     Some(pydict_to_hashmap(d)?)
                 } else {
-                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    return Err(crate::errors::configuration_type(format!(
                         "checkboxes['{}']: 'format' must be a dict",
                         cell_str
                     )));
@@ -738,7 +738,7 @@ pub(crate) fn extract_checkboxes(
             );
         } else {
             let checked: bool = value.extract().map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(format!(
+                crate::errors::configuration_type(format!(
                     "checkboxes['{}']: expected bool or dict, got {}",
                     cell_str,
                     pytype_name(&value)
@@ -773,7 +773,7 @@ pub(crate) fn extract_textboxes(
             let text: String = inner_dict
                 .get_item("text")?
                 .ok_or_else(|| {
-                    pyo3::exceptions::PyValueError::new_err(format!(
+                    crate::errors::configuration(format!(
                         "textboxes['{}'] dict missing 'text' key",
                         cell_str
                     ))
@@ -797,7 +797,7 @@ pub(crate) fn extract_textboxes(
                 },
             );
         } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            return Err(crate::errors::configuration_type(format!(
                 "textboxes['{}']: expected str or dict, got {}",
                 cell_str,
                 pytype_name(&value)
@@ -818,7 +818,7 @@ pub(crate) fn extract_charts(
     for (cell_ref, value) in py_dict.iter() {
         let cell_str: String = cell_ref.extract()?;
         let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "charts['{}']: expected dict, got {}",
                 cell_str,
                 pytype_name(&value)
@@ -840,7 +840,7 @@ pub(crate) fn extract_sparklines(
     for (loc_ref, value) in py_dict.iter() {
         let loc_str: String = loc_ref.extract()?;
         let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
+            crate::errors::configuration_type(format!(
                 "sparklines['{}']: expected dict, got {}",
                 loc_str,
                 pytype_name(&value)
@@ -857,8 +857,7 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
     let mut cells = Vec::new();
     for (key, value) in py_dict.iter() {
         let cell_ref: String = key.extract()?;
-        let (row, col) =
-            parse_cell_ref(&cell_ref).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let (row, col) = parse_cell_ref(&cell_ref).map_err(crate::errors::configuration)?;
 
         // Check if value is a dict with "value" and optional formatting keys
         if let Ok(d) = value.cast::<pyo3::types::PyDict>() {
@@ -874,7 +873,7 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 ],
             )?;
             let val = d.get_item("value")?.ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err(format!(
+                crate::errors::configuration(format!(
                     "cells['{}'] dict missing 'value' key",
                     cell_ref
                 ))
@@ -888,20 +887,20 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 .map(|v| v.extract::<String>())
                 .transpose()?;
             if let Some(ref ah) = align_h {
-                parse_horizontal_alignment(ah).map_err(pyo3::exceptions::PyValueError::new_err)?;
+                parse_horizontal_alignment(ah).map_err(crate::errors::configuration)?;
             }
             let align_v: Option<String> = d
                 .get_item("align_vertical")?
                 .map(|v| v.extract::<String>())
                 .transpose()?;
             if let Some(ref av) = align_v {
-                parse_vertical_alignment(av).map_err(pyo3::exceptions::PyValueError::new_err)?;
+                parse_vertical_alignment(av).map_err(crate::errors::configuration)?;
             }
             let wrap: bool = d
                 .get_item("wrap_text")?
                 .map(|v| {
                     v.extract::<bool>().map_err(|_| {
-                        pyo3::exceptions::PyTypeError::new_err(format!(
+                        crate::errors::configuration_type(format!(
                             "cells['{}']: 'wrap_text' must be a bool, got {}",
                             cell_ref,
                             pytype_name(&v)

@@ -12,6 +12,7 @@
 
 mod apply;
 mod convert;
+mod errors;
 mod extract;
 mod parse;
 mod types;
@@ -19,7 +20,7 @@ mod workbook;
 mod write;
 
 // Re-export public API for the CLI binary (main.rs)
-pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel};
+pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertError};
 pub use types::DateOrder;
 
 use convert::{convert_dataframe_to_xlsx, dataframe_row_count, write_configured_sheet};
@@ -49,7 +50,7 @@ fn path_arg_to_string(value: &Bound<'_, PyAny>, param_name: &str) -> PyResult<St
             return Ok(path);
         }
     }
-    Err(pyo3::exceptions::PyTypeError::new_err(format!(
+    Err(errors::configuration_type(format!(
         "'{}' must be str or a path-like object returning str (bytes paths are not supported), got {}",
         param_name,
         pytype_name(value)
@@ -62,7 +63,7 @@ fn require_dict<'py>(
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
     value.cast::<pyo3::types::PyDict>().cloned().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(format!(
+        errors::configuration_type(format!(
             "expected dict for '{}', got {}",
             param_name,
             pytype_name(value)
@@ -76,11 +77,31 @@ fn require_list<'py>(
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyList>> {
     value.cast::<pyo3::types::PyList>().cloned().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(format!(
+        errors::configuration_type(format!(
             "expected list for '{}', got {}",
             param_name,
             pytype_name(value)
         ))
+    })
+}
+
+/// Reject anything that is not a supported DataFrame, at the boundary.
+///
+/// This runs the *same* predicate the write pipeline runs, and exists for two reasons
+/// that the inner call cannot serve. First, classification: inside the pipeline the
+/// failure is a `String` that reaches `lib.rs` indistinguishable from a bad option, so
+/// `InputDataError` would be unraisable -- verified, before this existed
+/// `df_to_xlsx([1, 2, 3], ...)` raised `ConfigurationError`. Second, ordering: an
+/// unsupported input now fails before any file is created.
+///
+/// Calling `types::is_polars_dataframe` rather than re-implementing the check is what
+/// keeps the two sites from drifting apart.
+fn require_supported_dataframe(df: &Bound<'_, PyAny>, sheet: Option<&str>) -> PyResult<()> {
+    types::is_polars_dataframe(df).map(|_| ()).map_err(|e| {
+        errors::input_data(match sheet {
+            Some(name) => format!("sheet '{}': {}", name, e),
+            None => e,
+        })
     })
 }
 
@@ -224,7 +245,7 @@ fn csv_to_xlsx(
     let output_path = path_arg_to_string(output_path, "output_path")?;
     let sheet_name = sheet_name.to_string();
     let order = DateOrder::parse(date_order).ok_or_else(|| {
-        pyo3::exceptions::PyValueError::new_err(format!(
+        errors::configuration(format!(
             "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu, european",
             date_order
         ))
@@ -239,7 +260,7 @@ fn csv_to_xlsx(
             convert_csv_to_xlsx(&input_path, &output_path, &sheet_name, order)
         }
     });
-    result.map_err(pyo3::exceptions::PyValueError::new_err)
+    Ok(result?)
 }
 
 /// Convert a pandas or polars DataFrame to XLSX format.
@@ -420,6 +441,7 @@ fn df_to_xlsx<'py>(
     sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
+    require_supported_dataframe(df, None)?;
     let opts = extract_options(&RawOptions {
         column_widths,
         header_format,
@@ -454,7 +476,7 @@ fn df_to_xlsx<'py>(
         &opts,
         defined_names.as_ref(),
     )
-    .map_err(pyo3::exceptions::PyValueError::new_err)
+    .map_err(PyErr::from)
 }
 
 /// Get the version of the xlsxturbo library
@@ -629,7 +651,7 @@ fn dfs_to_xlsx<'py>(
 ) -> PyResult<Vec<(u32, u16)>> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
     if sheets.is_empty() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
+        return Err(errors::configuration(
             "dfs_to_xlsx requires at least one sheet, got an empty list",
         ));
     }
@@ -658,6 +680,7 @@ fn dfs_to_xlsx<'py>(
 
     for sheet_tuple in sheets {
         let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
+        require_supported_dataframe(&df, Some(&sheet_name))?;
 
         // Merge per-sheet scalar options with global defaults
         let effective_header = sheet_config.header.unwrap_or(header);
@@ -681,15 +704,14 @@ fn dfs_to_xlsx<'py>(
         // two empty sheets sharing a table name would false-positive as a
         // conflict.
         if !constant_memory && effective_header && effective_table_style.is_some() {
-            let row_count = dataframe_row_count(&df).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("sheet '{}': {}", sheet_name, e))
-            })?;
+            let row_count = dataframe_row_count(&df)
+                .map_err(|e| errors::input_data(format!("sheet '{}': {}", sheet_name, e)))?;
             if row_count > 0 {
                 if let Some(name) = effective_table_name.as_deref() {
                     let sanitized = sanitize_table_name(name);
                     let key = sanitized.to_ascii_lowercase();
                     if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
-                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        return Err(errors::workbook_validation(format!(
                             "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
                             sanitized, previous_sheet, sheet_name
                         )));
@@ -719,18 +741,15 @@ fn dfs_to_xlsx<'py>(
             &sheet_config_write,
             effective_opts,
         )
-        .map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(format!("sheet '{}': {}", sheet_name, e))
-        })?;
+        .map_err(|e| errors::configuration(format!("sheet '{}': {}", sheet_name, e)))?;
 
         stats.push(result);
     }
 
-    apply_defined_names(&mut workbook, defined_names.as_ref())
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    apply_defined_names(&mut workbook, defined_names.as_ref()).map_err(errors::configuration)?;
 
     // Save workbook
-    save_workbook(&mut workbook, &output_path).map_err(pyo3::exceptions::PyValueError::new_err)?;
+    save_workbook(&mut workbook, &output_path).map_err(errors::file)?;
 
     Ok(stats)
 }
@@ -761,5 +780,6 @@ fn xlsxturbo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dfs_to_xlsx, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    errors::register(m)?;
     Ok(())
 }

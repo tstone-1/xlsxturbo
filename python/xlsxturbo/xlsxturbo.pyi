@@ -5,6 +5,31 @@ from typing import Literal, TypedDict
 
 PathArg = str | PathLike[str]
 
+# --- Exception hierarchy ---------------------------------------------------
+#
+# Built at module initialisation in `src/errors.rs`, so these are real runtime
+# classes rather than stub-only types. Each carries the builtin exception the
+# same failure raised before 0.19, which is what keeps `except ValueError` and
+# `except TypeError` working; see `docs/errors.md`.
+
+class XlsxTurboError(Exception):
+    """Base class for every exception raised by xlsxturbo."""
+
+class ConfigurationError(XlsxTurboError, ValueError):
+    """An option or argument has an invalid value."""
+
+class ConfigurationTypeError(XlsxTurboError, TypeError):
+    """An option or argument has the wrong type."""
+
+class InputDataError(XlsxTurboError, ValueError):
+    """The object passed as data is not a supported DataFrame."""
+
+class FileError(XlsxTurboError, OSError, ValueError):
+    """A filesystem read or write failed."""
+
+class WorkbookValidationError(ConfigurationError):
+    """The configuration is well-formed, but Excel does not permit it."""
+
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
 ValidationType = Literal[
     "list",

@@ -47,7 +47,48 @@
 6. `python/xlsxturbo/xlsxturbo.pyi` - TypedDict for the options, kwarg on both signatures and `SheetOptions`, docstrings. This compiled-extension stub is the type source of truth; `__init__.pyi` is a thin re-export - never hand-edit it for new options.
 7. `tests/test_<feature area>.py` - a `TestXxx` class following the existing per-feature test files (behavior-coupled: read the produced xlsx back via openpyxl or XML).
 
+Raising from Rust: **never `pyo3::exceptions::Py*Error::new_err` in `src/`.** Use the
+`crate::errors::*` helpers — see the section below. `src/apply/` and `src/parse/` are
+unaffected: they return `Result<_, String>` and the boundary classifies for them.
+
 Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py --write`. `docs/capability-matrix.md` is GENERATED from the Rust sources and must never be hand-edited; `tests/test_capability_matrix.py` fails if the committed page is stale. The generator parses `SHEET_OPTION_NAMES`, `define_options!`, `CONSTANT_MEMORY_SAFE_OPTIONS`, `warn_constant_memory_skips` and the three `#[pyo3(signature)]` blocks, so touching any of those changes the page. Each parser raises rather than returning an empty list, because a structural audit that matches nothing reads exactly like a clean result — and each parsed parameter must be a Python identifier, which is what caught a regex that spanned from the file's first pyo3 attribute through to the requested function and produced "parameters" like `) -> PyResult<(u32`.
+
+## The Exception Hierarchy (0.19.0+)
+
+`src/errors.rs` owns the public exception classes and is the only place in `src/` that may
+construct a `PyErr` from scratch. Raise with `errors::configuration`,
+`errors::configuration_type`, `errors::input_data`, `errors::file` or
+`errors::workbook_validation`. The classes are built by calling the `type` metaclass rather
+than with `create_exception!`, because that macro takes a single base and every class here
+needs two or three.
+
+Five facts that are expensive to rediscover:
+
+- **The second base is a compatibility contract, not decoration.** Each class inherits the
+  builtin its failures raised in 0.18. Pick a new class's builtin by **grepping what the site
+  raises today**, not by what the failure morally is. Getting this from taste produced a
+  breaking change twice during the original implementation — once for I/O (`OSError` alone
+  would have broken `except ValueError`) and once for `InputDataError` (which is a
+  `ValueError`, because frame detection has always reached the boundary through the pipeline).
+- **The 93 `pytest.raises(ValueError|TypeError)` assertions across `tests/` are the
+  behaviour record for pre-0.19.** They are the compatibility gate. A change to this area that
+  needs one of them edited to stay green is a breaking change, whatever the changelog claims.
+- **A class no site raises is dead API that can never be removed.**
+  `tests/test_errors.py` asserts the exported set equals the set with a working trigger, which
+  is what kept `UnsupportedFeatureError` from shipping (a `constant_memory` conflict is a
+  `RuntimeWarning` and the call succeeds — nothing would have raised it).
+- **The boundary is `src/lib.rs` *and* `src/extract.rs`,** 50 sites, not the dozen the plan
+  assumed. Everything below `extract.rs` is uniformly `Result<_, String>`.
+- **`ConvertError` in `src/convert.rs` is the one seam.** Two variants, `Config` and `File`,
+  because `save_workbook` runs inside the pipeline and its failure would otherwise be
+  indistinguishable from a bad option at the boundary. `From<String>` maps to `Config`, so
+  every existing `?` still compiles — which also means **a new filesystem call defaults to
+  `Config` unless you tag it `ConvertError::File`.** Frame detection needed the same treatment
+  and got a boundary call (`require_supported_dataframe`) instead, since tagging it would have
+  pushed `ConvertError` down into the write layer.
+
+Full reasoning, including the shapes considered and rejected: `docs/roadmap-1.0.md`
+decision D6. User-facing contract: `docs/errors.md`.
 
 ## Python Lint, Type, and Security Gates
 

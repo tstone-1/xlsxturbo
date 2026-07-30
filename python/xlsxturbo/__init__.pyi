@@ -1,9 +1,10 @@
 """Public type stubs for the xlsxturbo package.
 
 The runtime surface of this package is the compiled extension re-exported by
-``__init__.py``: the conversion functions plus ``version`` / ``__version__``.
-This stub mirrors exactly that surface, so a type checker never reports an
-import as valid that would raise ``ImportError`` at runtime.
+``__init__.py``: the conversion functions, ``version`` / ``__version__``, and
+the exception hierarchy. This stub mirrors exactly that surface, so a type
+checker never reports an import as valid that would raise ``ImportError`` at
+runtime.
 
 The option ``TypedDict`` / ``Literal`` helpers (``SparklineOptions``,
 ``ChartOptions``, ``ValidationType``, ...) are stub-only types with no runtime
@@ -13,6 +14,12 @@ surface lives in ``xlsxturbo.pyi``.
 """
 
 from .xlsxturbo import (
+    ConfigurationError as ConfigurationError,
+    ConfigurationTypeError as ConfigurationTypeError,
+    FileError as FileError,
+    InputDataError as InputDataError,
+    WorkbookValidationError as WorkbookValidationError,
+    XlsxTurboError as XlsxTurboError,
     __version__ as __version__,
     csv_to_xlsx as csv_to_xlsx,
     df_to_xlsx as df_to_xlsx,
@@ -21,6 +28,12 @@ from .xlsxturbo import (
 )
 
 __all__ = [
+    "ConfigurationError",
+    "ConfigurationTypeError",
+    "FileError",
+    "InputDataError",
+    "WorkbookValidationError",
+    "XlsxTurboError",
     "__version__",
     "csv_to_xlsx",
     "df_to_xlsx",

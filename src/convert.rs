@@ -22,6 +22,61 @@ use rust_xlsxwriter::{Format, Table, Workbook, Worksheet};
 use std::collections::HashMap;
 use std::fs::File;
 
+/// A conversion failure, tagged with whether it came from the filesystem.
+///
+/// Two variants rather than one per failure mode, and that is the whole design. The
+/// public exception hierarchy needs exactly one distinction that classifying by call
+/// site cannot make: `save_workbook` is called from *inside* this pipeline, so a
+/// permissions failure otherwise arrives at the same boundary `map_err` in `lib.rs` as a
+/// misspelled option, and `FileError` would be unraisable. Everything else the hierarchy
+/// distinguishes is already visible at the boundary.
+///
+/// `From<String>` maps to [`ConvertError::Config`], so every existing `?` on a
+/// `Result<_, String>` in this module keeps compiling and only the four genuinely
+/// filesystem-facing calls name a variant. The cost of that convenience is that a
+/// filesystem call added later defaults to `Config` unless it is tagged; the tests in
+/// `tests/test_errors.py` pin the known paths, and this comment is the warning for the
+/// next one. See `docs/roadmap-1.0.md` decision D6.
+#[derive(Debug)]
+pub enum ConvertError {
+    /// Traceable to an option, a value, or the data. Becomes `ConfigurationError`.
+    Config(String),
+    /// A filesystem read or write failed. Becomes `FileError`.
+    File(String),
+}
+
+impl ConvertError {
+    /// The human-readable message, whichever variant this is.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Config(message) | Self::File(message) => message,
+        }
+    }
+}
+
+impl std::fmt::Display for ConvertError {
+    /// Writes the message alone; the variant is routing information, not user-facing.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for ConvertError {}
+
+impl From<String> for ConvertError {
+    /// Untagged failures are configuration failures; see the type's own note.
+    fn from(message: String) -> Self {
+        Self::Config(message)
+    }
+}
+
+impl From<&str> for ConvertError {
+    /// Same as the `String` conversion; `ok_or("literal")` sites rely on it.
+    fn from(message: &str) -> Self {
+        Self::Config(message.to_string())
+    }
+}
+
 /// Convert a CSV file to XLSX format with automatic type detection.
 ///
 /// # Arguments
@@ -32,15 +87,16 @@ use std::fs::File;
 ///
 /// # Returns
 /// * `Ok((rows, cols))` - Number of rows and columns written
-/// * `Err(message)` - Error description if conversion fails
+/// * `Err(error)` - What went wrong, tagged as filesystem or not
 pub fn convert_csv_to_xlsx(
     input_path: &str,
     output_path: &str,
     sheet_name: &str,
     date_order: DateOrder,
-) -> Result<(u32, u16), String> {
+) -> Result<(u32, u16), ConvertError> {
     // Open CSV file (csv::ReaderBuilder handles buffering internally)
-    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
+    let file = File::open(input_path)
+        .map_err(|e| ConvertError::File(format!("Failed to open input file: {}", e)))?;
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -91,7 +147,7 @@ pub fn convert_csv_to_xlsx(
     }
 
     // Save workbook
-    save_workbook(&mut workbook, output_path)?;
+    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
 
     Ok((row_count, col_count))
 }
@@ -111,8 +167,9 @@ pub fn convert_csv_to_xlsx_parallel(
     output_path: &str,
     sheet_name: &str,
     date_order: DateOrder,
-) -> Result<(u32, u16), String> {
-    let file = File::open(input_path).map_err(|e| format!("Failed to open input file: {}", e))?;
+) -> Result<(u32, u16), ConvertError> {
+    let file = File::open(input_path)
+        .map_err(|e| ConvertError::File(format!("Failed to open input file: {}", e)))?;
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -166,7 +223,7 @@ pub fn convert_csv_to_xlsx_parallel(
         )?;
     }
 
-    save_workbook(&mut workbook, output_path)?;
+    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
 
     Ok((row_count, col_count))
 }
@@ -740,7 +797,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
     constant_memory: bool,
     opts: &ExtractedOptions,
     defined_names: Option<&HashMap<String, String>>,
-) -> Result<(u32, u16), String> {
+) -> Result<(u32, u16), ConvertError> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
 
     let config = WriteConfig {
@@ -764,7 +821,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
 
     apply_defined_names(&mut workbook, defined_names)?;
 
-    save_workbook(&mut workbook, output_path)?;
+    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
 
     Ok(result)
 }

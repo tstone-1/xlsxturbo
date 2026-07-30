@@ -61,12 +61,17 @@ Consequence: touchpoint 6 of the feature checklist in `AGENTS.md` changes meanin
 `except ValueError` / `except TypeError` keeps working. Without this the hierarchy is a
 breaking change and cannot ship in a minor release.
 
+**The principle held; the class list in this entry did not — see [D6](#d6--the-hierarchy-and-boundary-as-actually-built).**
+
 ### D3 — Classify errors at the boundary, not by refactoring internals
 
 Internal functions return `Result<_, String>`; the conversion to Python exceptions happens at
 roughly a dozen sites in `src/lib.rs`. Classify there, by call site. Do **not** introduce an
 internal error enum in this cycle — it touches all of `apply/`, `parse/` and `convert.rs` for
 the last fraction of precision, and the public contract does not depend on it.
+
+**"Do not introduce an internal error enum" held. "Roughly a dozen sites in `src/lib.rs`" was
+wrong — see [D6](#d6--the-hierarchy-and-boundary-as-actually-built).**
 
 ### D4 — Options objects lower to kwargs in Python
 
@@ -80,6 +85,112 @@ not.
 It was the only tracked file under `docs/` — an internal planning memo was what a visitor to
 the public repo found there. Now gitignored alongside `docs/reviews/`. `docs/` from here on
 holds user-facing documentation only, which is what Phase 1 fills it with.
+
+### D6 — The hierarchy and boundary as actually built
+
+D2 and D3 were written before anyone counted the raise sites. Counting them changed four
+things. Recorded here rather than by editing D2/D3, because the reasoning is the useful part.
+
+**The boundary is two files, not one.** `src/lib.rs` has 12 conversion sites; **`src/extract.rs`
+has 38 more**, raising `PyTypeError`/`PyValueError` directly. D3's "roughly a dozen sites in
+`src/lib.rs`" undercounted by a factor of four. Everything below `extract.rs` — `apply/`,
+`parse/`, `convert.rs`, `write.rs`, `workbook.rs` — really is uniformly `Result<_, String>`,
+so that half of D3 was right and is what makes the rest tractable.
+
+**`UnsupportedFeatureError` is dropped: nothing raises it.** D2 gave it "e.g. constant_memory
+conflicts" as its purpose, but a `constant_memory` conflict is a `RuntimeWarning` and the call
+succeeds — by design, and `CONSTANT_MEMORY_SAFE_OPTIONS` plus a guard test exist to keep that
+deliberate. An exception class no site raises is dead public API that can never be removed.
+
+**`WorkbookWriteError(XlsxTurboError, OSError)` becomes
+`FileError(XlsxTurboError, OSError, ValueError)`.** Two reasons, and the first is a
+compatibility bug in D2's own terms:
+
+- Without a `ValueError` base it is a **breaking change**. Save failures are `ValueError`
+  today (`docs/errors.md` documents the exact prefix), so `except ValueError` around a save is
+  code that exists in the wild, and `(XlsxTurboError, OSError)` would stop catching it — the
+  precise outcome D2 was written to prevent. Verified legal: `(XlsxTurboError, OSError,
+  ValueError)` has no instance-layout conflict, gives a clean single-arg `str()`, and leaves
+  `errno`/`strerror`/`filename` as `None`.
+- `WorkbookWriteError` is the wrong *name*: `csv_to_xlsx` also fails on **reading** its input
+  (`Failed to open input file: ...`), which is filesystem I/O but not a workbook write.
+
+**`ConfigurationTypeError` is added, and it is not a refinement — it is required.** A single
+`ConfigurationError(XlsxTurboError, ValueError)` cannot cover `extract.rs`, because ~20 of its
+sites raise `TypeError` ("expected dict for 'x', got int") and ~18 raise `ValueError`. One
+`ValueError`-based class over both breaks `except TypeError`. The alternative considered and
+rejected was `ConfigurationError(XlsxTurboError, ValueError, TypeError)`: it is layout-legal,
+but it makes every bad option *value* also a `TypeError`, and the sibling pair costs one class
+to keep the mapping 1:1 with today's behaviour. **The whole hierarchy is therefore additive:
+no call that raises `ValueError` today raises `TypeError` tomorrow, or vice versa** — which is
+a property a test can pin, and `tests/test_errors.py` does.
+
+**`InputDataError` is a `ValueError`, not a `TypeError` — and the existing suite is what
+proved it.** The list above was implemented with `InputDataError(XlsxTurboError, TypeError)`,
+on the reasoning that "you passed a list, not a DataFrame" is a type problem. It is, but the
+builtin is not a matter of taste: `tests/test_core.py::TestDataFrameSubclasses::
+test_unrelated_object_still_rejected` asserts `pytest.raises(ValueError, match="Unsupported
+DataFrame type")`, and it went red. Frame detection has always raised `ValueError`, because it
+reaches the boundary through the write pipeline. So the same bug the `FileError` naming
+caught in D2 was reproduced one paragraph later in D6, by the author of that paragraph —
+which is the useful part of the record. Two habits follow:
+
+- **Derive the builtin base from a grep of the current behaviour, never from what the failure
+  ought to be.** Taste is exactly the input that produces a breaking change here.
+- **Run the full suite before believing a compatibility claim.** 93 existing
+  `pytest.raises(ValueError|TypeError)` assertions across the suite are a behaviour record
+  for pre-0.19; they are load-bearing for this phase and cost nothing to consult. The final
+  state passes all 381 pre-existing tests **with zero test edits**, which is the actual proof
+  that the hierarchy is additive. Any future change here that needs a test edited to stay
+  green is a breaking change, whatever the changelog says.
+
+As built:
+
+```
+XlsxTurboError(Exception)
+├── ConfigurationError(XlsxTurboError, ValueError)        # an option or argument VALUE is invalid
+│   └── WorkbookValidationError(ConfigurationError)       # valid config, but Excel forbids it
+├── ConfigurationTypeError(XlsxTurboError, TypeError)     # an option or argument has the wrong TYPE
+├── InputDataError(XlsxTurboError, ValueError)            # the object passed is not a supported frame
+└── FileError(XlsxTurboError, OSError, ValueError)        # filesystem read or write failure
+```
+
+**The one refactor D3 did not anticipate: `save_workbook` is not at the boundary.** It is
+called from inside the pipeline (`convert.rs:94`, `:169`, `:767`) and its error arrives at the
+*same* `map_err` as an option-validation failure, so classification by call site cannot tell
+them apart — and `FileError` is the most valuable class in the hierarchy, so leaving it
+imprecise defeats the point. Fixed with a two-variant tag at that one seam:
+
+```rust
+pub(crate) enum ConvertError { Config(String), File(String) }
+impl From<String> for ConvertError { /* -> Config */ }
+```
+
+`From<String>` means every existing `?` on a `Result<_, String>` keeps compiling unchanged and
+lands in `Config`; only the three `save_workbook` calls and the one `File::open` are tagged
+`File` explicitly. This is **not** the internal error enum D3 forbids — it does not reach
+`apply/`, `parse/` or `write.rs`, and it has two variants rather than one per failure mode.
+
+**A second boundary call was needed, for the same reason.** Frame detection also lives inside
+the pipeline (`types.rs:460`, reached from `write_sheet_data`), so `InputDataError` was
+*unraisable* through `df_to_xlsx` on the first build — `df_to_xlsx([1, 2, 3], path)` raised
+`ConfigurationError`, verified by running it. Fixed by calling the same predicate,
+`types::is_polars_dataframe`, at the top of both entry points via
+`require_supported_dataframe`. Calling the existing function rather than re-implementing the
+check is what stops the two sites drifting; the side benefit is that an unsupported input now
+fails before any file is created.
+
+That leaves a check whose inner twin already exists, which normally argues for deleting one of
+them. Not here: the inner call is the real implementation and the outer one exists to
+*classify*, which is information the inner site cannot produce. The mutation that deletes the
+boundary call is in the harness and turns
+`test_class_is_raised_by_a_real_call[InputDataError]` red, so the outer call is demonstrably
+load-bearing rather than defensive decoration.
+
+Accepted imprecision, stated so nobody mistakes it for an oversight: a dtype problem raised
+deep inside `write_sheet_data` arrives as `ConfigurationError`, not `InputDataError`.
+`InputDataError` covers only frame detection, which is now at the boundary. Chasing the rest
+is exactly the "last fraction of precision" D3 declined.
 
 ---
 
@@ -365,9 +476,10 @@ to the same new public surface.
 - [ ] Update `AGENTS.md` touchpoint 6 to match
 - [ ] `CHANGELOG.md` entry superseding the note that these are stub-only types
 
-### Exception hierarchy (see D2, D3)
+### Exception hierarchy (see D2, D3, and **D6 for what actually shipped**)
 
-- [ ] Define the hierarchy:
+- [x] Define the hierarchy. The planned shape is below, kept for the record; the built shape
+      and the four reasons it differs are in [D6](#d6--the-hierarchy-and-boundary-as-actually-built).
 
 ```
 XlsxTurboError(Exception)
@@ -378,14 +490,26 @@ XlsxTurboError(Exception)
 └── WorkbookValidationError(XlsxTurboError, ValueError)
 ```
 
-- [ ] Register the classes on the extension module and export them from `__init__.py` /
-      `__init__.pyi`
-- [ ] Classify the ~12 conversion sites in `src/lib.rs` by call site: `save_workbook` ->
-      `WorkbookWriteError`, option extraction -> `ConfigurationError`, frame detection ->
-      `InputDataError`
-- [ ] `tests/test_errors.py` asserting, for each class, both the new type **and** the legacy
-      builtin base — the legacy assertion is what proves D2 held
-- [ ] Document in the Phase 1 `errors` page
+- [x] Register the classes on the extension module and export them from `__init__.py` /
+      `__init__.pyi`. Built in `src/errors.rs` by calling the `type` metaclass, because
+      `create_exception!` accepts only one base and every class here needs two or three.
+      `__module__` is set to `xlsxturbo` so `repr()` and pickling follow the import path.
+- [x] Classify the conversion sites by call site. **50 sites, not ~12**: 12 in `src/lib.rs`
+      and 38 in `src/extract.rs` (22 `TypeError` -> `ConfigurationTypeError`, 16 `ValueError`
+      -> `ConfigurationError`). Plus the two boundary additions D6 describes.
+- [x] `tests/test_errors.py` — 51 tests. Asserts, per class, the new type, the legacy builtin
+      base, **and the builtins it must *not* be** (without that third table, a class that
+      inherited everything would pass). Also asserts every class is raised by a real call, and
+      that the exported set and the triggered set are equal — so a class cannot be added,
+      documented and never raised.
+- [x] Every one of those tests shown to fail: 6 mutations of production code, 6 caught. Two
+      harness bugs found on the way, both worth recording because each produced a *wrong
+      verdict* rather than an obvious crash — a bare test name that does not match pytest's
+      `name[param]` id read as `SURVIVED`, and `shutil.copy2` preserving mtime on restore left
+      cargo with nothing to rebuild, so one mutation was scored against the *previous*
+      mutation's binary. Same family as the padded-column parser already on record: the
+      harness needs its own controls.
+- [x] Document in the Phase 1 `errors` page
 
 **Gate:** full set — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test`, `maturin develop --release`, ruff, bandit, pyright, pytest. Then a deep diff
