@@ -800,15 +800,47 @@ it wants to reference.
 are already public as TypedDicts in `xlsxturbo.types`, and two of those three mean something
 different there. Resolve D7 before writing `options.py`.
 
-- [ ] `python/xlsxturbo/options.py`: `ExportOptions`, `SheetOptions`, `LayoutOptions`,
-      `TableOptions`, `FormattingOptions`, `ValidationOptions`, `MediaOptions`, `ChartOptions`
-      — as listed by the external review, and **not the list to build**; D7 has the revision
-- [ ] Lower to kwargs in Python (see D4)
-- [ ] Keep every existing kwarg supported indefinitely, documented as the low-level form.
-      **No deprecation in this phase**
-- [ ] Coverage guard, in the spirit of `tests/test_option_coverage.py`: fail when a kwarg has
-      no corresponding options-object field, so the two surfaces cannot drift
-- [ ] Update `AGENTS.md`: the feature checklist grows an eighth touchpoint
+- [x] `python/xlsxturbo/options.py`: **`ExportOptions` only**, per D7. The other seven names
+      were dropped — three collided with shipped `TypedDict`s and the rest were groups of two
+      to five fields that did not earn a public class
+- [x] Lower to kwargs in Python (see D4) — and **not** by wrapping the entry points, which is
+      a deviation worth reading: a wrapper would have to duplicate 27 parameters or collapse
+      them to `**kwargs`, and showing `**kwargs` where an editor shows 27 typed parameters
+      costs more discoverability than the object adds. `as_kwargs()` / `as_sheet_options()`
+      instead, leaving the compiled functions untouched
+- [x] Keep every existing kwarg supported indefinitely. **Nothing deprecated**
+- [x] Coverage guard: `TestCoverage` derives the option list from `inspect.signature` and
+      fails in both directions. Mutated three ways — dropping a field, adding a field naming
+      no real option, and emptying the workbook-only exclusion set — each caught by its
+      aimed-at test
+- [x] `AGENTS.md`: eighth touchpoint added, with what makes it affordable stated
+
+**Unplanned find:** the full-bundle test wrote all 24 options at once and produced a file no
+XML parser would read. Bisected to `data_bar` + `sparklines` on one worksheet, then reproduced
+against **rust_xlsxwriter 0.97.0 alone** — no xlsxturbo code in the path — which emits three
+`<ext>` elements and closes two. Upstream, unfixable here, and 0.97.0 is the latest release.
+**Resolved by refusing the combination.** `apply::reject_databar_with_sparklines` raises
+`ConfigurationError` before anything is written, naming the sheet, the column and two
+workarounds. Refusing beats warning because a corrupt workbook is normally discovered by
+whoever it was sent to, not by the person who wrote it.
+
+`ConfigurationError` and deliberately *not* `WorkbookValidationError`: the latter is documented
+as well-formed configuration that **Excel** forbids, and Excel is perfectly happy with a data
+bar beside a sparkline. It is this writer that cannot produce it.
+
+Two consequences worth carrying forward:
+
+- **The guard makes the defect unreachable from Python, so no Python test can see it fixed.**
+  `tests/upstream_defect.rs` drives rust_xlsxwriter directly and asserts the bug is *still
+  present*; when upstream fixes it, that test fails and the guard gets deleted rather than
+  outliving its reason. It has a control so a worse regression cannot be misread as the known
+  one. `zip` was added as a dev-dependency for it — already in the tree via rust_xlsxwriter,
+  with `default-features = false` because the default set pulls a `pbkdf2` version that does
+  not resolve.
+- **Over-reach is the expensive failure for a guard like this, not under-reach.** Refusing a
+  combination that is actually fine removes a feature silently, because users read the error as
+  their own mistake. Mutating the condition to refuse *any* conditional format beside sparklines
+  is caught by `test_the_guard_is_narrow`, which pins the adjacent cases that must keep working.
 
 **Accept the cost explicitly.** Adding a permanent eighth touchpoint per feature is a real
 tax, paid for discoverability and typability. It is worth paying, but it is not free, and the

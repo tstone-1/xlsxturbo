@@ -12,8 +12,13 @@ keep working unchanged -- see ``docs/errors.md``.
 The option shapes for annotating calls (``HeaderFormat``, ``ChartOptions``,
 ``ValidationType``, ...) live in ``xlsxturbo.types``, which imports nothing
 beyond the standard library.
+
+:class:`ExportOptions` bundles the option keywords into one reusable, typed
+object for callers who would rather not spell out a long argument list; every
+keyword remains available directly and nothing is deprecated.
 """
 
+from .options import ExportOptions
 from .xlsxturbo import (
     ConfigurationError,
     ConfigurationTypeError,
@@ -31,6 +36,7 @@ from .xlsxturbo import (
 __all__ = [
     "ConfigurationError",
     "ConfigurationTypeError",
+    "ExportOptions",
     "FileError",
     "InputDataError",
     "WorkbookValidationError",

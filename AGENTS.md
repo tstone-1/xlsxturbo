@@ -50,12 +50,35 @@
 5. `src/convert.rs` - apply call in `apply_worksheet_features` (order matters: `cells` stays last so user cells can overwrite data). Decide constant_memory classification: a new option defaults to skipped+warned; add to `CONSTANT_MEMORY_SAFE_OPTIONS` only if applied during the data write. The guard test `every_complex_option_is_classified_for_constant_memory` forces this decision.
 6. **`python/xlsxturbo/types.py`** - the option `TypedDict`/`Literal` for the new feature. Since 0.19.0 this runtime module, NOT the stub, is where shapes are declared; `xlsxturbo.pyi` imports them with the redundant-alias form (`X as X`) and keeps only the four function signatures, the exception classes and `__version__`. So a new option means: add the shape to `types.py`, add `X as X` to the stub's import block **and** to its `__all__`, then add the kwarg to both function signatures and to `SheetOptions` (which is itself in `types.py`). `tests/test_types_module.py` fails if the stub's re-export list and the runtime module disagree. `__init__.pyi` is a thin re-export of the *runtime* surface - never hand-edit it for new options. Two constraints on `types.py`: module-level aliases must use `Union[...]`/`Optional[...]` (`requires-python` is `>=3.9`, where `str | PathLike[str]` raises at import), while field annotations inside a `TypedDict` may use `|` because the module has `from __future__ import annotations`. Verified against a real 3.9 interpreter; the trade is that `typing.get_type_hints()` on these classes fails on 3.9 and works from 3.10.
 7. `tests/test_<feature area>.py` - a `TestXxx` class following the existing per-feature test files (behavior-coupled: read the produced xlsx back via openpyxl or XML).
+8. **`python/xlsxturbo/options.py`** - the matching `ExportOptions` field, plus a sample value in `tests/test_options.py`'s `SAMPLE_VALUES`. Both are enforced: `TestCoverage` derives the option list from `inspect.signature(df_to_xlsx)` and fails on a field the signature lacks or a signature parameter no field mirrors, and `test_sample_values_cover_every_field` fails if the sample table falls behind. Nothing else is needed - `as_kwargs`/`as_sheet_options` iterate the dataclass fields, so a new field flows through both lowerings automatically, and `as_sheet_options`'s workbook-only exclusion set is verified against what a per-sheet dict actually rejects rather than hand-maintained.
+
+   This eighth touchpoint is a real, permanent tax, accepted deliberately for discoverability (roadmap D7). It is one line of code plus one line of test data; it is bounded because `ExportOptions` is flat and mirrors the kwargs one-to-one, and it is enforced rather than remembered, which is the only reason it is affordable.
 
 Raising from Rust: **never `pyo3::exceptions::Py*Error::new_err` in `src/`.** Use the
 `crate::errors::*` helpers — see the section below. `src/apply/` and `src/parse/` are
 unaffected: they return `Result<_, String>` and the boundary classifies for them.
 
 Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py --write`. `docs/capability-matrix.md` is GENERATED from the Rust sources and must never be hand-edited; `tests/test_capability_matrix.py` fails if the committed page is stale. The generator parses `SHEET_OPTION_NAMES`, `define_options!`, `CONSTANT_MEMORY_SAFE_OPTIONS`, `warn_constant_memory_skips` and the three `#[pyo3(signature)]` blocks, so touching any of those changes the page. Each parser raises rather than returning an empty list, because a structural audit that matches nothing reads exactly like a clean result — and each parsed parameter must be a Python identifier, which is what caught a regex that spanned from the file's first pyo3 attribute through to the requested function and produced "parameters" like `) -> PyResult<(u32`.
+
+## The one upstream defect worked around in this codebase
+
+`apply::reject_databar_with_sparklines` refuses a `data_bar` conditional format beside a
+sparkline on one worksheet, because rust_xlsxwriter 0.97.0 emits unbalanced `<ext>` elements
+for that pair and Excel reports the workbook as damaged. Found by the full-bundle test in
+`tests/test_options.py`, which writes all 24 options at once — a combination nothing else
+exercised.
+
+Two things worth knowing before touching it:
+
+- **The guard makes the bug unreachable from Python, so no Python test can notice it being
+  fixed.** `tests/upstream_defect.rs` uses rust_xlsxwriter directly and asserts the defect is
+  *still present*; when upstream fixes it that test fails, which is the signal to delete the
+  guard, the Rust test, and the note in `docs/errors.md`. It has a control alongside it so a
+  worse regression cannot be misread as the known defect.
+- **Over-reach is the expensive failure here, not under-reach.** A guard refusing a
+  combination that is actually fine costs a feature silently, since users read the error as
+  their own mistake. `TestDataBarSparklineGuard::test_the_guard_is_narrow` pins the adjacent
+  cases that must keep working, and it is what catches a widened condition.
 
 ## The Exception Hierarchy (0.19.0+)
 

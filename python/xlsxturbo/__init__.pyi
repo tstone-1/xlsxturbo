@@ -13,9 +13,12 @@ real runtime objects, so no ``TYPE_CHECKING`` guard is needed::
     from xlsxturbo.types import HeaderFormat
 
 They are deliberately *not* re-exported here, to keep the package's top level to
-what the compiled extension provides.
+what the compiled extension provides. :class:`ExportOptions` is the exception: it
+is constructed in user code rather than used as an annotation, so it is exported
+at the top level where it is discoverable.
 """
 
+from .options import ExportOptions as ExportOptions
 from .xlsxturbo import (
     ConfigurationError as ConfigurationError,
     ConfigurationTypeError as ConfigurationTypeError,
@@ -33,6 +36,7 @@ from .xlsxturbo import (
 __all__ = [
     "ConfigurationError",
     "ConfigurationTypeError",
+    "ExportOptions",
     "FileError",
     "InputDataError",
     "WorkbookValidationError",

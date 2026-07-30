@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-07-30
+
+### Added
+- **`ExportOptions` — the export options as one reusable, typed object.**
+  `df_to_xlsx` takes 27 parameters, which is unpleasant for a call with ten options and gives
+  you nowhere to keep a set of options you use more than once:
+
+  ```python
+  from xlsxturbo import ExportOptions
+
+  REPORT = ExportOptions(freeze_panes=True, autofit=True, header_format={"bold": True})
+  xlsxturbo.df_to_xlsx(df, "out.xlsx", **REPORT.as_kwargs())
+  ```
+
+  The same bundle serves the multi-sheet path via `as_sheet_options()`, which drops the two
+  workbook-level options a per-sheet dict rejects. It is frozen, so it is safe as a shared
+  constant; `dataclasses.replace` derives a variant and `merged_with()` layers a sparse
+  override without resetting everything else.
+
+  **Every keyword argument still works, unchanged, and nothing is deprecated.** The compiled
+  entry points are untouched: the bundle lowers to the keywords they already accept rather
+  than wrapping them. A wrapper would have had to either duplicate all 27 parameters or
+  collapse them to `**kwargs` — and showing `**kwargs` where an editor currently shows 27
+  named, typed parameters would have cost more discoverability than the object adds.
+
+  An option left unset is omitted when lowering; an option set to `None` is passed through.
+  The two are different: per-sheet, `table_style=None` means "no table on this sheet",
+  overriding a workbook default.
+
+  Only one new public name. The per-feature shapes (`ChartOptions`, `ValidationOptions`, ...)
+  remain `TypedDict`s in `xlsxturbo.types` — they already describe themselves to a type
+  checker, and grouped `LayoutOptions`/`TableOptions`-style objects were dropped because the
+  natural groups are two to five fields and none earned a public class.
+
+### Changed
+- **A `data_bar` conditional format and a sparkline on the same worksheet are now refused.**
+  rust_xlsxwriter 0.97.0 emits unbalanced `<ext>` elements for that pair, producing a workbook
+  Excel reports as damaged. xlsxturbo now raises `ConfigurationError` naming the sheet, the
+  column and two workarounds, before writing anything, rather than producing a file you cannot
+  open.
+
+  Reproduced against rust_xlsxwriter alone, with no xlsxturbo code in the path, so it cannot be
+  fixed here; 0.97.0 is the latest release. Deliberately narrow: only `data_bar` collides, each
+  feature alone is unaffected, and every other conditional-format type still works beside
+  sparklines. `tests/upstream_defect.rs` asserts the upstream bug is *still present*, so the day
+  it is fixed a test fails and the workaround gets removed instead of outliving its reason.
+
 ## [0.19.1] - 2026-07-30
 
 Three defects in 0.19.0's new public surface, all found by an independent review of that

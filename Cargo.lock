@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "xlsxturbo"
-version = "0.19.1"
+version = "0.20.0"
 dependencies = [
  "chrono",
  "clap",
@@ -800,6 +800,7 @@ dependencies = [
  "rayon",
  "rust_xlsxwriter",
  "tempfile",
+ "zip",
 ]
 
 [[package]]

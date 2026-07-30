@@ -72,6 +72,7 @@ nav:
       - Charts and media: charts-and-media.md
       - CSV conversion: csv-conversion.md
       - Constant memory mode: constant-memory.md
+      - Reusable option bundles: export-options.md
   - Reference:
       - API reference: api-reference.md
       - Capability matrix: capability-matrix.md
