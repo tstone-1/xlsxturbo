@@ -7,7 +7,7 @@ from the sources, and the generator's parsers silently matching nothing.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -23,15 +23,19 @@ DOC = REPO_ROOT / "docs" / "capability-matrix.md"
 def _load_generator() -> ModuleType:
     """Import the generator script as a module.
 
+    Imports by name off `sys.path` rather than through
+    `spec_from_file_location` + `spec.loader.exec_module`. The latter is a
+    typeshed minefield: `ModuleSpec.loader` is typed as `Loader | None`, and
+    whether `Loader` declares `exec_module` varies between typeshed versions --
+    so that spelling passed pyright locally and failed it in CI.
+
     Returns:
         The imported module.
     """
-    spec = importlib.util.spec_from_file_location("gen_capability_matrix", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    scripts_dir = str(SCRIPT.parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    return importlib.import_module("gen_capability_matrix")
 
 
 class TestCapabilityMatrixFreshness:

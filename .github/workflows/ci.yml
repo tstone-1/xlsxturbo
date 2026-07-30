@@ -236,17 +236,27 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      # Install into a project-local .venv, which is what pyproject.toml's
+      # [tool.pyright] venvPath/venv point at. Installing into the system
+      # interpreter instead made pyright log "venv .venv subdirectory not
+      # found" and analyse a different environment than a contributor gets
+      # locally -- so the gate could pass on one and fail on the other, which
+      # it duly did. A gate that disagrees with its documented local command is
+      # worse than no gate: it grants false confidence in both directions.
       - name: Install project with dev extras
-        run: pip install -e ".[dev]"
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
 
       - name: Run ruff
-        run: ruff check python tests benchmarks scripts
+        run: .venv/bin/ruff check python tests benchmarks scripts
 
       - name: Run bandit
-        run: bandit -c pyproject.toml -r python
+        run: .venv/bin/bandit -c pyproject.toml -r python
 
       - name: Run pyright
-        run: pyright
+        run: .venv/bin/pyright
 
   # ---------------------------------------------------------------------------
   # Supply-chain gates
