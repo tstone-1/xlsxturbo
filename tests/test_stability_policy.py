@@ -87,12 +87,22 @@ def _classifier_pythons() -> set[str]:
 
 
 def _ci_pythons() -> set[str]:
-    """Interpreter versions any CI job runs the test suite against."""
+    """Interpreter versions any CI job runs the test suite against.
+
+    Reads `include:` entries as well as the matrix axes. A version reachable
+    only through an `include` is just as tested as one on an axis, and reading
+    only the axes would report it as untested -- the direction that quietly
+    understates coverage rather than overstating it, and therefore the one that
+    would sit unnoticed.
+    """
     config = yaml.safe_load(CI.read_text(encoding="utf-8"))
     found: set[str] = set()
     for job in config["jobs"].values():
         matrix = job.get("strategy", {}).get("matrix", {})
         found.update(str(version) for version in matrix.get("python-version", ()))
+        for entry in matrix.get("include", ()):
+            if "python-version" in entry:
+                found.add(str(entry["python-version"]))
     assert found, "no python-version matrix found in ci.yml"
     return found
 

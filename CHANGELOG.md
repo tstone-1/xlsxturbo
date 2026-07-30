@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test-dependency floors raised to what 3.10 makes reachable: `pytest>=9.1.1`,
   `numpy>=2.2.6`, `pandas>=2.3.3`, `polars>=1.43.1`. Test-only; the published wheel has no
   runtime dependencies.
+- **CI now runs the test suite against both pandas 2 and pandas 3.** The declared range was
+  `<3` while pandas 3 was released and was what development actually ran on, so local runs
+  and CI had silently stopped testing the same library. The ceiling moves to `<4` and a
+  fourth `python-test` leg installs `requirements-test-pandas2.txt`, which layers the main
+  file and overrides only the pandas ceiling — every floor stays single-sourced.
+
+  Worth a job rather than an assumption because pandas 3 changed defaults this library is
+  directly exposed to: Copy-on-Write, and PyArrow-backed strings as the default `str` dtype,
+  in a library whose whole job is detecting types. Both majors pass, measured on each before
+  the change was made.
 
 ### Internal
 - **Two guards fired on this change, as designed, and that is the result worth recording.**

@@ -58,6 +58,14 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.10', '3.12', '3.14']
+        requirements: ['requirements-test.txt']
+        # requirements-test.txt allows pandas 2 or 3 and pip always resolves to
+        # the newest, so without this leg pandas 2 is declared supported and
+        # never run. `include` adds a combination rather than merging, because
+        # `requirements` is an existing matrix key with a different value.
+        include:
+          - python-version: '3.12'
+            requirements: 'requirements-test-pandas2.txt'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -86,7 +94,12 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" -r requirements-test.txt
+          pip install "maturin>=1.4,<2.0" -r ${{ matrix.requirements }}
+
+      - name: Report the resolved DataFrame library versions
+        run: |
+          source .venv/bin/activate
+          python -c "import pandas, polars; print(f'pandas {pandas.__version__}, polars {polars.__version__}')"
 
       - name: Build and install xlsxturbo
         run: |

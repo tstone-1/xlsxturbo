@@ -28,6 +28,22 @@
 - This repo uses a project-local `.venv` (an exception to any central-venv convention). Test deps (`pytest pandas polars openpyxl`) must be installed there; if they are missing, `uv run pytest` silently falls back to a system Python with a stale extension and reports bogus signature mismatches. Verify the interpreter in the pytest header is `.venv\Scripts\python.exe`; recover with `uv pip install pytest pandas polars openpyxl` and rebuild via `maturin develop --release`.
 - **A new third-party import in a test cannot be validated locally — add it to `requirements-test.txt`.** The local `.venv` holds the whole `dev` extras, but the CI test jobs and the release smoke test install only `requirements-test.txt`, so the local environment is a strict superset of CI and a test importing anything outside that file passes locally and fails only in CI. Declaring it in `[project.optional-dependencies] dev` does **not** fix it; those jobs never install `dev`. `tests/test_ci_config.py` fails if an import is undeclared or if a workflow re-inlines the list.
 
+  **A declared version range is only supported at the end CI installs.** pip resolves to the
+  newest allowed, so `pandas>=2.3.3,<4` means pandas 3 on every leg and pandas 2 never. Since
+  1.1.0 a fourth `python-test` leg installs `requirements-test-pandas2.txt`, which **layers**
+  the main file (`-r requirements-test.txt`) and overrides only the pandas ceiling — never
+  restates the list, which would be a fifth copy of it. `tests/test_ci_config.py` fails if
+  that file stops layering, gains a package, stops being referenced by a workflow, or outlives
+  its reason (the pandas range narrowing back to one major). Scoped to pandas because it is
+  the only dependency whose range currently spans two majors; a second one needs its own leg
+  and nothing will notice on its own.
+
+  How the gap was found is the transferable part: the local `.venv` had pandas 3 while
+  `requirements-test.txt` said `<3`, so **local runs and CI had not been testing the same
+  library for weeks** and everything was green on both. The usual assumption here — that the
+  local environment is a strict superset of CI — was simply false, in the direction nothing
+  checks.
+
   That guard exists because the same bug landed three times in two days: `tests/test_docs_site.py` imported `yaml` (declared in `dev`, broke three CI jobs); fixing those three left a **fourth** copy of the list in `release.yml`'s smoke-test job, which failed the v0.19.0 release after every wheel had already built; and the guard's first run found `numpy` imported by `tests/test_core.py` and never declared anywhere — working only because pandas pulls it in. A comment saying "remember the other copies" was the fix after the first, and it did not survive a day.
 
 - **The release smoke test runs `pytest tests/` against an installed wheel from outside the checkout, with only `tests/` copied.** So a test module that reads *repository* files — `mkdocs.yml`, the capability matrix, the generator script, the workflows — has nothing to read there and must skip via `tests.helpers.repo_checkout_available()`, not fail. This is invisible in ordinary CI and surfaces only when a tag is pushed: `test_docs_site.py` and `test_capability_matrix.py` were both added after v0.18.0, so v0.19.0 was the first release to run them and all 16 failed. Inside a checkout a missing file stays a hard failure — the guard distinguishes "no repository here" from "the repository is broken". Reproduce the job locally before tagging: `cp -r tests "$TMP/smoke" && cd "$TMP/smoke" && python -m pytest tests/ -q`.

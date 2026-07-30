@@ -1,0 +1,20 @@
+# The same test dependencies, held to pandas 2.x.
+#
+# `requirements-test.txt` allows `pandas>=2.3.3,<4`, so a plain install always
+# resolves to the newest -- pandas 3 today. That leaves pandas 2 declared as
+# supported and never exercised, which is how a library ends up claiming a range
+# it only tests one end of. This file is the other end, installed by one leg of
+# the `python-test` matrix in .github/workflows/ci.yml.
+#
+# It layers rather than duplicates: every floor stays single-sourced in
+# requirements-test.txt, and only the pandas ceiling is overridden here. Adding a
+# package to this file would recreate the drift that file exists to prevent.
+#
+# pandas 3 changed defaults this library is directly exposed to -- Copy-on-Write,
+# and PyArrow-backed strings as the default `str` dtype -- so "the type detection
+# behaves the same on both" is a claim worth a CI job rather than an assumption.
+#
+# `tests/test_ci_config.py` fails if this file stops layering the main one or
+# stops being referenced by a workflow.
+-r requirements-test.txt
+pandas<3

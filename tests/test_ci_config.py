@@ -37,6 +37,7 @@ pytestmark = pytest.mark.skipif(
 
 TESTS_DIR = REPO_ROOT / "tests"
 REQUIREMENTS = REPO_ROOT / "requirements-test.txt"
+PANDAS2_REQUIREMENTS = REPO_ROOT / "requirements-test-pandas2.txt"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -169,6 +170,84 @@ class TestWorkflowsUseTheSharedRequirements:
             assert "requirements-test.txt" in text or ".[dev]" in text, (
                 f"{workflow.name} runs pytest without installing requirements-test.txt"
             )
+
+
+class TestBothPandasMajorsAreExercised:
+    """A declared range is only supported at the end that CI actually runs.
+
+    `requirements-test.txt` allows `pandas>=2.3.3,<4`, and pip resolves to the
+    newest every time. Without a second leg, pandas 2 would be declared
+    supported and never executed -- which is not a hypothetical: it was the state
+    of this repository until 1.1.0, in the opposite direction. The ceiling said
+    `<3` while pandas 3 was released and was what the developer machine ran, so
+    local runs and CI had silently stopped testing the same library.
+
+    pandas 3 changed defaults this project is directly exposed to (Copy-on-Write,
+    PyArrow-backed strings as the default `str` dtype), so "type detection
+    behaves the same on both" is a claim that deserves a job rather than an
+    assumption. Both majors pass today; this keeps that measurable.
+
+    Scoped to pandas deliberately: it is the only dependency here whose declared
+    range currently spans two majors. A second one would need its own leg, and
+    nothing in this file would notice -- said out loud because a guard that reads
+    as general when it is specific is worse than one that admits its scope.
+    """
+
+    def test_the_layered_file_constrains_only_pandas(self) -> None:
+        """The pandas-2 file overrides one ceiling and re-uses every other floor.
+
+        Layering is what keeps the floors single-sourced. A file that restated
+        the dependency list would be the fourth copy of it, which is the drift
+        this module exists to prevent.
+        """
+        lines = [
+            line.strip()
+            for line in PANDAS2_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert lines[0] == "-r requirements-test.txt", (
+            f"{PANDAS2_REQUIREMENTS.name} must layer requirements-test.txt, not restate it; "
+            f"its first directive is {lines[0]!r}"
+        )
+        overrides = lines[1:]
+        assert overrides == ["pandas<3"], (
+            f"{PANDAS2_REQUIREMENTS.name} should override the pandas ceiling and nothing "
+            f"else, but declares {overrides}"
+        )
+
+    def test_a_workflow_actually_installs_it(self) -> None:
+        """The leg exists in CI, not merely the file.
+
+        The silent failure this guards: deleting the matrix `include` entry
+        leaves the file in the tree, looking like coverage that no longer runs.
+        """
+        installed_by = [
+            workflow.name
+            for workflow in sorted(WORKFLOWS.glob("*.yml"))
+            if PANDAS2_REQUIREMENTS.name in workflow.read_text(encoding="utf-8")
+        ]
+        assert installed_by, (
+            f"{PANDAS2_REQUIREMENTS.name} is not referenced by any workflow, so pandas 2 is "
+            f"declared supported in requirements-test.txt and never run"
+        )
+
+    def test_the_declared_range_still_spans_two_majors(self) -> None:
+        """The leg's reason still holds.
+
+        The other direction, and the one that expires: if the pandas ceiling is
+        ever lowered back to `<3`, this file and its CI leg are redundant and
+        should go rather than linger as a second way of testing the only major
+        that is left.
+        """
+        text = REQUIREMENTS.read_text(encoding="utf-8")
+        match = re.search(r"^pandas>=(\d+)[^,]*,<(\d+)", text, re.MULTILINE)
+        assert match, "could not read a bounded pandas requirement from requirements-test.txt"
+        floor_major, ceiling_major = int(match.group(1)), int(match.group(2))
+        assert ceiling_major - floor_major > 1, (
+            f"requirements-test.txt now allows only pandas {floor_major}.x, so "
+            f"{PANDAS2_REQUIREMENTS.name} and its CI leg are redundant -- remove both, and "
+            f"this test with them"
+        )
 
 
 def _oldest_supported_python_minor() -> int:
