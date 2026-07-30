@@ -72,9 +72,32 @@ Scoping notes (intentional, do not "fix" by widening):
 
 ## Benchmarks
 
-- The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the README performance table and `--json` for machine-readable output.
+- The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the tables on `docs/performance.md` and `--json` for machine-readable output. (Those tables were on the README until the 0.19.0 documentation split; the README now carries only the headline ratios in prose.)
 - The parallel CSV conversion suite is `benchmarks/benchmark_parallel.py`.
-- README performance numbers are system-specific and should identify the machine, OS, Python version, and run methodology.
+- Published performance numbers are system-specific and must identify the machine, OS, Python version, and run methodology.
 - Keep comparisons reproducible and fair: seed generated data, use native-fast dtypes for every compared library, perform warmup runs, report medians and standard deviations, and keep both benchmark suites methodologically aligned.
 - Prefer honest, reproducible results over flattering headline numbers, including when a fairer method reduces the reported speedup.
 - Generate measured documentation claims (benchmark results, variance, counts, and similar values) from their source script when practical; avoid hand-maintained factoids that silently become stale.
+
+## Documentation Sync
+
+Migrated here from the personal cross-repo memory file on 2026-07-30: it was xlsxturbo-specific knowledge living outside the repo, and its first step had gone stale (it said usage examples belong in the README, which stopped being true with the 0.19.0 split).
+
+When adding or modifying a feature:
+
+1. **The relevant `docs/` page** — add or update the usage example. `docs/` is the MkDocs Material site published to GitHub Pages; the README is a landing page and should NOT grow new per-feature examples. Match the option to its page from the nav in `mkdocs.yml` (formatting, tables, charts-and-media, cells, ...). A brand-new page must be added to that nav or `tests/test_docs_site.py` fails it as unreachable.
+2. **`docs/capability-matrix.md`** — regenerate with `python scripts/gen_capability_matrix.py --write`. Never hand-edit it. `tests/test_capability_matrix.py` fails when the committed page is stale.
+3. **`CHANGELOG.md`** — document all changes under the appropriate version heading. Note the file is NOT uniform: 37 headings are `## [X.Y.Z]` and three older ones are `## X.Y.Z` without brackets. `.github/scripts/release-notes.sh` handles both by fixed-string matching; do not "simplify" it to a regex, which is how a release once got the wrong version's notes.
+4. **Type stubs** (`python/xlsxturbo/xlsxturbo.pyi`) — add new parameters with types and docstrings. This compiled-extension stub is the type source of truth; `python/xlsxturbo/__init__.pyi` is a thin re-export and must not be hand-edited for new options.
+
+Before commit or push, follow the `BUILD.md` checklist.
+
+### docs/ is published wholesale — mind what is sitting in it
+
+MkDocs publishes every file under `docs/`, and knows nothing about git. Two tracked-but-internal files (`roadmap-1.0.md`) and two untracked ones (`strategic-recommendations-plan.md`, `reviews/`) are therefore listed in `mkdocs.yml`'s `exclude_docs`, and `tests/test_docs_site.py` asserts that list stays in step with `.gitignore`.
+
+Verified by removing one `exclude_docs` entry: the private planning memo appeared in `site/` and `mkdocs build --strict` still **exited 0**. Strict mode does not cover this. The reliable protection is that deployment happens only from `.github/workflows/docs.yml`, which builds from a clean checkout and so cannot see an untracked file at all — never run `mkdocs gh-deploy` by hand.
+
+### The CLI is not in the wheel
+
+`Cargo.toml` has a `[[bin]] xlsxturbo` target with `default = ["cli"]`, so `cargo build --release` produces a working CLI. maturin builds only the extension module, so the published wheel contains **no console script and no binary** — confirmed by inspecting the PyPI artifact for 0.18.0, not by reading the config. The README and the CLI docs claimed otherwise until 0.19.0. If shipping it is ever wanted, that is a packaging change, not a documentation one.

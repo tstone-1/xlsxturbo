@@ -30,7 +30,14 @@ Thumbs.db
 !tests/*.xlsx
 .claude/
 
-# Local-only agent artifacts — must NOT leak into this public repo
+# Local-only agent artifacts — must NOT leak into this public repo.
+# These live under docs/, which mkdocs publishes wholesale, so they are also
+# listed in mkdocs.yml's `exclude_docs`. tests/test_docs_site.py asserts the two
+# lists agree — an entry added here and not there would be published by a local
+# `mkdocs build`.
 docs/reviews/
 docs/strategic-recommendations-plan.md
 agent-memory-audit*.csv
+
+# Built documentation site
+site/

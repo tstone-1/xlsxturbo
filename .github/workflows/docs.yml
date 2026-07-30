@@ -1,0 +1,86 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Builds on every PR so a broken link or a page missing from the nav fails
+  # review rather than the deploy. `--strict` is what makes that true: without
+  # it MkDocs downgrades both to warnings and exits 0.
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install documentation dependencies
+        run: pip install -r requirements-docs.txt
+
+      - name: Build
+        run: mkdocs build --strict
+
+      - name: Check nothing untracked was staged for publication
+        # The workflow checks out only tracked files, so this cannot fail here --
+        # it is a tripwire for a future change that adds a generated or fetched
+        # file into site/ without adding it to the repository. Reporting the
+        # population it examined keeps a zero from reading as "clean" when it
+        # actually means "nothing was looked at".
+        run: |
+          pages=$(find site -name '*.html' | wc -l)
+          echo "built $pages HTML page(s)"
+          if [ "$pages" -lt 15 ]; then
+            echo "expected at least 15 pages; the nav or the build is broken" >&2
+            exit 1
+          fi
+          for leaked in strategic-recommendations-plan roadmap-1.0 reviews; do
+            if [ -e "site/$leaked" ] || [ -e "site/$leaked.html" ]; then
+              echo "excluded document '$leaked' was published" >&2
+              exit 1
+            fi
+          done
+          echo "no excluded document reached site/"
+
+      - name: Upload artifact for Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

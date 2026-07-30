@@ -1,0 +1,10 @@
+# Documentation site dependencies. Kept separate from the `dev` extras in
+# pyproject.toml on purpose: building the docs needs no Rust toolchain and no
+# compiled extension, so the docs workflow installs only this and stays fast.
+#
+# Pinned so a site build is reproducible and a theme release cannot change the
+# rendered output between a PR preview and the deploy. Dependabot's `pip`
+# ecosystem covers this file.
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+pymdown-extensions==11.0.1

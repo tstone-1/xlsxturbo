@@ -49,6 +49,11 @@ dev = [
     "bandit>=1.8.0",
     "pyright>=1.1.390",
     "pandas-stubs",
+    # tests/test_docs_site.py parses mkdocs.yml. PyYAML is already present as a
+    # bandit transitive, but a test must not depend on another tool's dependency
+    # tree -- that breaks silently the day bandit drops it.
+    "pyyaml",
+    "types-PyYAML",
 ]
 
 [tool.maturin]

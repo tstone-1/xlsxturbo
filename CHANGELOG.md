@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `python-lint` installs into a project-local `.venv` and runs ruff, bandit and pyright from it, matching the documented local commands. Previously it installed into the runner's system interpreter while pyright's config pointed at `.venv`, so the gate analysed a different environment in CI than locally — and could pass one while failing the other.
 - `scripts/` is covered by the ruff and pyright gates; it was previously unchecked.
 
+### Documentation
+- **The documentation is now a site.** `README.md` goes from 1289 lines to a landing page; the reference content moved into 16 pages under `docs/`, published to GitHub Pages by a new `docs` workflow. The split was done mechanically and each moved section verified byte-identical in exactly one destination, so no example or caveat was lost or reworded in transit. New pages: `api-reference.md` and `errors.md`.
+- `errors.md` documents something previously undocumented: every failure is a `ValueError` or a `TypeError`, and **I/O failures arrive as `ValueError`** (message prefix `Failed to save workbook to '<path>': `) rather than `OSError`. Noted as a wart, with the planned exception hierarchy that fixes it.
+- **Corrected a false claim on the front page: the command-line tool is not in the PyPI wheel.** The README stated "Available as both Python library and CLI tool" and documented `xlsxturbo in.csv out.xlsx` as if `pip install xlsxturbo` provided it. It never has — maturin packages only the extension module, confirmed by inspecting the published 0.18.0 artifact. The CLI is a Cargo `[[bin]]` target built by `cargo build --release`; the docs now say so, and `csv_to_xlsx` is the supported route from Python.
+- `CONTRIBUTING.md` gained sections on working on the docs site and on building a distributable wheel, the latter absorbing the README's former "Building from Source".
+
 ## [0.18.0] - 2026-07-25
 
 ### Added

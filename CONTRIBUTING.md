@@ -55,6 +55,46 @@ that the interpreter in pytest's header is the project `.venv`.
 
 If you change the `dev` dependencies, run `uv lock` -- the lockfile is tracked.
 
+## Documentation
+
+The site under `docs/` is MkDocs Material, published to GitHub Pages from `main` by
+`.github/workflows/docs.yml`. Its dependencies are pinned separately in
+`requirements-docs.txt`, because building the site needs neither Rust nor the compiled
+extension:
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve          # live preview on http://127.0.0.1:8000
+mkdocs build --strict # what CI runs; fails on a broken link or an orphan page
+```
+
+Two things to know before editing:
+
+- **`docs/capability-matrix.md` is generated.** Never edit it by hand. Regenerate with
+  `python scripts/gen_capability_matrix.py --write`; `tests/test_capability_matrix.py`
+  fails if the committed page is stale.
+- **Do not run `mkdocs gh-deploy`.** Deployment happens only from the workflow, which
+  builds from a clean checkout. A local deploy would publish whatever untracked files
+  happen to be sitting in your `docs/` directory. `mkdocs.yml`'s `exclude_docs` names the
+  ones that are known about, and `tests/test_docs_site.py` checks that list stays in step
+  with `.gitignore` -- but the reliable protection is not deploying by hand.
+
+A new page must be added to the `nav` in `mkdocs.yml`, or the test suite will fail it as
+unreachable.
+
+## Building a wheel
+
+`maturin develop --release` installs into the venv, which is what you want while working.
+To produce a distributable wheel instead:
+
+```bash
+maturin build --release   # writes to target/wheels/
+```
+
+The wheel contains only the Python extension module. The `xlsxturbo` command-line binary
+is a separate Cargo `[[bin]]` target that is **not** packaged -- it is built by a plain
+`cargo build --release` and has never shipped on PyPI.
+
 ## Adding a feature: the touchpoint checklist
 
 Options in this library thread through several layers, and missing one is usually a

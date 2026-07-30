@@ -26,12 +26,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 3
 
-  # Python dev and build toolchain (pyproject.toml).
+  # Python dev, build, and docs toolchain (pyproject.toml, requirements-docs.txt).
   #
   # The shipped wheel has no runtime dependencies, so what this tracks is the
-  # `[project.optional-dependencies] dev` group plus the build backend. Note
-  # that uv.lock is tracked but is NOT updated by Dependabot -- run `uv lock`
-  # after merging one of these, as AGENTS.md requires when dev deps change.
+  # `[project.optional-dependencies] dev` group, the build backend, and the
+  # pinned MkDocs stack. Note that uv.lock is tracked but is NOT updated by
+  # Dependabot -- run `uv lock` after merging one of these, as AGENTS.md
+  # requires when dev deps change. requirements-docs.txt has no lockfile; its
+  # pins are the lock.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:

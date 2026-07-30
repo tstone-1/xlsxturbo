@@ -1,0 +1,80 @@
+site_name: xlsxturbo
+site_description: High-performance Excel writer with automatic type detection. Written in Rust, usable from Python.
+site_url: https://tstone-1.github.io/xlsxturbo/
+repo_url: https://github.com/tstone-1/xlsxturbo
+repo_name: tstone-1/xlsxturbo
+edit_uri: edit/main/docs/
+copyright: MIT licensed
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+# Anything left in docs/ is published. Two of the files that live there locally are
+# deliberately untracked -- an internal planning memo and the review notes -- so a
+# build run from a working copy would otherwise put them on a public site. The
+# roadmap is tracked but is project planning, not user documentation.
+#
+# This list is a second line of defence, not the first. Deployment happens only from
+# the workflow, which builds from a clean checkout and therefore cannot see an
+# untracked file at all. `tests/test_docs_site.py` asserts the two agree.
+exclude_docs: |
+  strategic-recommendations-plan.md
+  roadmap-1.0.md
+  reviews/
+
+nav:
+  - Home: index.md
+  - Guide:
+      - DataFrame export: dataframe-export.md
+      - Multi-sheet workbooks: multi-sheet-workbooks.md
+      - Excel tables: tables.md
+      - Formatting: formatting.md
+      - Conditional formatting: conditional-formatting.md
+      - Formulas and defined names: formulas.md
+      - Data validation: data-validation.md
+      - Individual cells: cells.md
+      - Charts and media: charts-and-media.md
+      - CSV conversion: csv-conversion.md
+      - Constant memory mode: constant-memory.md
+  - Reference:
+      - API reference: api-reference.md
+      - Capability matrix: capability-matrix.md
+      - Errors and warnings: errors.md
+      - Compatibility: compatibility.md
+      - Performance: performance.md

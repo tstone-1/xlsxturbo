@@ -212,12 +212,20 @@ review (PR-only), the provenance attestation, the SBOM job, and the `github-rele
 
 ## Phase 1 — Documentation split and capability matrix
 
-- [ ] MkDocs Material site, published to GitHub Pages by a workflow
-- [ ] Cut `README.md` (currently 1289 lines) to a landing page: what it does, install, one
-      DataFrame example, one CSV example, performance summary, major limitations, docs link
-- [ ] Move the remaining README content into pages: getting-started, dataframe-export,
-      csv-conversion, multi-sheet-workbooks, formatting, formulas, tables, charts-and-media,
-      constant-memory, errors, compatibility, api-reference
+- [x] MkDocs Material site, published to GitHub Pages by `.github/workflows/docs.yml`.
+      Builds on every PR with `--strict`, deploys only from `main`. Docs dependencies are
+      pinned in `requirements-docs.txt`, separate from the `dev` extras — building the
+      site needs neither Rust nor the compiled extension
+- [x] Cut `README.md` from 1289 lines to 121: what it does, install, one DataFrame
+      example, one CSV example, performance ratios, the four limitations that most often
+      surprise people, and links into the site
+- [x] Move the remaining README content into pages. The set grew from the 12 planned to
+      16, because four sections were large enough to earn their own page rather than being
+      folded into a neighbour: `conditional-formatting`, `data-validation`, `cells`
+      (arbitrary writes, hyperlinks, comments, checkboxes) and `performance`. The planned
+      `getting-started` page was dropped instead — `index.md` does that job, and a separate
+      page would have duplicated the install-and-first-example content the README already
+      carries
 - [x] **Capability matrix** — `docs/capability-matrix.md`, covering df / dfs / csv,
       per-sheet overridability, and constant-memory behaviour
 - [x] **Generated, not hand-maintained** — `scripts/gen_capability_matrix.py` parses
@@ -252,6 +260,45 @@ Two facts make the matrix cheap to build and worth building:
 
 **Gate:** docs build clean; matrix freshness test passes; existing tests unaffected.
 **Release:** none.
+
+### Phase 1 aftermath
+
+**The split was scripted, not retyped.** A one-off migration script cut the README into
+atomic sections, assigned each to exactly one page or to an explicit drop list with a
+reason, and then asserted three things: that the assignments partition the section list,
+that each moved section's body appears **byte for byte** in exactly one destination, and
+that every intra-README anchor link was rewritten the expected number of times. 33
+sections moved, 5 deliberately did not. Two link assertions failed on the first run and
+were real: one anchor occurred four times where the plan said three, and the "target page"
+exemption had conflated *where a link sits* with *where its target lives*. Replacing that
+with "the anchor must resolve to a heading on the destination page" is a strictly better
+check, and it is the one that would catch a future page rename.
+
+**A false claim on the front page, found because the split forced a check.** The README
+advertised "Available as both Python library and CLI tool" and documented the CLI as
+though `pip install xlsxturbo` provided it. It does not: maturin packages only the
+extension module. This was settled by unzipping the published 0.18.0 wheel — no console
+script, no binary — not by reading `Cargo.toml`, which says `default = ["cli"]` and would
+have supported the wrong conclusion. Documentation-only fix, recorded in the changelog; if
+shipping the binary is ever wanted, that is a packaging decision and a separate change.
+
+**`mkdocs build --strict` does not protect against publishing a private file.** `docs/`
+holds two files that are deliberately untracked (an internal planning memo, review notes)
+plus the tracked-but-internal roadmap, and MkDocs publishes the whole directory. They are
+named in `mkdocs.yml`'s `exclude_docs`, and `tests/test_docs_site.py` asserts that list
+stays in step with `.gitignore`. What makes this worth writing down is the control:
+removing one `exclude_docs` entry put the memo into `site/` **and `--strict` still exited
+0**. The real protection is that deployment happens only from the workflow, from a clean
+checkout with no untracked files present — which is why `CONTRIBUTING.md` says not to run
+`mkdocs gh-deploy` by hand.
+
+**One of the new tests was vacuous and the mutation harness caught it.** The orphan-page
+check asked `git ls-files` which pages exist. Every new page was still uncommitted, so it
+examined almost nothing and passed for the same reason an empty audit passes — the
+mutation that removed a page from the nav survived. Rewritten against the filesystem,
+which is what MkDocs actually publishes, and which cannot be empty. 5/5 mutations caught
+afterwards. Same family as the generator's empty-list guard above, arriving through a
+different door: there the population came from a regex, here from git.
 
 **Phase 0 aftermath, all resolved — recorded because each was a gate behaving differently
 than expected rather than a code bug:**
