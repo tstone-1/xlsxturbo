@@ -28,4 +28,4 @@ pyyaml>=6.0.3,<7
 # dependency, and relying on another package's dependency tree means the day
 # pandas drops numpy is the day this suite stops collecting. Found by
 # tests/test_ci_config.py on its first run.
-numpy>=1.24
+numpy>=2.2.6
