@@ -86,7 +86,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9" "pyyaml>=6,<7"
 
       - name: Build and install xlsxturbo
         run: |
@@ -131,7 +131,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv\Scripts\activate
-          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9" "pyyaml>=6,<7"
 
       - name: Build and install xlsxturbo
         run: |
@@ -176,7 +176,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+          pip install "maturin>=1.4,<2.0" "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9" "pyyaml>=6,<7"
 
       - name: Build and install xlsxturbo
         run: |
