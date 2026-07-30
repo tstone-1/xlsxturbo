@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - Unreleased
+
+### Added
+- **`docs/capability-matrix.md`** — which option applies in which mode (`df_to_xlsx`, `dfs_to_xlsx`, `csv_to_xlsx`, per-sheet overrides, `constant_memory`). Generated from the Rust sources by `scripts/gen_capability_matrix.py`, so it cannot drift from the implementation; `tests/test_capability_matrix.py` fails if the committed page is stale. It makes explicit something the README never stated: `csv_to_xlsx` accepts three options and none of the formatting or feature ones — it is a straight-through fast path, not a reduced-feature DataFrame path.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, three issue forms and a pull-request template. `SECURITY.md` documents a scope that follows from the library only ever *writing* xlsx: the vulnerability classes affecting spreadsheet readers largely do not apply.
+- `docs/roadmap-1.0.md` — the planned work between here and a 1.0 release.
+- GitHub Releases now exist for every tag. The release workflow creates them going forward, with wheels and SBOMs attached; the 37 pre-existing tags were backfilled from their changelog sections.
+
+### Changed
+- `rust_xlsxwriter` 0.96 → 0.97.
+- CI gained `cargo audit`, `pip-audit`, CodeQL (Python **and** Rust), dependency review, and a check that each SHA-pinned action's version comment still names that SHA. All third-party actions are pinned to commit SHAs.
+- The release workflow attests build provenance for the published wheels and publishes CycloneDX SBOMs.
+- Dependabot now tracks Python dev/build dependencies in addition to Cargo and Actions.
+- `python-lint` installs into a project-local `.venv` and runs ruff, bandit and pyright from it, matching the documented local commands. Previously it installed into the runner's system interpreter while pyright's config pointed at `.venv`, so the gate analysed a different environment in CI than locally — and could pass one while failing the other.
+- `scripts/` is covered by the ruff and pyright gates; it was previously unchecked.
+
 ## [0.18.0] - 2026-07-25
 
 ### Added

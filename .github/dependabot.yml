@@ -9,9 +9,17 @@ updates:
 
   # GitHub Actions
   #
-  # Actions in .github/workflows/ are pinned to commit SHAs. Dependabot
-  # understands SHA pins and bumps both the SHA and its trailing `# vX` comment,
-  # so pinning costs no update visibility.
+  # Actions in .github/workflows/ are pinned to commit SHAs. Dependabot does
+  # bump the SHA, so pinning costs no update visibility -- but it rewrites the
+  # trailing version comment only when that comment matches the tag it is
+  # replacing. The first bump here (dependency-review-action 4.9.0 -> 5.0.0)
+  # moved the SHA to v5.0.0 and left `# v4` in place, which is the worst
+  # outcome: an unreadable SHA carrying a wrong human label is more misleading
+  # than no label at all.
+  #
+  # So the comments carry the FULL version (`# v7.0.1`, not `# v7`). After any
+  # action bump, check that the comment moved with the SHA -- a stale comment is
+  # invisible in a green build.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
