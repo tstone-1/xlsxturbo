@@ -17,17 +17,21 @@ compiled extension, so it is safe to import from anywhere.
 
 .. note::
    Field annotations are strings, because this module uses
-   ``from __future__ import annotations`` -- that is what lets fields be written
-   as ``bool | str`` while still importing on Python 3.9, where evaluating that
-   expression raises ``TypeError``. The consequence is that
-   ``typing.get_type_hints()`` on these classes fails on 3.9 and works from 3.10
-   onwards. Static type checking is unaffected on every version.
+   ``from __future__ import annotations``. They resolve on every supported
+   version, so ``typing.get_type_hints()`` works on these classes -- which is
+   what anything building a schema from them needs (pydantic, FastAPI, attrs).
+
+   Until 1.1.0 the floor was Python 3.9, where ``bool | str`` is a syntax the
+   runtime cannot evaluate; the deferred annotations hid that at import time and
+   ``get_type_hints()`` raised. Module-level aliases such as ``PathArg`` had to
+   be spelled ``Union[...]`` for the same reason. Raising the floor to 3.10
+   removed the constraint entirely.
 """
 
 from __future__ import annotations
 
 from os import PathLike
-from typing import Literal, Optional, TypedDict, Union
+from typing import Literal, TypedDict
 
 # The public surface, authoritative rather than descriptive: `from
 # xlsxturbo.types import *` gives exactly these names. Without it the four
@@ -59,7 +63,7 @@ __all__ = [
     "ValidationType",
 ]
 
-PathArg = Union[str, PathLike[str]]
+PathArg = str | PathLike[str]
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
 ValidationType = Literal[
@@ -84,11 +88,11 @@ class HeaderFormat(TypedDict, total=False):
     bg_color: str  # '#RRGGBB' or named color
     font_size: float
     underline: bool
-    border: Union[bool, str]  # True = thin all sides, str = named style all sides
-    border_left: Union[bool, str]  # True = thin, or a named style (thin, medium, thick, dashed, ...)
-    border_right: Union[bool, str]  # True = thin, or named style for right side only
-    border_top: Union[bool, str]  # True = thin, or named style for top side only
-    border_bottom: Union[bool, str]  # True = thin, or named style for bottom side only
+    border: bool | str  # True = thin all sides, str = named style all sides
+    border_left: bool | str  # True = thin, or a named style (thin, medium, thick, dashed, ...)
+    border_right: bool | str  # True = thin, or named style for right side only
+    border_top: bool | str  # True = thin, or named style for top side only
+    border_bottom: bool | str  # True = thin, or named style for bottom side only
     border_color: str  # Color for all borders. Requires a border to be set for a visible effect
     align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
@@ -105,11 +109,11 @@ class ColumnFormat(TypedDict, total=False):
     font_size: float
     underline: bool
     num_format: str  # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
-    border: Union[bool, str]  # True = thin all sides (backward compat), str = named style all sides
-    border_left: Union[bool, str]  # True = thin, or a named style (thin, medium, thick, dashed, ...)
-    border_right: Union[bool, str]  # True = thin, or named style for right side only
-    border_top: Union[bool, str]  # True = thin, or named style for top side only
-    border_bottom: Union[bool, str]  # True = thin, or named style for bottom side only
+    border: bool | str  # True = thin all sides (backward compat), str = named style all sides
+    border_left: bool | str  # True = thin, or a named style (thin, medium, thick, dashed, ...)
+    border_right: bool | str  # True = thin, or named style for right side only
+    border_top: bool | str  # True = thin, or named style for top side only
+    border_bottom: bool | str  # True = thin, or named style for bottom side only
     border_color: str  # Color for all borders. Requires a border to be set for a visible effect
     align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
@@ -156,9 +160,9 @@ class ConditionalFormat(_ConditionalRequired, total=False):
     icons_only: bool  # Show only icons, hide values
     # For cell rules (type='cell'):
     criteria: str  # 'equal_to', 'not_equal_to', 'greater_than', 'less_than', 'between', 'containing', etc.
-    value: Union[str, int, float]  # Target value for comparison criteria
-    min_value: Union[int, float]  # Min value for 'between'/'not_between' criteria
-    max_value: Union[int, float]  # Max value for 'between'/'not_between' criteria
+    value: str | int | float  # Target value for comparison criteria
+    min_value: int | float  # Min value for 'between'/'not_between' criteria
+    max_value: int | float  # Max value for 'between'/'not_between' criteria
     format: ColumnFormat  # Format to apply when condition is met (bg_color, font_color, bold, etc.)
 
 
@@ -205,8 +209,8 @@ class ValidationOptions(_ValidationRequired, total=False):
     """
 
     values: list[str]  # For 'list' type: dropdown options
-    min: Union[int, float]  # For number/text_length: minimum value (defaults to type minimum if omitted)
-    max: Union[int, float]  # For number/text_length: maximum value (defaults to type maximum if omitted)
+    min: int | float  # For number/text_length: minimum value (defaults to type minimum if omitted)
+    max: int | float  # For number/text_length: maximum value (defaults to type maximum if omitted)
     input_title: str  # Title for input prompt
     input_message: str  # Message for input prompt
     error_title: str  # Title for error message
@@ -425,7 +429,7 @@ class _CellValueRequired(TypedDict):
     an empty dict, which the runtime rejects.
     """
 
-    value: Union[str, int, float, bool]  # The cell value (required)
+    value: str | int | float | bool  # The cell value (required)
 
 
 class CellValueOptions(_CellValueRequired, total=False):
@@ -459,23 +463,23 @@ class SheetOptions(TypedDict, total=False):
 
     header: bool
     autofit: bool
-    table_style: Optional[str]
+    table_style: str | None
     freeze_panes: bool
-    column_widths: Optional[dict[Union[int, str], Union[int, float]]]  # Keys: int index or '_all'
-    row_heights: Optional[dict[int, Union[int, float]]]
-    table_name: Optional[str]
-    header_format: Optional[HeaderFormat]
-    column_formats: Optional[dict[str, ColumnFormat]]  # Pattern -> format ('prefix*', '*suffix', '*contains*', exact)
-    conditional_formats: Optional[dict[str, Union[ConditionalFormat, list[ConditionalFormat]]]]  # Column -> config
-    formula_columns: Optional[dict[str, str]]  # Column name -> Excel formula template with {row} placeholder
-    merged_ranges: Optional[list[Union[tuple[str, str], tuple[str, str, HeaderFormat]]]]  # (range, text[, format])
-    hyperlinks: Optional[list[Union[tuple[str, str], tuple[str, str, str]]]]  # (cell, url[, display_text])
-    comments: Optional[dict[str, Union[str, CommentOptions]]]  # Cell ref -> comment text or options
-    validations: Optional[dict[str, ValidationOptions]]  # Column name/pattern -> validation options
-    rich_text: Optional[dict[str, list[Union[tuple[str, RichTextFormat], str]]]]  # Cell ref -> segments
-    images: Optional[dict[str, Union[str, ImageOptions]]]  # Cell ref -> image path or options
-    checkboxes: Optional[dict[str, Union[bool, CheckboxOptions]]]  # Cell ref -> checked state or options
-    textboxes: Optional[dict[str, Union[str, TextboxOptions]]]  # Cell ref -> text or textbox options
-    charts: Optional[dict[str, ChartOptions]]  # Cell ref -> native Excel chart options
-    sparklines: Optional[dict[str, SparklineOptions]]  # Location ref -> sparkline options
-    cells: Optional[dict[str, Union[str, int, float, bool, CellValueOptions]]]  # Cell ref -> value or options
+    column_widths: dict[int | str, int | float] | None  # Keys: int index or '_all'
+    row_heights: dict[int, int | float] | None
+    table_name: str | None
+    header_format: HeaderFormat | None
+    column_formats: dict[str, ColumnFormat] | None  # Pattern -> format ('prefix*', '*suffix', '*contains*', exact)
+    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None  # Column -> config
+    formula_columns: dict[str, str] | None  # Column name -> Excel formula template with {row} placeholder
+    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text[, format])
+    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url[, display_text])
+    comments: dict[str, str | CommentOptions] | None  # Cell ref -> comment text or options
+    validations: dict[str, ValidationOptions] | None  # Column name/pattern -> validation options
+    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> segments
+    images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
+    checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
+    textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
+    charts: dict[str, ChartOptions] | None  # Cell ref -> native Excel chart options
+    sparklines: dict[str, SparklineOptions] | None  # Location ref -> sparkline options
+    cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options

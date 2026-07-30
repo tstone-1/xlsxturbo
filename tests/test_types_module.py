@@ -14,12 +14,9 @@ someone trims to make a test pass is how a shape silently stops being exported.
 
 from __future__ import annotations
 
-import ast
-import inspect
 import re
 import typing
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import pytest
@@ -70,6 +67,11 @@ def _runtime_shapes() -> list[str]:
 
 
 REEXPORTS = _stub_reexports()
+
+# Names `types.py` imports for its own use, which `dir()` therefore reports as
+# public but `__all__` deliberately omits. Guarded below against naming an
+# import that no longer exists.
+TYPING_HELPERS = {"annotations", "Literal", "PathLike", "TypedDict"}
 
 
 class TestStubAndRuntimeAgree:
@@ -130,25 +132,16 @@ class TestRuntimeUsability:
             assert not module.startswith("."), f"types.py imports {module} relatively"
             assert "xlsxturbo" not in module, f"types.py imports {module}"
 
-    def test_pathalias_is_not_a_pep604_union(self) -> None:
-        """``PathArg`` is spelled with ``Union`` so it evaluates on Python 3.9.
-
-        A ``.pyi`` is never executed, so ``str | PathLike[str]`` is free there and
-        was what the stub used. In a runtime module on 3.9 that same expression
-        raises ``TypeError`` at import. Verified against a real 3.9 interpreter
-        when this module was written; pinned here as source text, because on 3.10+
-        both spellings import and the difference is invisible at runtime.
-        """
-        source = TYPES_SOURCE.read_text(encoding="utf-8")
-        assert "PathArg = Union[str, PathLike[str]]" in source
-        assert "PathArg = str | PathLike[str]" not in source
-
     def test_future_annotations_is_enabled(self) -> None:
-        """Field annotations stay unevaluated, which is what allows ``bool | str``.
+        """Field annotations stay unevaluated, which keeps import cost off the shapes.
 
-        Without this import, every ``|`` in a field annotation would be evaluated
-        at class-creation time and the module would not import on Python 3.9 --
-        the failure the ``PathArg`` test above pins for module-level aliases.
+        Load-bearing for a different reason since 1.1.0. While the floor was 3.9
+        this import was what let a field be written ``bool | str`` at all -- the
+        expression is a syntax 3.9 cannot evaluate, and a companion test pinned
+        module-level aliases to ``Union[...]`` for the same reason. Both are gone
+        with 3.9. What remains is that these annotations are never evaluated at
+        class creation, so a forward reference costs nothing and the module stays
+        importable before the extension is built.
         """
         source = TYPES_SOURCE.read_text(encoding="utf-8")
         # Anchored to column 0, and deliberately so: types.py *documents* this
@@ -182,19 +175,22 @@ class TestPublicNamespace:
         the declaration, while still being importable by name -- so nothing else
         in this suite would notice.
         """
-        typing_helpers = {
-            "annotations",
-            "Literal",
-            "Optional",
-            "PathLike",
-            "TypedDict",
-            "Union",
-        }
         public = {
-            n for n in dir(types_module) if not n.startswith("_") and n not in typing_helpers
+            n for n in dir(types_module) if not n.startswith("_") and n not in TYPING_HELPERS
         }
         undeclared = public - set(types_module.__all__)
         assert not undeclared, f"public name(s) missing from __all__: {sorted(undeclared)}"
+
+    def test_the_helper_exclusions_are_all_real_imports(self) -> None:
+        """The exclusion set does not outlive the imports it excludes.
+
+        ``Optional`` and ``Union`` sat here after 1.1.0 stopped importing them,
+        which is harmless and exactly the shape of rot this suite distrusts
+        elsewhere: an exclusion naming something that no longer exists reads as
+        a deliberate carve-out and is nothing of the kind.
+        """
+        stale = TYPING_HELPERS - set(dir(types_module))
+        assert not stale, f"excluded names types.py no longer imports: {sorted(stale)}"
 
     def test_wildcard_import_leaks_no_typing_helpers(self) -> None:
         """``import *`` gives the shapes and nothing else.
@@ -241,9 +237,9 @@ class TestRequiredFieldsAreTyped:
 
     Every one of these carried a docstring note saying it was "required at
     runtime but TypedDict doesn't enforce this". It can be enforced -- a required
-    base plus a ``total=False`` subclass works on Python 3.9 -- so the note was
-    describing a gap, not a limitation. Until 0.19.1 a type checker accepted
-    ``images={"D1": {}}``, which raises.
+    base plus a ``total=False`` subclass has worked on every version this package
+    has ever supported -- so the note was describing a gap, not a limitation.
+    Until 0.19.1 a type checker accepted ``images={"D1": {}}``, which raises.
     """
 
     @pytest.mark.parametrize("shape", sorted(REQUIRED_FIELDS))
@@ -312,27 +308,27 @@ class TestRequiredFieldsAreTyped:
 
 
 class TestAnnotationsResolveOnEverySupportedPython:
-    """``typing.get_type_hints`` works on the option shapes, back to 3.9.
+    """``typing.get_type_hints`` works on the option shapes.
 
-    ``requires-python`` is ``>=3.9``, where PEP 604 unions (``str | None``) are a
-    syntax the runtime cannot evaluate. ``from __future__ import annotations``
-    hides that at import time -- the annotations are never evaluated -- so the
-    module imports cleanly on 3.9 and the failure surfaces only when *something
-    else* resolves the hints. Frameworks do exactly that: pydantic, FastAPI,
-    attrs, and any tool that builds a form or a schema from a type.
+    Frameworks resolve annotations rather than reading them as strings --
+    pydantic, FastAPI, attrs, and anything building a form or a schema from a
+    type -- so a shape whose hints cannot be resolved is a typed API that cannot
+    be read programmatically.
 
-    Freezing that at 1.0 would have shipped a typed API whose types cannot be
-    read programmatically on a version we claim to support.
+    This was the harder half of the problem while the floor was 3.9: PEP 604
+    unions are a syntax 3.9 cannot evaluate, ``from __future__ import
+    annotations`` hid that at import time, and the failure appeared only when
+    something else resolved the hints. Raising the floor to 3.10 in 1.1.0
+    removed the constraint -- ``str | None`` evaluates there -- so the source
+    scan that enforced the ``Union[...]`` spelling is gone and this test is what
+    is left.
     """
 
     def test_get_type_hints_resolves_every_shape(self) -> None:
         """Every exported TypedDict resolves without raising.
 
-        On 3.10+ this passes whether or not the annotations use ``|``, so it is
-        **not** the check that catches a regression -- that is
-        :meth:`test_no_annotation_uses_a_pep_604_union` below, which fails on
-        every version. This one is here for what a source scan cannot see: a
-        forward reference to a name that no longer exists.
+        Catches what a source scan cannot see: a forward reference to a name
+        that no longer exists.
         """
         hints_by_shape = {}
         for name in sorted(_runtime_shapes()):
@@ -341,30 +337,12 @@ class TestAnnotationsResolveOnEverySupportedPython:
                 continue
             hints_by_shape[name] = typing.get_type_hints(shape)
         assert hints_by_shape, "no TypedDict shapes were resolved"
-        assert typing.get_type_hints(types_module.SheetOptions)["table_style"] == Optional[str]
+        assert typing.get_type_hints(types_module.SheetOptions)["table_style"] == (str | None)
 
-    def test_no_annotation_uses_a_pep_604_union(self) -> None:
-        """No annotation in ``types.py`` spells a union with ``|``.
-
-        The discriminating half, and the reason it reads the source rather than
-        the runtime: on 3.10+ a ``|`` union resolves perfectly, so a regression
-        introduced on a developer machine passes every runtime check and fails
-        only in the 3.9 CI leg -- or, worse, only for a user.
-
-        Read through ``inspect.getsource`` rather than a repository path, so it
-        also runs against an installed wheel, where the release smoke test is
-        the last thing standing between this and a published artifact.
-        """
-        tree = ast.parse(inspect.getsource(types_module))
-        offenders = [
-            f"line {node.lineno}"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.AnnAssign)
-            for sub in ast.walk(node.annotation)
-            if isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr)
-        ]
-        assert not offenders, (
-            f"PEP 604 unions in types.py at {offenders}. Python 3.9 cannot evaluate "
-            "these, so typing.get_type_hints() raises there. Use Union[...] / "
-            "Optional[...] instead."
-        )
+    # `test_no_annotation_uses_a_pep_604_union` lived here until 1.1.0. It read
+    # the source through `inspect.getsource` and failed on any `|` in an
+    # annotation, because 3.9 could not evaluate one and the mistake was
+    # invisible on a developer machine. Raising the floor to 3.10 made the
+    # syntax legal everywhere the package runs, so it was deleted rather than
+    # weakened -- the constraint is now enforced by the language version, which
+    # is a stronger guarantee than a test.

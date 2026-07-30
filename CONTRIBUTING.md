@@ -5,7 +5,7 @@ setup has two halves; the whole thing should take about five minutes.
 
 ## Setup
 
-You need a [Rust toolchain](https://rustup.rs/) (stable), Python 3.9 or newer, and
+You need a [Rust toolchain](https://rustup.rs/) (stable), Python 3.10 or newer, and
 [uv](https://docs.astral.sh/uv/).
 
 ```bash

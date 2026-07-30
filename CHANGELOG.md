@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-30
+
+### Removed
+- **Python 3.9 support.** It reached upstream end of life in October 2025. `pip` handles the
+  drop without any action on your part: a 3.9 interpreter resolves to 1.0.0, which stays on
+  PyPI and keeps working. Move to 3.10 or newer to receive further releases.
+
+  A dropped Python version is a minor release under the
+  [stability policy](https://tstone-1.github.io/xlsxturbo/stability/) published in 1.0.0, not
+  a 2.0.0 event — the reasoning is on that page, and this is the first release to exercise it.
+
+  The floor was not costing nothing. In the two days before this release it blocked pytest 9,
+  numpy 2.1+ and polars 1.37+ from the test matrix — each requires 3.10 — and it forced
+  `python/xlsxturbo/types.py` to spell every union `Union[str, int]` where `str | int` is the
+  natural form.
+
+### Changed
+- Wheels are now `abi3-py310` rather than `abi3-py39`; one wheel per platform still serves
+  every supported version, 3.10 through 3.14.
+- `python/xlsxturbo/types.py` uses PEP 604 unions throughout, including module-level aliases
+  such as `PathArg`. Type checking is unaffected; `typing.get_type_hints()` on the option
+  shapes now works on every supported version rather than only from 3.10.
+- Test-dependency floors raised to what 3.10 makes reachable: `pytest>=9.1.1`,
+  `numpy>=2.2.6`, `pandas>=2.3.3`, `polars>=1.43.1`. Test-only; the published wheel has no
+  runtime dependencies.
+
+### Internal
+- **Two guards fired on this change, as designed, and that is the result worth recording.**
+  The stability page's version table went red against the classifiers and the CI matrix, and
+  the Dependabot hold registered in `tests/test_ci_config.py` went red because its reason —
+  pytest 9 needs 3.10 — had expired. Neither was an obstacle to work around; each named the
+  work that had to accompany the drop, which is what both were built for one day earlier.
+- Guards that existed only for 3.9 were **deleted rather than weakened**: the two tests
+  pinning the `Union[...]` spelling in `types.py`, and the ruff `keep-runtime-typing` setting
+  that stopped `--fix` undoing them. The constraint is now enforced by the language version,
+  which is stronger than a test.
+- `HELD_BACK_MAJORS` is empty and the Dependabot `ignore` block is gone. The mechanism stays,
+  restructured so it is not vacuous with nothing held: the live check is now that no
+  major-version `ignore` may exist without a registered expiry condition, which needs no
+  entries to do its job.
+
 ## [1.0.0] - 2026-07-30
 
 **No behaviour changes. Nothing was renamed, removed, or reinterpreted.** 1.0.0 is the

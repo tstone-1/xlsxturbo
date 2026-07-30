@@ -31,9 +31,10 @@ import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, cast
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import pandas as pd

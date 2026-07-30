@@ -84,10 +84,10 @@ the exception: it requires one of `values_range` / `values` / `data_range`, whic
 `TypedDict` cannot express, so all three stay optional to the checker and the runtime
 enforces the choice.
 
-Field annotations are unevaluated strings, which is what lets a field be written `bool | str`
-while the package still supports Python 3.9. The one consequence:
-`typing.get_type_hints()` on these classes needs Python 3.10 or newer. Static type checking
-works on every supported version.
+Field annotations are unevaluated strings, so `typing.get_type_hints()` resolves them and
+anything building a schema from these shapes -- pydantic, FastAPI, attrs -- works. That was
+not true before 1.1.0: on Python 3.9 a `bool | str` annotation could be written but not
+evaluated, so resolving the hints raised. Dropping 3.9 removed the split.
 
 ## Exceptions
 

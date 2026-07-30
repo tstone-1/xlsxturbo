@@ -44,8 +44,11 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 # Majors deliberately held back, mapped to the Python 3.x minor their next major
 # requires. The hold is legitimate only while this project supports something
 # older; once it does not, the entry -- and the Dependabot ignore behind it --
-# must go. The test below enforces that in both directions.
-HELD_BACK_MAJORS = {"pytest": 10}
+# must go.
+#
+# Empty as of 1.1.0: `pytest` lived here while the floor was 3.9, and raising it
+# to 3.10 released the hold, exactly as the test below demanded.
+HELD_BACK_MAJORS: dict[str, int] = {}
 
 # Import name -> distribution name, for the few that differ. Guarded below
 # against rot: an entry naming something `tests/` no longer imports fails.
@@ -60,10 +63,13 @@ MUST_COME_FROM_REQUIREMENTS = ("pandas", "polars", "openpyxl", "pytest", "pyyaml
 def _is_third_party(name: str) -> bool:
     """Whether `name` resolves to an installed third-party distribution.
 
-    Resolved at runtime rather than against a hardcoded stdlib list, because
-    `sys.stdlib_module_names` does not exist on Python 3.9 and this repo still
-    supports it -- a check that quietly degrades on the oldest supported version
-    is the one least likely to be noticed.
+    Resolved at runtime rather than against a stdlib name list. `sys.
+    stdlib_module_names` is available on every supported version since 1.1.0
+    dropped 3.9 -- the reason this was written this way -- but it answers a
+    weaker question: "not in the standard library" also includes a local module
+    or a namespace package, neither of which belongs in a requirements file.
+    Checking that the resolved origin is under `site-packages` answers the one
+    that matters.
     """
     if name in {"xlsxturbo", "tests"}:
         return False
@@ -188,20 +194,41 @@ def _majors_dependabot_ignores() -> set[str]:
 class TestDeferredMajorUpgradesExpireWithTheirReason:
     """A silenced Dependabot PR stops arriving, so its reason needs a deadline.
 
-    `pytest` 9 is held back only because it requires Python 3.10 and this
-    project still supports 3.9. That is a real blocker -- the 3.9 CI jobs cannot
-    resolve pytest 9 at all -- but it is temporary, and the ignore that silences
-    the weekly PR is invisible once it is written. Nothing would ever announce
-    that the hold had become obsolete.
+    This worked once already: `pytest` 9 needs Python 3.10, the floor was 3.9,
+    and the weekly PR was silenced by an `ignore` entry. An ignore is invisible
+    once written -- the PR simply never comes back -- so nothing would have
+    announced that the reason had expired. Tying it to `requires-python` meant
+    raising the floor to 3.10 in 1.1.0 failed this test until the hold was
+    released with it, which is exactly what happened.
 
-    So the hold is tied to the fact that justifies it: while 3.9 is supported
-    the ignore must be present, and the moment `requires-python` moves past the
-    blocking version the ignore must be gone. Dropping a Python version
-    therefore fails this test until the hold is released with it.
+    **`HELD_BACK_MAJORS` is currently empty, so two of the three tests below are
+    dormant** -- they iterate an empty mapping and pass without examining
+    anything. That is honest rather than clean: a zero population is not a clean
+    result, and saying so is the point of this paragraph. The live one is
+    `test_no_silenced_major_lacks_a_recorded_expiry`, which needs no entries to
+    do its job and is what stops the next hold being written down nowhere.
     """
 
+    def test_no_silenced_major_lacks_a_recorded_expiry(self) -> None:
+        """Every Dependabot major-version ignore is registered here.
+
+        The direction that stays live with no holds recorded, and the one that
+        matters: an ignore added to `.github/dependabot.yml` on its own silences
+        a PR forever with nothing to expire it. Registering the package in
+        `HELD_BACK_MAJORS` is what subjects it to the test below.
+        """
+        unrecorded = _majors_dependabot_ignores() - set(HELD_BACK_MAJORS)
+        assert not unrecorded, (
+            f".github/dependabot.yml silences major updates for {sorted(unrecorded)} with "
+            f"no entry in HELD_BACK_MAJORS, so nothing will ever say the hold expired. Add "
+            f"each one, mapped to the Python 3.x minor its next major requires."
+        )
+
     def test_each_hold_matches_the_supported_python_range(self) -> None:
-        """Every held-back major is silenced exactly while its reason holds."""
+        """Every held-back major is silenced exactly while its reason holds.
+
+        Dormant while `HELD_BACK_MAJORS` is empty; see the class docstring.
+        """
         oldest = _oldest_supported_python_minor()
         ignored = _majors_dependabot_ignores()
         for package, needs_minor in HELD_BACK_MAJORS.items():

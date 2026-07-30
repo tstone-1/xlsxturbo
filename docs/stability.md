@@ -83,13 +83,12 @@ warnings.simplefilter("error", DeprecationWarning)
 ## Supported Python versions
 
 One `abi3` wheel per platform covers every supported version, so support here is structural
-rather than per-version: the wheel built against Python 3.9's stable ABI is the same file a
+rather than per-version: the wheel built against Python 3.10's stable ABI is the same file a
 3.14 interpreter loads.
 
 | Python | Supported | Run in CI |
 |--------|-----------|-----------|
-| 3.9 | yes | yes |
-| 3.10 | yes | no |
+| 3.10 | yes | yes |
 | 3.11 | yes | no |
 | 3.12 | yes | yes |
 | 3.13 | yes | no |
@@ -100,17 +99,17 @@ the identical `abi3` interface, so CI covers the oldest, a middle, and the newes
 gaps carry no independent risk. What CI would catch on 3.11 that 3.10 and 3.12 do not is
 essentially nothing.
 
-**Python 3.9 is past its upstream end of life** (October 2025) and is still supported here,
-because `requires-python = ">=3.9"` is a promise that was made and dropping it is a
-user-visible change rather than a tidy-up. It will be dropped in a future minor release,
-announced in the changelog; the practical cost of keeping it is visible in
-`python/xlsxturbo/types.py`, which must write `Union[str, int]` where every other supported
-version would allow `str | int`.
+**Python 3.9 was dropped in 1.1.0**, having reached upstream end of life in October 2025.
+`pip` handles this without any action on your part: a 3.9 interpreter resolves to 1.0.0,
+which stays on PyPI and keeps working. Move to 3.10 or newer to receive further releases.
 
-A dropped Python version is a **minor** release. It is not a 2.0.0 event: an interpreter
-whose upstream support has ended is not a platform this project can meaningfully promise
-anything about, and holding the major version hostage to it would mean either never dropping
-one or bundling unrelated breakage to justify the bump.
+A dropped Python version is a **minor** release, not a 2.0.0 event. An interpreter whose
+upstream support has ended is not a platform this project can meaningfully promise anything
+about, and holding the major version hostage to it would mean either never dropping one or
+bundling unrelated breakage to justify the bump. The cost of *not* dropping it is not
+theoretical: in the two days before 1.1.0, the 3.9 floor blocked pytest 9, numpy 2.1+ and
+polars 1.37+ from the test matrix, and forced `python/xlsxturbo/types.py` to spell every
+union `Union[str, int]` where `str | int` is the natural form.
 
 ## Supported platforms
 

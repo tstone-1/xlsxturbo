@@ -4,11 +4,11 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "1.0.0"
+version = "1.1.0"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["excel", "xlsx", "csv", "converter", "performance", "rust"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -17,7 +17,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -65,7 +64,7 @@ python-source = "python"
 module-name = "xlsxturbo"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 extend-exclude = ["python/xlsxturbo/xlsxturbo.pyd"]
 
@@ -97,19 +96,6 @@ ignore = [
     "ANN401", # allow explicit typing.Any where a precise type is impractical
 ]
 
-[tool.ruff.lint.pyupgrade]
-# Do NOT rewrite `Union[X, Y]` to `X | Y` (UP007/UP045) in `python/xlsxturbo/types.py`.
-#
-# `requires-python` is `>=3.9`, where PEP 604 unions are a syntax the runtime cannot
-# evaluate. `from __future__ import annotations` makes the module *import* fine on 3.9 --
-# annotations are never evaluated -- so ruff reasonably concludes the rewrite is safe.
-# It is not: `typing.get_type_hints()` evaluates them, and anything building a schema
-# from these shapes (pydantic, FastAPI, attrs) does exactly that. It raises on 3.9.
-#
-# `tests/test_types_module.py::test_no_annotation_uses_a_pep_604_union` is the guard;
-# this setting is what stops `ruff check --fix` reintroducing the problem in one keystroke.
-keep-runtime-typing = true
-
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -131,7 +117,7 @@ include = ["python", "tests", "benchmarks", "scripts"]
 exclude = ["**/__pycache__", "**/.venv", "target"]
 venvPath = "."
 venv = ".venv"
-pythonVersion = "3.9"
+pythonVersion = "3.10"
 # Default mode for the project (tests + benchmarks). The shipped library
 # (python/xlsxturbo) is raised to "strict" via the `strict` path list below.
 typeCheckingMode = "standard"

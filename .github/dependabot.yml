@@ -39,15 +39,8 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
-    ignore:
-      # pytest 9 requires Python >= 3.10; this project supports 3.9, so the
-      # 3.9 CI jobs cannot resolve it at all -- pip fails before a single test
-      # runs. Nothing in the suite is incompatible with pytest 9, so this hold
-      # ends when 3.9 is dropped and needs no code change.
-      #
-      # An ignore that outlives its reason is invisible: the PR simply stops
-      # arriving. `tests/test_ci_config.py` ties this entry to
-      # `requires-python` in both directions, so dropping 3.9 fails the suite
-      # until this block goes with it.
-      - dependency-name: "pytest"
-        update-types: ["version-update:semver-major"]
+    # No `ignore:` block, deliberately. If one is ever added to silence a major
+    # that cannot be taken yet, register the reason in `HELD_BACK_MAJORS` in
+    # tests/test_ci_config.py at the same time -- a silenced PR simply stops
+    # arriving, so nothing else would ever announce that the reason expired.
+    # That test fails on an ignore it does not recognise.
