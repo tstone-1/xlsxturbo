@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Every published wheel is now smoke-tested on a runner of its own architecture.** Two of
+  the five — Linux `aarch64` and macOS `x86_64` — were built, published to PyPI, and never
+  executed anywhere. Both are cross-compiled, and when the pipeline was written no hosted
+  runner of either architecture existed. They do now (`ubuntu-24.04-arm` and
+  `macos-15-intel`), so the release workflow installs and runs the full test suite against
+  all five before publishing.
+
+  Each leg also asserts the platform tag of the wheel it downloaded and prints the runner's
+  own architecture. Without that, a mistyped artifact name silently installs some other wheel
+  twice and two green legs look exactly like coverage.
+
+  Nothing had compared the build matrix with the smoke-test matrix, which is why the gap
+  survived every release. `tests/test_stability_policy.py` now does, in both directions, and
+  ties the "Smoke-tested before publish" column on the
+  [stability page](https://tstone-1.github.io/xlsxturbo/stability/) to the workflow — so a
+  new build target fails the suite until it has a leg, and a leg naming an artifact no job
+  uploads fails in an ordinary test run instead of after every wheel has built.
 - **`ExportOptions` field types now match the signature they mirror.** Five fields disagreed
   with `df_to_xlsx`. Four had decayed to `Any` inside a container — `column_widths`,
   `merged_ranges`, `hyperlinks`, `checkboxes` — so a bundle gave an IDE nothing for exactly

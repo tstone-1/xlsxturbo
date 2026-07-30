@@ -118,8 +118,8 @@ Wheels are built for these targets on every release:
 | Platform | Architecture | Wheel tag | Smoke-tested before publish |
 |----------|--------------|-----------|------------------------------|
 | Linux | x86_64 | `manylinux_2_28` | yes |
-| Linux | aarch64 | `manylinux_2_28` | no |
-| macOS | x86_64 | — | no |
+| Linux | aarch64 | `manylinux_2_28` | yes |
+| macOS | x86_64 | — | yes |
 | macOS | aarch64 (Apple silicon) | — | yes |
 | Windows | x64 | — | yes |
 
@@ -127,10 +127,17 @@ An sdist is published alongside them, so a platform without a wheel — Windows 
 Linux, FreeBSD — can still install by building from source, which needs a Rust toolchain.
 Those builds are not tested here and carry no promise.
 
-"Smoke-tested" means the built wheel is installed on a clean runner and the full test suite
-runs against it **before** anything is published to PyPI. The two that are not are
-cross-compiled for an architecture no hosted runner provides; they are built from the same
-sources by the same toolchain in the same job matrix.
+"Smoke-tested" means the built wheel is installed on a clean runner **of its own
+architecture** and the full test suite runs against it before anything is published to PyPI —
+not an import check. Every published wheel is covered, and the table is checked against the
+release workflow rather than maintained by hand.
+
+Until 1.1.0 the two cross-compiled targets, Linux aarch64 and macOS x86_64, were built and
+published without ever being run: no hosted ARM Linux runner existed when the pipeline was
+written, and the Intel macOS image has since been replaced. Both are now available
+(`ubuntu-24.04-arm` and `macos-15-intel`), so the gap is closed. Each leg also asserts the
+platform tag of the wheel it downloaded, because two legs that silently install the same file
+look exactly like coverage.
 
 `manylinux_2_28` is a deliberate floor — glibc 2.28, so RHEL 8 and Debian 10 and newer. It is
 chosen rather than left automatic; see the note in

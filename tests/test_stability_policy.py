@@ -119,6 +119,25 @@ def _release_wheel_targets() -> set[tuple[str, str]]:
     return found
 
 
+def _built_wheel_artifacts() -> set[str]:
+    """Artifact names the wheel-building jobs upload, e.g. `wheels-linux-aarch64`.
+
+    Derived from the same `(job, target)` pairs the jobs interpolate into their
+    upload step, so a new build target appears here without anyone maintaining a
+    list.
+    """
+    return {f"wheels-{job}-{target}" for job, target in _release_wheel_targets()}
+
+
+def _smoke_tested_artifacts() -> set[str]:
+    """Artifact names the release workflow's smoke-test matrix actually installs."""
+    config = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
+    matrix = config["jobs"]["smoke-test"]["strategy"]["matrix"]
+    found = {str(entry["wheel-artifact"]) for entry in matrix["include"]}
+    assert found, "the smoke-test matrix installs no wheel artifacts"
+    return found
+
+
 @needs_checkout
 class TestSupportedPythonTable:
     """The Python table states the classifiers and the CI matrix, not a memory of them."""
@@ -178,6 +197,49 @@ class TestSupportedPlatformTable:
         assert documented == built, (
             f"docs/stability.md documents wheels for {sorted(documented)} but release.yml "
             f"builds {sorted(built)}"
+        )
+
+    def test_every_built_wheel_is_smoke_tested(self) -> None:
+        """No wheel is published without being installed and run first.
+
+        The gap this closes was open from the first release until 1.1.0: two
+        cross-compiled targets were built, published, and never executed,
+        because no runner of their architecture existed when the pipeline was
+        written. Nothing compared the two matrices, so nothing said so.
+        """
+        untested = sorted(_built_wheel_artifacts() - _smoke_tested_artifacts())
+        assert not untested, (
+            f"release.yml builds and publishes {untested} without any smoke-test leg "
+            f"installing them. Add a matrix entry on a runner of that architecture, or stop "
+            f"publishing the wheel."
+        )
+
+    def test_the_smoke_test_matrix_installs_only_wheels_that_are_built(self) -> None:
+        """The other direction: no leg names an artifact that is never produced.
+
+        A mistyped `wheel-artifact` fails the download at release time, after
+        every wheel has already built -- the most expensive moment to find a
+        typo. This finds it in the ordinary test run instead.
+        """
+        phantom = sorted(_smoke_tested_artifacts() - _built_wheel_artifacts())
+        assert not phantom, (
+            f"the smoke-test matrix downloads {phantom}, which no build job uploads. "
+            f"Artifacts actually built: {sorted(_built_wheel_artifacts())}"
+        )
+
+    def test_the_documented_smoke_test_column_matches_the_workflow(self) -> None:
+        """The "Smoke-tested before publish" column is read from release.yml.
+
+        Same rule as the Python table's CI column: a claim about what was tested
+        is worth nothing if the page is the only thing asserting it.
+        """
+        rows = _markdown_table("Supported platforms")
+        claimed = {
+            f"wheels-{row[0].lower()}-{row[1].split()[0].lower()}" for row in rows if row[3] == "yes"
+        }
+        assert claimed == _smoke_tested_artifacts(), (
+            f"docs/stability.md claims these wheels are smoke-tested: {sorted(claimed)}; "
+            f"release.yml actually smoke-tests: {sorted(_smoke_tested_artifacts())}"
         )
 
 

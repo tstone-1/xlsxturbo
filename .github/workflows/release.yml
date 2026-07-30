@@ -161,13 +161,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Every published wheel is installed and exercised on a runner of its own
+        # architecture. Publishing an artifact nobody has run is the one gap this
+        # job exists to close, and it stayed open for the two cross-compiled
+        # targets until 1.1.0.
+        #
+        # `expected-tag` is asserted against the downloaded filename below. Without
+        # it a mistyped `wheel-artifact` silently tests some other wheel twice, and
+        # two green legs that ran the same file look exactly like coverage.
         include:
           - os: ubuntu-latest
             wheel-artifact: wheels-linux-x86_64
+            expected-tag: manylinux_2_28_x86_64
+          - os: ubuntu-24.04-arm
+            wheel-artifact: wheels-linux-aarch64
+            expected-tag: manylinux_2_28_aarch64
           - os: windows-latest
             wheel-artifact: wheels-windows-x64
+            expected-tag: win_amd64
           - os: macos-latest
             wheel-artifact: wheels-macos-aarch64
+            expected-tag: macosx_11_0_arm64
+          # macos-13 was the Intel runner and has been retired; macos-15-intel is
+          # the current x86_64 image. This leg is the only place the
+          # cross-compiled Intel wheel is ever run on an Intel machine.
+          - os: macos-15-intel
+            wheel-artifact: wheels-macos-x86_64
+            expected-tag: macosx_10_12_x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,12 +202,44 @@ jobs:
           name: ${{ matrix.wheel-artifact }}
           path: dist
 
+      - name: Verify the downloaded wheel is the one this leg exists to test
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel in dist/, found ${#wheels[@]}: ${wheels[*]}"
+            exit 1
+          fi
+          name="$(basename "${wheels[0]}")"
+          echo "wheel: $name"
+          echo "runner: ${{ matrix.os }} ($(uname -m))"
+          case "$name" in
+            *"${{ matrix.expected-tag }}"*) ;;
+            *) echo "::error::$name does not carry the expected platform tag ${{ matrix.expected-tag }}"
+               exit 1 ;;
+          esac
+
       - name: Install test dependencies
         run: pip install -r requirements-test.txt
 
       - name: Install built wheel
         shell: bash
         run: pip install dist/*.whl
+
+      - name: Confirm the installed extension came from the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          python -c "
+          import xlsxturbo, pathlib, sys
+          location = pathlib.Path(xlsxturbo.__file__).resolve()
+          print(f'xlsxturbo {xlsxturbo.version()} from {location}')
+          print(f'python {sys.version.split()[0]}, platform {sys.platform}')
+          if 'site-packages' not in location.parts:
+              raise SystemExit(f'imported from {location}, not from the installed wheel')
+          "
 
       - name: Run tests against the installed wheel
         shell: bash
