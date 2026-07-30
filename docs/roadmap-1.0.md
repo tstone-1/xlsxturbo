@@ -216,11 +216,27 @@ review (PR-only), the provenance attestation, the SBOM job, and the `github-rele
 - [ ] Move the remaining README content into pages: getting-started, dataframe-export,
       csv-conversion, multi-sheet-workbooks, formatting, formulas, tables, charts-and-media,
       constant-memory, errors, compatibility, api-reference
-- [ ] **Capability matrix** — which options apply in DataFrame / multi-sheet / CSV /
-      constant-memory mode
-- [ ] **Generate the matrix; do not hand-maintain it.** Emit from `SHEET_OPTION_NAMES`,
-      `CONSTANT_MEMORY_SAFE_OPTIONS` and the `csv_to_xlsx` signature, with a test that fails
-      when the generated table and the committed page diverge
+- [x] **Capability matrix** — `docs/capability-matrix.md`, covering df / dfs / csv,
+      per-sheet overridability, and constant-memory behaviour
+- [x] **Generated, not hand-maintained** — `scripts/gen_capability_matrix.py` parses
+      `SHEET_OPTION_NAMES`, `define_options!`, `CONSTANT_MEMORY_SAFE_OPTIONS`,
+      `warn_constant_memory_skips` and the three `#[pyo3(signature)]` blocks
+- [x] `tests/test_capability_matrix.py` — freshness check plus per-parser guards, and
+      `scripts/` added to the ruff and pyright gates (it was an ungated corner)
+
+Two generator properties worth keeping if this is ever rewritten:
+
+- **Every parser raises rather than returning an empty list.** A structural audit that
+  finds no instances of its own pattern reports nothing to flag, which is indistinguishable
+  from a clean result.
+- **Every parsed parameter must be a Python identifier.** That check is what caught the
+  first signature parser, whose non-greedy regex spanned from the file's first pyo3
+  attribute through to the requested function and yielded "parameters" like
+  `) -> PyResult<(u32` — while still emitting a table that looked entirely plausible.
+
+The tests pin the parsers against the **sources**, not against the generated page, so the
+two cannot drift together. Both were shown to go red before being trusted: mutating the
+page fails the freshness check, and both parser guards raise rather than returning quietly.
 
 Two facts make the matrix cheap to build and worth building:
 
@@ -234,6 +250,25 @@ Two facts make the matrix cheap to build and worth building:
 
 **Gate:** docs build clean; matrix freshness test passes; existing tests unaffected.
 **Release:** none.
+
+**Phase 0 aftermath, all resolved — recorded because each was a gate behaving differently
+than expected rather than a code bug:**
+
+- `pip-audit --strict` and `--skip-editable` contradict each other: `--strict` fails on any
+  skipped dependency and `--skip-editable` creates one. Fixed by auditing an explicit
+  `pip freeze --exclude-editable` list, with the dependency count asserted non-empty.
+- `python-lint` installed into the runner's system interpreter while `[tool.pyright]`
+  points at `.venv`, so pyright analysed a different environment than the documented local
+  command. It passed locally and failed in CI on the same tree. The job now builds `.venv`
+  and runs all three tools from it, matching `CONTRIBUTING.md` exactly.
+- A local `pytest` run showed 16 failures in `test_media.py` that were **not** real: the
+  `.venv` extension was a week stale, reporting 0.17.2 against a 0.18.0 `Cargo.toml`. CI
+  passing every `python-test` job on the same commit is what identified it.
+  `maturin develop --release` cleared it. Note `test_version.py`'s drift guard cannot catch
+  this — both sides of its comparison come from the same stale build.
+
+All 14 CI jobs green as of `c749d14`, including both CodeQL legs. `Dependency review` only
+runs on pull requests, and was confirmed passing on the two Dependabot PRs.
 
 ---
 
