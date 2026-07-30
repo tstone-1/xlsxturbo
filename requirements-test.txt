@@ -16,7 +16,7 @@
 pandas>=2,<3
 polars>=1,<2
 openpyxl>=3,<4
-pytest>=8,<9
+pytest>=9.1.1,<10
 pyyaml>=6,<7
 # tests/test_core.py imports numpy directly. It has always been installed as a
 # pandas dependency, so nothing broke -- but a direct import is a direct
