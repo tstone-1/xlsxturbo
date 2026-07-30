@@ -255,8 +255,9 @@ stated confidence is not evidence.
 **Verdict: the surface is not safe to freeze unchanged.** Three defects shipped in 0.19.0 and
 four are 1.0 design questions.
 
-**All three defects are fixed in 0.19.1.** The four design questions are open and belong to
-Phase 5. One consistency question surfaced while fixing the first defect and is recorded with
+**All three defects are fixed in 0.19.1. All four design questions are resolved in 0.21.0**,
+each one decided rather than inherited; the decisions and their reasoning are recorded inline
+below. One consistency question surfaced while fixing the first defect and is recorded with
 it below.
 
 #### Defects in 0.19.0
@@ -332,7 +333,7 @@ is the fix working, not collateral damage.
 
 #### 1.0 design questions
 
-**4. There is no class meaning "any bad option."** `ConfigurationError` (values) and
+**4. There is no class meaning "any bad option." — RESOLVED in 0.21.0, additively.** `ConfigurationError` (values) and
 `ConfigurationTypeError` (types) are siblings — confirmed, `issubclass` is `False` — so a
 caller wanting all configuration problems must catch a tuple, and `XlsxTurboError` also
 catches file and input-data failures. This is the real category flaw.
@@ -342,7 +343,20 @@ abstract parent. **A purely additive fix is available and better:** introduce
 `OptionError(XlsxTurboError)` and reparent both classes under it. No rename, no removal, every
 existing `except` clause keeps working, and `except OptionError` becomes possible.
 
-**5. `FileError(XlsxTurboError, OSError, ValueError)`.** The layout hazard is theoretical here
+**Shipped exactly as proposed.** `OptionError` takes no builtin base of its own, deliberately:
+a builtin there would land on *both* children, so a `ConfigurationTypeError` would silently
+also be a `ValueError` and the value/type split would stop meaning anything to `except`.
+`FORBIDDEN_BASES` pins that.
+
+The interesting part was not the class but the test. `test_every_concrete_class_has_a_trigger`
+is what kept a dead `UnsupportedFeatureError` from shipping, and `OptionError` is *deliberately*
+never raised — so it would have walked straight past that rule simply by being called abstract.
+Instead `ABSTRACT` maps each abstract class to exactly the triggered classes it must catch,
+asserted in both directions and again at runtime by actually catching them. An abstract class
+that catches nothing raisable now fails.
+
+**5. `FileError(XlsxTurboError, OSError, ValueError)`. — RESOLVED in 0.21.0: keep the base,
+populate the field.** The layout hazard is theoretical here
 — it works, because `ValueError` adds no fields to `OSError`'s struct. The demonstrated
 oddity is `OSError`'s argument handling, which `FileError` fully inherits: `FileError('boom')`
 has `errno is None`, while `FileError(2, 'x')` sets `errno` and changes `str()` to
@@ -354,7 +368,24 @@ from the underlying OS error is the cleaner class — and it breaks `except Valu
 failures, which D6 chose deliberately. That is a real trade, to be taken knowingly at 1.0
 rather than inherited by default.
 
-**6. `From<String> -> ConvertError::Config` is the wrong default.** D6 already records two
+**The trade turned out to be false, because the two halves are separable.** Measured before
+deciding: setting `errno` alone leaves `str()` **untouched**, while setting `filename` makes
+`OSError.__str__` switch to `[Errno n] strerror: 'filename'` and *discard the message* — which
+is where this library puts the path and the context, so populating it would have been strictly
+worse. `errno` is now populated, the other two stay `None` on purpose, and the `ValueError`
+base stays. The complaint the question was really about — an `OSError` whose structured fields
+are permanently empty — is answered with no break at all.
+
+Two things this needed that were not obvious. `save_workbook` stringified its `io::Error`
+immediately, so the number had to be threaded out (`FileFailure`) rather than recovered. And
+**`raw_os_error()` is only an `errno` on Unix**: on Windows it is a Win32 code from a different
+numbering, where `ERROR_PATH_NOT_FOUND` is 3 and 3 as POSIX means `ESRCH`, "no such process".
+Reporting that would be worse than reporting nothing, because it is wrong in a way that looks
+right. Unix passes the number through; elsewhere it is classified via `io::ErrorKind`, the
+portable view the standard library has already computed.
+
+**6. `From<String> -> ConvertError::Config` is the wrong default. — RESOLVED in 0.21.0, more
+strongly than proposed.** D6 already records two
 misclassifications caused by it and files them under "last fraction of precision". The review
 sharpens this usefully: the problem is not the two known instances but the *direction* — every
 new untagged failure silently becomes `ConfigurationError`, i.e. blamed on the user, unless an
@@ -362,11 +393,41 @@ author remembers an invisible rule. **Make the fallback `Internal` instead**, so
 fails visibly rather than masquerading as bad configuration. That is cheap and does not require
 the error-enum refactor D3 declined.
 
-**7. The Python 3.9 annotation split.** `typing.get_type_hints()` on these classes fails on
+**Shipped as "no fallback at all", which is the better answer and was cheaper than it looked.**
+The blanket `From<String>` and its `&str` twin are removed, so every site names `Config` or
+`File` and a new failure site **does not compile** until it chooses. An omission is a build
+error rather than a wrong exception in production — a stronger guarantee than any runtime
+classification could give — and it avoids inventing an `Internal` variant, which would have
+needed a public exception class nothing can raise, tripping the reachability rule from
+question 4. A fallback that still exists is still a default, and the default was the bug.
+
+The cost was measured before committing to it, by deleting the impl and counting what stopped
+compiling: **14 sites, all in `convert.rs`**, not the ~70 that a naive grep for `?;` suggests.
+
+Guarded by `TestConvertErrorHasNoDefaultCategory`, which reads the source, because the property
+is the *absence* of code and nothing observable at runtime distinguishes that from a codebase
+that never took the shortcut. It carries a control asserting both variants are still
+constructed: deleting every `File` construction would satisfy the absence check perfectly while
+restoring the exact behaviour it exists to prevent.
+
+**7. The Python 3.9 annotation split. — RESOLVED in 0.21.0: keep 3.9, fix the annotations.** `typing.get_type_hints()` on these classes fails on
 3.9 and works from 3.10 — documented in D1 and accepted. The review's point is that freezing
 *documented broken introspection* at 1.0 buys nothing, and frameworks do introspect
 annotations. Either drop 3.9 and use PEP 604 throughout, or keep 3.9 and spell field unions
 with `Union[...]` too. Decide at 1.0; it resolves itself when 3.9 support ends.
+
+**Decided: keep 3.9.** Dropping it would have solved the same problem while also removing
+users — PEP 604 syntax is a maintainer convenience, not a user benefit — so 35 field
+annotations were rewritten to `Union[...]`/`Optional[...]` instead. Verified on a real 3.9.25
+interpreter: 15 shapes, all resolving.
+
+The guard is the interesting part, because the obvious one is useless. A test that calls
+`typing.get_type_hints` passes on 3.10+ **whether or not** the annotations use `|`, so a
+regression introduced on a developer machine goes green locally and red only in the 3.9 CI leg.
+The discriminating check is a source scan for PEP 604 unions, which fails on every version; the
+runtime check is kept beside it for what a source scan cannot see, such as a forward reference
+to a name that no longer exists. Both were mutated: reintroducing one `str | None` fails the
+source scan and, as predicted, leaves the runtime check green.
 
 #### Corrected
 

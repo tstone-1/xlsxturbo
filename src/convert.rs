@@ -6,6 +6,7 @@ use crate::apply::{
     apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_rich_text,
     apply_sparklines, apply_textboxes, apply_validations, reject_databar_with_sparklines,
 };
+use crate::errors::FileFailure;
 use crate::parse::{
     build_column_formats, parse_header_format, parse_table_style, parse_value, sanitize_table_name,
 };
@@ -42,7 +43,7 @@ pub enum ConvertError {
     /// Traceable to an option, a value, or the data. Becomes `ConfigurationError`.
     Config(String),
     /// A filesystem read or write failed. Becomes `FileError`.
-    File(String),
+    File(crate::errors::FileFailure),
 }
 
 impl std::fmt::Display for ConvertError {
@@ -54,26 +55,28 @@ impl std::fmt::Display for ConvertError {
     /// no caller outside this impl.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Config(message) | Self::File(message) => f.write_str(message),
+            Self::Config(message) => f.write_str(message),
+            Self::File(failure) => f.write_str(&failure.message),
         }
     }
 }
 
 impl std::error::Error for ConvertError {}
 
-impl From<String> for ConvertError {
-    /// Untagged failures are configuration failures; see the type's own note.
-    fn from(message: String) -> Self {
-        Self::Config(message)
-    }
-}
-
-impl From<&str> for ConvertError {
-    /// Same as the `String` conversion; `ok_or("literal")` sites rely on it.
-    fn from(message: &str) -> Self {
-        Self::Config(message.to_string())
-    }
-}
+// There is deliberately no `From<String>` for `ConvertError`.
+//
+// It used to exist, mapping every untagged failure to `Config`, and it made `?`
+// on a `Result<_, String>` compile everywhere. The cost was invisible and
+// one-directional: a filesystem call added later defaulted to `Config`, so the
+// library blamed the caller's options for something that was not their doing,
+// and nothing failed. Two such misclassifications were found and written down
+// before the conversion was removed.
+//
+// Without it, a new failure site does not compile until it says which kind of
+// failure it is. That is the strongest form of the fix -- an omission is a build
+// error rather than a wrong exception in production -- and it is why this is not
+// the `Internal` fallback variant the review proposed: a fallback that still
+// exists is still a default, and a default is what caused this.
 
 /// Convert a CSV file to XLSX format with automatic type detection.
 ///
@@ -94,7 +97,7 @@ pub fn convert_csv_to_xlsx(
 ) -> Result<(u32, u16), ConvertError> {
     // Open CSV file (csv::ReaderBuilder handles buffering internally)
     let file = File::open(input_path)
-        .map_err(|e| ConvertError::File(format!("Failed to open input file: {}", e)))?;
+        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -106,7 +109,7 @@ pub fn convert_csv_to_xlsx(
     let worksheet = workbook.add_worksheet();
     worksheet
         .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+        .map_err(|e| ConvertError::Config(format!("Failed to set sheet name: {}", e)))?;
 
     // Create formats for dates and datetimes
     let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
@@ -117,17 +120,21 @@ pub fn convert_csv_to_xlsx(
 
     // Process records
     for result in csv_reader.records() {
-        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_count, e))?;
-        let num_cols = u16::try_from(record.len())
-            .map_err(|_| format!("Column count {} exceeds u16 limit", record.len()))?;
+        let record = result.map_err(|e| {
+            ConvertError::Config(format!("CSV parse error at row {}: {}", row_count, e))
+        })?;
+        let num_cols = u16::try_from(record.len()).map_err(|_| {
+            ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
+        })?;
         if num_cols > col_count {
             col_count = num_cols;
         }
 
         for (col_idx, value) in record.iter().enumerate() {
             let cell_value = parse_value(value, date_order);
-            let col = u16::try_from(col_idx)
-                .map_err(|_| format!("Column index {} exceeds u16 limit", col_idx))?;
+            let col = u16::try_from(col_idx).map_err(|_| {
+                ConvertError::Config(format!("Column index {} exceeds u16 limit", col_idx))
+            })?;
             write_cell(
                 worksheet,
                 row_count,
@@ -136,12 +143,17 @@ pub fn convert_csv_to_xlsx(
                 &date_format,
                 &datetime_format,
             )
-            .map_err(|e| format!("Write error at ({}, {}): {}", row_count, col_idx, e))?;
+            .map_err(|e| {
+                ConvertError::Config(format!(
+                    "Write error at ({}, {}): {}",
+                    row_count, col_idx, e
+                ))
+            })?;
         }
 
         row_count = row_count
             .checked_add(1)
-            .ok_or("Row count exceeds u32 limit")?;
+            .ok_or_else(|| ConvertError::Config("Row count exceeds u32 limit".to_string()))?;
     }
 
     // Save workbook
@@ -167,7 +179,7 @@ pub fn convert_csv_to_xlsx_parallel(
     date_order: DateOrder,
 ) -> Result<(u32, u16), ConvertError> {
     let file = File::open(input_path)
-        .map_err(|e| ConvertError::File(format!("Failed to open input file: {}", e)))?;
+        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -178,7 +190,7 @@ pub fn convert_csv_to_xlsx_parallel(
     let worksheet = workbook.add_worksheet();
     worksheet
         .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name: {}", e))?;
+        .map_err(|e| ConvertError::Config(format!("Failed to set sheet name: {}", e)))?;
 
     let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
     let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
@@ -189,10 +201,12 @@ pub fn convert_csv_to_xlsx_parallel(
 
     for result in csv_reader.records() {
         let absolute_row = row_count as usize + chunk.len();
-        let record =
-            result.map_err(|e| format!("CSV parse error at row {}: {}", absolute_row, e))?;
-        let num_cols = u16::try_from(record.len())
-            .map_err(|_| format!("Column count {} exceeds u16 limit", record.len()))?;
+        let record = result.map_err(|e| {
+            ConvertError::Config(format!("CSV parse error at row {}: {}", absolute_row, e))
+        })?;
+        let num_cols = u16::try_from(record.len()).map_err(|_| {
+            ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
+        })?;
         if num_cols > col_count {
             col_count = num_cols;
         }
@@ -206,7 +220,8 @@ pub fn convert_csv_to_xlsx_parallel(
                 date_order,
                 &date_format,
                 &datetime_format,
-            )?;
+            )
+            .map_err(ConvertError::Config)?;
         }
     }
 
@@ -218,7 +233,8 @@ pub fn convert_csv_to_xlsx_parallel(
             date_order,
             &date_format,
             &datetime_format,
-        )?;
+        )
+        .map_err(ConvertError::Config)?;
     }
 
     save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
@@ -825,9 +841,10 @@ pub(crate) fn convert_dataframe_to_xlsx(
         sheet_name,
         &config,
         opts.as_effective(),
-    )?;
+    )
+    .map_err(ConvertError::Config)?;
 
-    apply_defined_names(&mut workbook, defined_names)?;
+    apply_defined_names(&mut workbook, defined_names).map_err(ConvertError::Config)?;
 
     save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
 

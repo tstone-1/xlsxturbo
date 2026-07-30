@@ -5,6 +5,94 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-07-30
+
+Four open design questions from the 1.0 review, decided rather than inherited. Every change
+here is additive: no class was renamed or removed, no builtin base changed, and no existing
+`except` clause means anything different than it did.
+
+### Added
+- **`OptionError` — one class meaning "anything wrong with what you passed."**
+  `ConfigurationError` (bad value) and `ConfigurationTypeError` (wrong type) were siblings, so
+  a caller who wanted both had to catch a tuple, while `XlsxTurboError` also swept up
+  filesystem failures and unsupported DataFrames — which are not the caller's options at all.
+
+  ```python
+  try:
+      xlsxturbo.df_to_xlsx(df, path, **user_supplied_options)
+  except xlsxturbo.OptionError as exc:
+      return {"error": f"bad export options: {exc}"}
+  except xlsxturbo.FileError as exc:
+      return {"error": f"could not write the file: {exc}"}
+  ```
+
+  Added by **reparenting, not renaming**: both classes keep their names and their builtin
+  bases, and `OptionError` takes no builtin of its own — one there would land on both children
+  and make every bad *value* a `TypeError` too.
+- **`FileError.errno` is populated**, so a full disk can be told from a missing directory
+  without matching on message text:
+
+  ```python
+  except xlsxturbo.FileError as exc:
+      if exc.errno == errno.ENOSPC:
+          ...
+  ```
+
+  `strerror` and `filename` deliberately stay `None`: `OSError` rewrites its own `str()` into
+  `[Errno n] strerror: 'filename'` the moment `filename` is set, discarding the message — which
+  already carries the path and the context. Setting `errno` alone leaves `str()` byte-identical,
+  which is what makes this additive rather than a break.
+
+  On Windows the value is the POSIX equivalent, not the native Win32 code, so a comparison
+  against `errno.ENOENT` means the same thing on every platform. Where no meaningful number is
+  available it stays `None` — compare against a constant, not for truthiness.
+
+### Fixed
+- **`typing.get_type_hints()` now works on Python 3.9** for every option shape. The field
+  annotations in `xlsxturbo.types` used PEP 604 unions (`str | None`), which 3.9 cannot
+  evaluate; `from __future__ import annotations` hid that at import time, so the failure
+  surfaced only for a framework that resolves hints — pydantic, FastAPI, attrs, or anything
+  building a schema from a type. 35 annotations are now spelled `Union[...]` / `Optional[...]`,
+  verified on a real 3.9 interpreter.
+
+  **Python 3.9 support is unchanged.** Dropping it would have solved the same problem while
+  also removing users; the PEP 604 syntax was a maintainer convenience.
+
+### Internal
+- **`ConvertError` no longer has a blanket `From<String>`.** It mapped every untagged pipeline
+  failure to `Config`, and thence to `ConfigurationError` — so a filesystem failure added later
+  silently blamed the caller's options, and nothing failed. Two such misclassifications had been
+  found and written down before it was removed. Each of the 14 sites now names its category, and
+  a new failure site does not compile until it chooses one.
+
+  This goes further than the review proposed, which was an `Internal` fallback variant. A
+  fallback that still exists is still a default, and the default was the bug.
+- **Property tests over `src/parse/`**, stated as round-trips, idempotences and equivalences
+  to the `str` method each parser claims to implement, plus boundary tests for the Excel
+  serial-date scale, the 1900 leap-year gap and the 2^53 integer cutoff.
+
+  Two of the properties did not test what they appeared to, and were only found by mutating
+  the code they guard: one could reach its failing input roughly once in seventy thousand
+  draws, and one never entered the branch it was written for at all. Both generators were
+  narrowed until the interesting case is common. Every property and every boundary test has
+  since been shown to go red under a deliberate single-edit mutation of the code it covers.
+- **`scripts/coverage_report.py`** reports coverage of the Rust core and the Python layer.
+  Deliberately no threshold, in CI or out of it: the useful output is *which* branches are
+  unexercised.
+
+  It measures both test suites together because neither is honest alone. `cargo test` on its
+  own reports 26% and shows every `src/apply/*.rs` file at zero — those paths are covered
+  thoroughly, from Python. The Python suite alone misses the parser branches only the Rust
+  property tests reach.
+
+### Documentation
+- **The type-detection table now covers the three places a value changes kind.** All three
+  were already the implemented behaviour and none was written down: any spelling of a
+  non-finite number (`nan`, `+Inf`, `Infinity`, …) becomes an empty cell — which is a trap for
+  a *text* column that happens to contain one of those words; dates before 1900-03-01 are
+  written as text because Excel numbers them a day out; and integers past 2^53 are written as
+  text so no digits are lost.
+
 ## [0.20.0] - 2026-07-30
 
 ### Added
@@ -51,33 +139,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feature alone is unaffected, and every other conditional-format type still works beside
   sparklines. `tests/upstream_defect.rs` asserts the upstream bug is *still present*, so the day
   it is fixed a test fails and the workaround gets removed instead of outliving its reason.
-
-### Documentation
-- **The type-detection table now covers the three places a value changes kind.** All three
-  were already the implemented behaviour and none was written down: any spelling of a
-  non-finite number (`nan`, `+Inf`, `Infinity`, …) becomes an empty cell — which is a trap for
-  a *text* column that happens to contain one of those words; dates before 1900-03-01 are
-  written as text because Excel numbers them a day out; and integers past 2^53 are written as
-  text so no digits are lost.
-
-### Internal
-- **Property tests over `src/parse/`**, stated as round-trips, idempotences and equivalences
-  to the `str` method each parser claims to implement, plus boundary tests for the Excel
-  serial-date scale, the 1900 leap-year gap and the 2^53 integer cutoff.
-
-  Two of the properties did not test what they appeared to, and were only found by mutating
-  the code they guard: one could reach its failing input roughly once in seventy thousand
-  draws, and one never entered the branch it was written for at all. Both generators were
-  narrowed until the interesting case is common. Every property and every boundary test has
-  since been shown to go red under a deliberate single-edit mutation of the code it covers.
-- **`scripts/coverage_report.py`** reports coverage of the Rust core and the Python layer.
-  Deliberately no threshold, in CI or out of it: the useful output is *which* branches are
-  unexercised.
-
-  It measures both test suites together because neither is honest alone. `cargo test` on its
-  own reports 26% and shows every `src/apply/*.rs` file at zero — those paths are covered
-  thoroughly, from Python. The Python suite alone misses the parser branches only the Rust
-  property tests reach.
 
 ## [0.19.1] - 2026-07-30
 

@@ -14,8 +14,12 @@ someone trims to make a test pass is how a shape silently stops being exported.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import re
+import typing
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import pytest
@@ -178,7 +182,14 @@ class TestPublicNamespace:
         the declaration, while still being importable by name -- so nothing else
         in this suite would notice.
         """
-        typing_helpers = {"annotations", "Literal", "TypedDict", "Union", "PathLike"}
+        typing_helpers = {
+            "annotations",
+            "Literal",
+            "Optional",
+            "PathLike",
+            "TypedDict",
+            "Union",
+        }
         public = {
             n for n in dir(types_module) if not n.startswith("_") and n not in typing_helpers
         }
@@ -297,4 +308,63 @@ class TestRequiredFieldsAreTyped:
         cls = getattr(types_module, shape)
         assert not cls.__required_keys__, (
             f"{shape} requires {set(cls.__required_keys__)} but is listed as fully optional"
+        )
+
+
+class TestAnnotationsResolveOnEverySupportedPython:
+    """``typing.get_type_hints`` works on the option shapes, back to 3.9.
+
+    ``requires-python`` is ``>=3.9``, where PEP 604 unions (``str | None``) are a
+    syntax the runtime cannot evaluate. ``from __future__ import annotations``
+    hides that at import time -- the annotations are never evaluated -- so the
+    module imports cleanly on 3.9 and the failure surfaces only when *something
+    else* resolves the hints. Frameworks do exactly that: pydantic, FastAPI,
+    attrs, and any tool that builds a form or a schema from a type.
+
+    Freezing that at 1.0 would have shipped a typed API whose types cannot be
+    read programmatically on a version we claim to support.
+    """
+
+    def test_get_type_hints_resolves_every_shape(self) -> None:
+        """Every exported TypedDict resolves without raising.
+
+        On 3.10+ this passes whether or not the annotations use ``|``, so it is
+        **not** the check that catches a regression -- that is
+        :meth:`test_no_annotation_uses_a_pep_604_union` below, which fails on
+        every version. This one is here for what a source scan cannot see: a
+        forward reference to a name that no longer exists.
+        """
+        hints_by_shape = {}
+        for name in sorted(_runtime_shapes()):
+            shape = getattr(types_module, name)
+            if not (isinstance(shape, type) and issubclass(shape, dict)):
+                continue
+            hints_by_shape[name] = typing.get_type_hints(shape)
+        assert hints_by_shape, "no TypedDict shapes were resolved"
+        assert typing.get_type_hints(types_module.SheetOptions)["table_style"] == Optional[str]
+
+    def test_no_annotation_uses_a_pep_604_union(self) -> None:
+        """No annotation in ``types.py`` spells a union with ``|``.
+
+        The discriminating half, and the reason it reads the source rather than
+        the runtime: on 3.10+ a ``|`` union resolves perfectly, so a regression
+        introduced on a developer machine passes every runtime check and fails
+        only in the 3.9 CI leg -- or, worse, only for a user.
+
+        Read through ``inspect.getsource`` rather than a repository path, so it
+        also runs against an installed wheel, where the release smoke test is
+        the last thing standing between this and a published artifact.
+        """
+        tree = ast.parse(inspect.getsource(types_module))
+        offenders = [
+            f"line {node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign)
+            for sub in ast.walk(node.annotation)
+            if isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr)
+        ]
+        assert not offenders, (
+            f"PEP 604 unions in types.py at {offenders}. Python 3.9 cannot evaluate "
+            "these, so typing.get_type_hints() raises there. Use Union[...] / "
+            "Optional[...] instead."
         )

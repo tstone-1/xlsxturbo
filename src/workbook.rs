@@ -1,6 +1,7 @@
 //! Shared workbook-level helpers.
 
-use rust_xlsxwriter::Workbook;
+use crate::errors::{errno, FileFailure};
+use rust_xlsxwriter::{Workbook, XlsxError};
 use std::collections::HashMap;
 use std::path::Path;
 use tempfile::NamedTempFile;
@@ -49,7 +50,7 @@ fn set_output_permissions(_tmp: &NamedTempFile, _dest: &Path) {}
 /// `$TMPDIR` so the rename stays within one filesystem and is therefore atomic;
 /// a cross-filesystem rename would degrade into a copy and reintroduce the
 /// partial-write window.
-pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Result<(), String> {
+pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Result<(), FileFailure> {
     let dest = Path::new(output_path);
     let dir = match dest.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
@@ -59,25 +60,41 @@ pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Resul
     // Every failure below reports as a save failure: staging is an
     // implementation detail, and a caller who passed a bad path should not have
     // to reason about temporary files to understand what went wrong.
+    let context = format!("Failed to save workbook to '{}'", output_path);
+
     if !dir.is_dir() {
-        return Err(format!(
-            "Failed to save workbook to '{}': directory '{}' does not exist",
-            output_path,
-            dir.display()
+        // `ENOENT` is synthesised rather than observed, because this branch
+        // exists to produce a better message than the syscall would. It is the
+        // number the syscall one line below *would* have returned, and it is
+        // worth setting: a missing output directory is the most common file
+        // failure here, so leaving it unnumbered would make `errno` useless
+        // exactly where a caller most wants to branch on it.
+        return Err(FileFailure::detected(
+            format!("{}: directory '{}' does not exist", context, dir.display()),
+            errno::ENOENT,
         ));
     }
 
-    let mut tmp = NamedTempFile::new_in(dir)
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+    let mut tmp =
+        NamedTempFile::new_in(dir).map_err(|e| FileFailure::from_io(context.clone(), &e))?;
 
     workbook
         .save_to_writer(tmp.as_file_mut())
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+        .map_err(|e| match &e {
+            // `save_to_writer` wraps the underlying `io::Error`, so a disk-full
+            // or permissions failure keeps its number instead of arriving as an
+            // opaque library error.
+            XlsxError::IoError(io) => FileFailure::from_io(context.clone(), io),
+            other => FileFailure {
+                message: format!("{}: {}", context, other),
+                errno: None,
+            },
+        })?;
 
     set_output_permissions(&tmp, dest);
 
     tmp.persist(dest)
-        .map_err(|e| format!("Failed to save workbook to '{}': {}", output_path, e))?;
+        .map_err(|e| FileFailure::from_io(context, &e.error))?;
 
     Ok(())
 }

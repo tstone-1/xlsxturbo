@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "0.20.0"
+version = "0.21.0"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -96,6 +96,19 @@ ignore = [
     "D213",   # multi-line-summary-second-line (conflicts with D212)
     "ANN401", # allow explicit typing.Any where a precise type is impractical
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Do NOT rewrite `Union[X, Y]` to `X | Y` (UP007/UP045) in `python/xlsxturbo/types.py`.
+#
+# `requires-python` is `>=3.9`, where PEP 604 unions are a syntax the runtime cannot
+# evaluate. `from __future__ import annotations` makes the module *import* fine on 3.9 --
+# annotations are never evaluated -- so ruff reasonably concludes the rewrite is safe.
+# It is not: `typing.get_type_hints()` evaluates them, and anything building a schema
+# from these shapes (pydantic, FastAPI, attrs) does exactly that. It raises on 3.9.
+#
+# `tests/test_types_module.py::test_no_annotation_uses_a_pep_604_union` is the guard;
+# this setting is what stops `ruff check --fix` reintroducing the problem in one keystroke.
+keep-runtime-typing = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

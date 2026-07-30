@@ -46,6 +46,7 @@ __all__ = [
     "HeaderFormat",
     "ImageOptions",
     "InputDataError",
+    "OptionError",
     "PathArg",
     "RichTextFormat",
     "SheetOptions",
@@ -74,10 +75,18 @@ __all__ = [
 class XlsxTurboError(Exception):
     """Base class for every exception raised by xlsxturbo."""
 
-class ConfigurationError(XlsxTurboError, ValueError):
+class OptionError(XlsxTurboError):
+    """An option or argument is wrong, in value or in type.
+
+    Never raised itself -- it exists so that `except OptionError` catches every
+    problem with what the caller passed, without also catching filesystem
+    failures or an unsupported DataFrame.
+    """
+
+class ConfigurationError(OptionError, ValueError):
     """An option or argument has an invalid value."""
 
-class ConfigurationTypeError(XlsxTurboError, TypeError):
+class ConfigurationTypeError(OptionError, TypeError):
     """An option or argument has the wrong type."""
 
 class InputDataError(XlsxTurboError, ValueError):

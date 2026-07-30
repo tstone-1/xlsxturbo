@@ -19,15 +19,34 @@ except xlsxturbo.XlsxTurboError as exc:
     log.error("export failed: %s", exc)
 ```
 
-Five subclasses say what kind of failure it was:
+The subclasses say what kind of failure it was:
 
 | Exception | Raised for | Also a |
 |-----------|------------|--------|
-| `ConfigurationError` | An option or argument **value** is invalid: an unrecognised key, an unparseable colour or cell reference, an out-of-range number, an invalid chart range | `ValueError` |
-| `ConfigurationTypeError` | An option or argument has the wrong **type**: a list where a dict is required, a non-string dictionary key, a `bytes` path | `TypeError` |
+| `OptionError` | Never raised itself — the parent of the two below, so `except OptionError` catches every problem with what you passed | — |
+| `ConfigurationError` | An option or argument **value** is invalid: an unrecognised key, an unparseable colour or cell reference, an out-of-range number, an invalid chart range | `OptionError`, `ValueError` |
+| `ConfigurationTypeError` | An option or argument has the wrong **type**: a list where a dict is required, a non-string dictionary key, a `bytes` path | `OptionError`, `TypeError` |
 | `InputDataError` | The object passed as data is not a pandas or polars DataFrame, or its columns cannot be read | `ValueError` |
 | `FileError` | A filesystem read or write failed: a missing output directory, a permissions problem, a full disk, an unreadable CSV input | `OSError`, `ValueError` |
-| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it — two sheets claiming the same table name | `ConfigurationError`, so also `ValueError` |
+| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it — two sheets claiming the same table name | `ConfigurationError`, so also `OptionError` and `ValueError` |
+
+### "Anything wrong with what I passed"
+
+`ConfigurationError` and `ConfigurationTypeError` split a bad *value* from a
+wrong *type*. That distinction is worth having and is usually not the one you
+want when writing a handler — most callers want both and nothing else:
+
+```python
+try:
+    xlsxturbo.df_to_xlsx(df, path, **user_supplied_options)
+except xlsxturbo.OptionError as exc:
+    return {"error": f"bad export options: {exc}"}    # the caller's mistake
+except xlsxturbo.FileError as exc:
+    return {"error": f"could not write the file: {exc}"}   # not their mistake
+```
+
+`OptionError` arrived in 0.21.0 by reparenting, not renaming, so every existing
+`except` clause means exactly what it did before.
 
 Messages carry the option and the specific key or cell reference that caused them, so
 they identify the offending entry rather than just the option family:
@@ -72,10 +91,33 @@ except ValueError:
     ...     # what 0.18 required
 ```
 
+**`errno` is set**, so you can tell one filesystem failure from another without
+matching on message text:
+
+```python
+import errno
+
+try:
+    xlsxturbo.df_to_xlsx(df, "/mnt/reports/out.xlsx")
+except xlsxturbo.FileError as exc:
+    if exc.errno == errno.ENOSPC:
+        ...          # the disk is full: retry elsewhere
+    elif exc.errno == errno.ENOENT:
+        ...          # the directory is gone: create it, or fail the job
+    raise
+```
+
 Two details worth knowing. The message still begins `Failed to save workbook to '<path>': `
-for a save failure, so message-matching code written against 0.18 keeps working. And
-because the exception is constructed from a single message, `errno`, `strerror` and
-`filename` are always `None` — the path is in the message text, not in those fields.
+for a save failure, so message-matching code written against 0.18 keeps working — and
+that is exactly why **`strerror` and `filename` stay `None`**. `OSError` reformats its
+own `str()` into `[Errno n] strerror: 'filename'` as soon as `filename` is set, which
+would throw the message away; the path is already in it. `errno` is the one field that
+can be populated without changing what the exception prints.
+
+On platforms whose native error numbers are not POSIX — Windows — `errno` carries the
+POSIX equivalent rather than the native code, so the comparison above means the same
+thing everywhere. Where no meaningful number is available it stays `None`, so compare
+against a specific constant rather than testing for truthiness.
 
 ### What is not in the hierarchy
 

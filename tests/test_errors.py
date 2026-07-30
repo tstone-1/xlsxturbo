@@ -24,8 +24,10 @@ classes and not the ones originally planned.
 
 from __future__ import annotations
 
+import errno
 import inspect
 import pickle
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,11 +36,14 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
+from tests.helpers import REPO_ROOT, repo_checkout_available
+
 # The public names, and the builtin each one must remain an instance of. A class
 # appearing here with the wrong builtin is a breaking change for anyone whose
 # `except` clause names that builtin.
 EXPECTED_BASES: dict[str, tuple[type[BaseException], ...]] = {
     "XlsxTurboError": (Exception,),
+    "OptionError": (Exception,),
     "ConfigurationError": (Exception, ValueError),
     "ConfigurationTypeError": (Exception, TypeError),
     "InputDataError": (Exception, ValueError),
@@ -52,6 +57,12 @@ EXPECTED_BASES: dict[str, tuple[type[BaseException], ...]] = {
 # other assertion in this file.
 FORBIDDEN_BASES: dict[str, tuple[type[BaseException], ...]] = {
     "XlsxTurboError": (ValueError, TypeError, OSError),
+    # `OptionError` deliberately adds no builtin of its own. If it took one, it
+    # would push that builtin onto both of its children -- so a
+    # `ConfigurationTypeError` would silently become a `ValueError` too, and the
+    # value/type split the hierarchy exists to express would stop meaning
+    # anything to `except`.
+    "OptionError": (ValueError, TypeError, OSError),
     "ConfigurationError": (TypeError, OSError),
     "ConfigurationTypeError": (ValueError, OSError),
     "InputDataError": (TypeError, OSError),
@@ -96,14 +107,29 @@ def _trigger_workbook_validation(out: Path) -> None:
     )
 
 
-# One real call per concrete class. `XlsxTurboError` is the abstract base and is
-# covered by every entry here being an instance of it.
+# One real call per concrete class.
 TRIGGERS: dict[str, Callable[[Path], None]] = {
     "ConfigurationError": _trigger_configuration,
     "ConfigurationTypeError": _trigger_configuration_type,
     "InputDataError": _trigger_input_data,
     "FileError": _trigger_file,
     "WorkbookValidationError": _trigger_workbook_validation,
+}
+
+# Classes that exist to be *caught*, never raised, mapped to exactly the
+# triggered classes each one must catch.
+#
+# "Abstract" is otherwise an excuse: the rule that every exported class needs a
+# working trigger is what kept a dead class from shipping in 0.19, and a class
+# that simply declares itself abstract would walk straight past it. So each entry
+# here carries its own obligation, checked in both directions -- an abstract
+# class that stopped catching one of its children fails, and so does one that
+# started catching something else.
+ABSTRACT: dict[str, frozenset[str]] = {
+    "XlsxTurboError": frozenset(TRIGGERS),
+    "OptionError": frozenset(
+        {"ConfigurationError", "ConfigurationTypeError", "WorkbookValidationError"}
+    ),
 }
 
 
@@ -152,11 +178,40 @@ class TestReachability:
             if isinstance(getattr(xlsxturbo, name), type)
             and issubclass(getattr(xlsxturbo, name), xlsxturbo.XlsxTurboError)
         }
-        concrete = exported - {"XlsxTurboError"}
+        concrete = exported - set(ABSTRACT)
         assert concrete == set(TRIGGERS), (
             f"exported without a trigger: {sorted(concrete - set(TRIGGERS))}; "
             f"triggered but not exported: {sorted(set(TRIGGERS) - concrete)}"
         )
+
+    @pytest.mark.parametrize("name", sorted(ABSTRACT))
+    def test_abstract_class_catches_exactly_its_documented_children(self, name: str) -> None:
+        """An abstract class earns its place by what it catches.
+
+        Checked against the *triggered* classes rather than against the module,
+        so a class nothing can raise contributes nothing here -- which is what
+        stops ``ABSTRACT`` becoming a way around
+        :meth:`test_every_concrete_class_has_a_trigger`.
+        """
+        abstract = getattr(xlsxturbo, name)
+        catches = {t for t in TRIGGERS if issubclass(getattr(xlsxturbo, t), abstract)}
+        assert catches == ABSTRACT[name], (
+            f"{name} catches {sorted(catches)}, documented as {sorted(ABSTRACT[name])}"
+        )
+        assert catches, f"{name} catches nothing that can actually be raised"
+
+    @pytest.mark.parametrize("name", sorted(ABSTRACT))
+    def test_abstract_class_catches_a_real_failure(self, name: str, tmp_path: Path) -> None:
+        """...and by catching one, at runtime, not by ``issubclass`` alone.
+
+        ``issubclass`` answers a question about the class objects. This answers
+        the question a caller actually asks -- whether writing ``except
+        OptionError`` around a call catches the failure it is meant to.
+        """
+        abstract = getattr(xlsxturbo, name)
+        for child in sorted(ABSTRACT[name]):
+            with pytest.raises(abstract):
+                TRIGGERS[child](tmp_path)
 
 
 class TestLegacyBuiltins:
@@ -218,21 +273,51 @@ class TestHierarchyShape:
         """The one intentional parent/child pair inside the hierarchy holds."""
         assert issubclass(xlsxturbo.WorkbookValidationError, xlsxturbo.ConfigurationError)
 
-    def test_file_error_leaves_the_oserror_fields_unset(self, tmp_path: Path) -> None:
-        """``errno``/``strerror``/``filename`` are ``None``, as documented.
+    def test_file_error_carries_the_os_error_number(self, tmp_path: Path) -> None:
+        """``errno`` is populated, so ``FileError`` is an honest ``OSError``.
 
-        ``FileError`` inherits ``OSError`` for its ``except`` behaviour, but it is
-        constructed with a single message argument, so the structured fields are
-        never populated. Documented in ``docs/errors.md``; pinned here because a
-        two-argument construction would silently start producing
-        ``[Errno x] y`` messages instead.
+        Writing into a directory that does not exist is ``ENOENT`` whichever
+        platform reports it, which is what makes this assertable rather than
+        merely "some number".
         """
         with pytest.raises(xlsxturbo.FileError) as caught:
             _trigger_file(tmp_path)
-        assert caught.value.errno is None
+        assert caught.value.errno == errno.ENOENT
+
+    def test_file_error_leaves_strerror_and_filename_unset(self, tmp_path: Path) -> None:
+        """...and the other two ``OSError`` fields stay ``None``, deliberately.
+
+        Not an oversight and not laziness: ``OSError.__str__`` switches to the
+        ``[Errno n] strerror: 'filename'`` form the moment ``filename`` is set,
+        **discarding the message entirely**. This library's message says more
+        than that form can, and already contains the path.
+
+        Pinned because populating them looks like an obvious improvement, and
+        the resulting message would be strictly worse.
+        """
+        with pytest.raises(xlsxturbo.FileError) as caught:
+            _trigger_file(tmp_path)
         assert caught.value.strerror is None
         assert caught.value.filename is None
-        assert "Failed to save workbook to" in str(caught.value)
+        assert str(caught.value).startswith("Failed to save workbook to")
+
+    def test_a_readable_directory_still_produces_no_errno_confusion(
+        self, tmp_path: Path
+    ) -> None:
+        """The control: a successful export raises nothing at all.
+
+        Without it, an implementation that raised ``FileError(ENOENT)``
+        unconditionally would satisfy both assertions above.
+        """
+        xlsxturbo.df_to_xlsx(_frame(), tmp_path / "fine.xlsx")
+        assert (tmp_path / "fine.xlsx").exists()
+
+    def test_csv_input_failure_also_carries_an_errno(self, tmp_path: Path) -> None:
+        """The read path is a different call site and needs its own case."""
+        with pytest.raises(xlsxturbo.FileError) as caught:
+            xlsxturbo.csv_to_xlsx(tmp_path / "absent.csv", tmp_path / "o.xlsx")
+        assert caught.value.errno == errno.ENOENT
+        assert "Failed to open input file" in str(caught.value)
 
 
 class TestExports:
@@ -411,3 +496,54 @@ class TestNestedExtractionStaysInTheHierarchy:
         """
         stale = SIGNATURE_CONVERTED - set(inspect.signature(xlsxturbo.df_to_xlsx).parameters)
         assert not stale, f"SIGNATURE_CONVERTED names non-parameters: {sorted(stale)}"
+
+
+@pytest.mark.skipif(
+    not repo_checkout_available(),
+    reason="reads src/convert.rs, which a wheel install does not carry",
+)
+class TestConvertErrorHasNoDefaultCategory:
+    """No blanket ``String -> ConvertError`` conversion exists, and none returns.
+
+    ``ConvertError`` once had ``From<String>``, mapping every untagged pipeline
+    failure to ``Config`` and thence to ``ConfigurationError``. It made ``?``
+    compile everywhere, and it was wrong in one direction only: a filesystem
+    failure added later blamed the caller's options, silently. Two such
+    misclassifications were found before it was removed.
+
+    Removing it makes the Rust compiler ask the question at every new failure
+    site, which is a stronger guarantee than any runtime test can give -- but
+    only for as long as nobody adds the impl back for convenience. That is what
+    this class watches, and it is why it reads the source: the property is the
+    *absence* of code, which nothing observable at runtime can distinguish from
+    a codebase that simply never took the shortcut.
+    """
+
+    def test_no_blanket_conversion_into_convert_error(self) -> None:
+        """``impl From<...> for ConvertError`` is absent from the source."""
+        source = (REPO_ROOT / "src" / "convert.rs").read_text(encoding="utf-8")
+        assert "enum ConvertError" in source, (
+            "src/convert.rs no longer defines ConvertError; this guard is reading "
+            "the wrong file and would pass for the wrong reason"
+        )
+        offenders = re.findall(r"impl\s+From\s*<[^>]*>\s+for\s+ConvertError", source)
+        assert not offenders, (
+            f"a blanket conversion into ConvertError is back: {offenders}. Every "
+            "failure site must name Config or File explicitly; see the note above "
+            "the enum in src/convert.rs."
+        )
+
+    def test_both_categories_are_still_constructed(self) -> None:
+        """...and the alternative to a default is that both variants get used.
+
+        The control. Deleting the ``File`` variant's every construction site
+        would satisfy the check above perfectly while making every filesystem
+        failure a ``ConfigurationError`` again -- the exact outcome it exists to
+        prevent.
+        """
+        source = (REPO_ROOT / "src" / "convert.rs").read_text(encoding="utf-8")
+        for variant in ("ConvertError::Config", "ConvertError::File"):
+            assert source.count(variant) >= 2, (
+                f"{variant} is constructed {source.count(variant)} time(s) in "
+                "convert.rs; a category nothing produces is not a category"
+            )

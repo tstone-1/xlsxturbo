@@ -37,6 +37,7 @@ const PUBLIC_MODULE: &str = "xlsxturbo";
 /// The exception classes, resolved once during module initialisation.
 struct ErrorTypes {
     base: Py<PyType>,
+    option: Py<PyType>,
     configuration: Py<PyType>,
     configuration_type: Py<PyType>,
     input_data: Py<PyType>,
@@ -88,26 +89,47 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     let base_ty = base.bind(py).clone();
 
+    // The one class that exists purely to be caught. `ConfigurationError` (bad value)
+    // and `ConfigurationTypeError` (wrong type) are siblings, so before this a caller
+    // who wanted "any bad option" had to catch a tuple -- while `XlsxTurboError` also
+    // swept up file and input-data failures, which are not the caller's option at all.
+    //
+    // Added by reparenting rather than renaming: `ConfigurationError` keeps its name and
+    // its `ValueError` base, so no existing `except` clause changes meaning.
+    let option = new_exception_class(
+        py,
+        "OptionError",
+        std::slice::from_ref(&base_ty),
+        "An option or argument is wrong, whether in value or in type.\n\n\
+         The parent of `ConfigurationError` and `ConfigurationTypeError`. Catch this to \
+         handle every problem with what the caller passed, without also catching \
+         filesystem failures or an unsupported DataFrame.\n\n\
+         It adds no builtin base of its own: each subclass keeps the builtin that its \
+         failures have always raised, so `except ValueError` and `except TypeError` are \
+         unaffected.",
+    )?;
+    let option_ty = option.bind(py).clone();
+
     let configuration = new_exception_class(
         py,
         "ConfigurationError",
-        &[base_ty.clone(), value_error.clone()],
+        &[option_ty.clone(), value_error.clone()],
         "An option or argument has an invalid value.\n\n\
          Raised for an unknown option key, a value outside the accepted set (a bad \
          color, an unparseable cell reference, an unrecognised chart type), and for \
-         failures inside the write pipeline that are traceable to an option. Also a \
-         `ValueError`.",
+         failures inside the write pipeline that are traceable to an option. An \
+         `OptionError`, and also a `ValueError`.",
     )?;
     let configuration_ty = configuration.bind(py).clone();
 
     let configuration_type = new_exception_class(
         py,
         "ConfigurationTypeError",
-        &[base_ty.clone(), type_error],
+        &[option_ty, type_error],
         "An option or argument has the wrong type.\n\n\
          Raised when a value is the wrong Python type rather than the wrong value -- a \
          list where a dict is required, a number where a string is required, a bytes \
-         path. Also a `TypeError`.",
+         path. An `OptionError`, and also a `TypeError`.",
     )?;
 
     let input_data = new_exception_class(
@@ -132,8 +154,13 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          Raised when the output workbook cannot be written (missing directory, \
          permissions, no space) or when a CSV input cannot be opened. Also an \
          `OSError`, which is what makes `except OSError` work, and a `ValueError`, \
-         which is what keeps pre-0.19 `except ValueError` handlers working. `errno`, \
-         `strerror` and `filename` are always `None`; the path is in the message.",
+         which is what keeps pre-0.19 `except ValueError` handlers working.\n\n\
+         `errno` carries the OS error number when the failure had one, so \
+         `exc.errno == errno.ENOSPC` distinguishes a full disk from a missing \
+         directory without matching on message text. `strerror` and `filename` stay \
+         `None` on purpose: setting `filename` makes `OSError` reformat `str()` into \
+         `[Errno n] strerror: 'filename'`, discarding this library's message, which \
+         already names the path.",
     )?;
 
     let workbook_validation = new_exception_class(
@@ -152,6 +179,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     // against a module attribute always agrees with what the raise helpers construct.
     let cached = ERRORS.get_or_init(py, || ErrorTypes {
         base,
+        option,
         configuration,
         configuration_type,
         input_data,
@@ -161,6 +189,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
 
     for (name, class) in [
         ("XlsxTurboError", &cached.base),
+        ("OptionError", &cached.option),
         ("ConfigurationError", &cached.configuration),
         ("ConfigurationTypeError", &cached.configuration_type),
         ("InputDataError", &cached.input_data),
@@ -171,6 +200,80 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     Ok(())
+}
+
+/// A filesystem failure: the message a user reads, and the OS's own error number.
+///
+/// The number exists so `FileError` is an honest `OSError`. Before this, `errno` was
+/// permanently `None` and the class was an `OSError` in name only -- a caller who
+/// wanted to tell "no such directory" from "disk full" had to match on message text.
+///
+/// `pub` for the same reason [`crate::convert::ConvertError`] is: it appears in that
+/// enum's signature, and `mod errors` is private, so nothing leaves the crate.
+#[derive(Debug)]
+pub struct FileFailure {
+    /// The user-facing message, already carrying the path.
+    pub message: String,
+    /// POSIX `errno`, where one could be determined. See [`posix_errno`].
+    pub errno: Option<i32>,
+}
+
+impl FileFailure {
+    /// Build one from an `io::Error`, prefixing `context` to its message.
+    pub(crate) fn from_io(context: impl Into<String>, error: &std::io::Error) -> Self {
+        Self {
+            message: format!("{}: {}", context.into(), error),
+            errno: posix_errno(error),
+        }
+    }
+
+    /// Build one for a condition detected before any syscall was made.
+    pub(crate) fn detected(message: impl Into<String>, errno: i32) -> Self {
+        Self {
+            message: message.into(),
+            errno: Some(errno),
+        }
+    }
+}
+
+/// POSIX error numbers this crate reports. Named because the literals are
+/// meaningless on sight, and identical on every platform Python runs on.
+pub(crate) mod errno {
+    /// No such file or directory.
+    pub(crate) const ENOENT: i32 = 2;
+    /// Permission denied.
+    pub(crate) const EACCES: i32 = 13;
+    /// File exists.
+    pub(crate) const EEXIST: i32 = 17;
+    /// Invalid argument.
+    pub(crate) const EINVAL: i32 = 22;
+}
+
+/// Map an `io::Error` to a POSIX `errno`, or `None` when it has no useful one.
+///
+/// **`raw_os_error()` is only an `errno` on Unix.** On Windows it is a Win32 code
+/// from an entirely different numbering -- `ERROR_PATH_NOT_FOUND` is 3, which as a
+/// POSIX number means `ESRCH`, "no such process". Reporting it as `errno` would be
+/// worse than reporting nothing, because it is wrong in a way that looks right.
+///
+/// So Unix passes the number straight through, which is exact and complete, and
+/// Windows classifies through `ErrorKind` -- the portable view the standard library
+/// already computes from the Win32 code. That covers fewer cases, and the ones it
+/// covers are the ones a caller branches on.
+fn posix_errno(error: &std::io::Error) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        if let Some(code) = error.raw_os_error() {
+            return Some(code);
+        }
+    }
+    match error.kind() {
+        std::io::ErrorKind::NotFound => Some(errno::ENOENT),
+        std::io::ErrorKind::PermissionDenied => Some(errno::EACCES),
+        std::io::ErrorKind::AlreadyExists => Some(errno::EEXIST),
+        std::io::ErrorKind::InvalidInput => Some(errno::EINVAL),
+        _ => None,
+    }
 }
 
 /// Build a `PyErr` of the class selected by `pick`.
@@ -200,8 +303,25 @@ pub(crate) fn input_data(message: impl Into<String>) -> PyErr {
 }
 
 /// A filesystem read or write failed. Also an `OSError` and a `ValueError`.
-pub(crate) fn file(message: impl Into<String>) -> PyErr {
-    raise(|t| &t.file, message.into())
+///
+/// `errno` is set when the failure carried one; `strerror` and `filename` stay
+/// `None` deliberately. `OSError.__str__` switches to the `[Errno n] strerror:
+/// 'filename'` form as soon as `filename` is set -- discarding the message
+/// entirely -- and this crate's messages say more than that form can
+/// (`Failed to save workbook to 'out.xlsx': ...`, with the path already in it).
+/// Setting `errno` alone leaves `str()` untouched, which is what makes this
+/// additive.
+pub(crate) fn file(failure: FileFailure) -> PyErr {
+    let error = raise(|t| &t.file, failure.message);
+    let Some(code) = failure.errno else {
+        return error;
+    };
+    Python::attach(|py| {
+        // Best effort: a failure to annotate must not replace the real error
+        // with a reporting one. The message is already complete without it.
+        let _ = error.value(py).setattr("errno", code);
+    });
+    error
 }
 
 /// Well-formed configuration that Excel does not permit. Also a `ValueError`.
