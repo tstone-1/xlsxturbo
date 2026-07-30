@@ -26,6 +26,7 @@ import importlib.util
 import re
 
 import pytest
+import yaml
 
 from tests.helpers import REPO_ROOT, repo_checkout_available
 
@@ -37,6 +38,14 @@ pytestmark = pytest.mark.skipif(
 TESTS_DIR = REPO_ROOT / "tests"
 REQUIREMENTS = REPO_ROOT / "requirements-test.txt"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+# Majors deliberately held back, mapped to the Python 3.x minor their next major
+# requires. The hold is legitimate only while this project supports something
+# older; once it does not, the entry -- and the Dependabot ignore behind it --
+# must go. The test below enforces that in both directions.
+HELD_BACK_MAJORS = {"pytest": 10}
 
 # Import name -> distribution name, for the few that differ. Guarded below
 # against rot: an entry naming something `tests/` no longer imports fails.
@@ -154,3 +163,72 @@ class TestWorkflowsUseTheSharedRequirements:
             assert "requirements-test.txt" in text or ".[dev]" in text, (
                 f"{workflow.name} runs pytest without installing requirements-test.txt"
             )
+
+
+def _oldest_supported_python_minor() -> int:
+    """The 3.x minor named by `requires-python` in pyproject.toml."""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(r'^requires-python\s*=\s*"[^"]*?>=\s*3\.(\d+)', text, re.MULTILINE)
+    # A parser that matches nothing would make every hold below look justified.
+    assert match, "could not read a `>=3.x` floor out of requires-python in pyproject.toml"
+    return int(match.group(1))
+
+
+def _majors_dependabot_ignores() -> set[str]:
+    """Packages whose major updates Dependabot is configured to skip."""
+    config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+    ignored: set[str] = set()
+    for update in config["updates"]:
+        for entry in update.get("ignore", ()):
+            if "version-update:semver-major" in entry.get("update-types", ()):
+                ignored.add(str(entry["dependency-name"]).lower())
+    return ignored
+
+
+class TestDeferredMajorUpgradesExpireWithTheirReason:
+    """A silenced Dependabot PR stops arriving, so its reason needs a deadline.
+
+    `pytest` 9 is held back only because it requires Python 3.10 and this
+    project still supports 3.9. That is a real blocker -- the 3.9 CI jobs cannot
+    resolve pytest 9 at all -- but it is temporary, and the ignore that silences
+    the weekly PR is invisible once it is written. Nothing would ever announce
+    that the hold had become obsolete.
+
+    So the hold is tied to the fact that justifies it: while 3.9 is supported
+    the ignore must be present, and the moment `requires-python` moves past the
+    blocking version the ignore must be gone. Dropping a Python version
+    therefore fails this test until the hold is released with it.
+    """
+
+    def test_each_hold_matches_the_supported_python_range(self) -> None:
+        """Every held-back major is silenced exactly while its reason holds."""
+        oldest = _oldest_supported_python_minor()
+        ignored = _majors_dependabot_ignores()
+        for package, needs_minor in HELD_BACK_MAJORS.items():
+            if oldest < needs_minor:
+                assert package in ignored, (
+                    f"{package}'s next major needs Python 3.{needs_minor} and this "
+                    f"project supports 3.{oldest}, so the weekly PR cannot be merged. "
+                    f"Add a semver-major ignore for {package} to .github/dependabot.yml, "
+                    f"or drop it from HELD_BACK_MAJORS if the hold no longer applies."
+                )
+            else:
+                assert package not in ignored, (
+                    f"this project now requires Python 3.{oldest}, so {package}'s next "
+                    f"major (which needs 3.{needs_minor}) is installable and the hold is "
+                    f"obsolete. Remove the ignore from .github/dependabot.yml, raise the "
+                    f"floor in requirements-test.txt, and drop the entry here."
+                )
+
+    def test_every_hold_names_a_package_the_suite_installs(self) -> None:
+        """The hold list does not outlive the dependency it is about.
+
+        Same rot as DISTRIBUTION_NAMES above: an entry for a package the suite
+        no longer uses reads as an active decision and is nothing of the kind.
+        """
+        declared = _declared_requirements()
+        stale = {package for package in HELD_BACK_MAJORS if package not in declared}
+        assert not stale, (
+            f"HELD_BACK_MAJORS holds back {sorted(stale)}, which requirements-test.txt "
+            f"no longer declares"
+        )

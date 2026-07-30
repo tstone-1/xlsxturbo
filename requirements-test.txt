@@ -15,9 +15,14 @@
 # `tests/test_ci_config.py` fails if a workflow goes back to inlining the list.
 pandas>=2,<3
 polars>=1,<2
-openpyxl>=3,<4
+openpyxl>=3.1.5,<4
+# Held at 8 because pytest 9 requires Python >= 3.10 and this project still
+# supports 3.9. It is not a compatibility problem in the suite -- nothing here
+# uses an API pytest 9 removed -- so the hold ends with 3.9, not with a code
+# change. `.github/dependabot.yml` silences the weekly PR and
+# tests/test_ci_config.py fails if that silence outlives the reason for it.
 pytest>=8,<9
-pyyaml>=6,<7
+pyyaml>=6.0.3,<7
 # tests/test_core.py imports numpy directly. It has always been installed as a
 # pandas dependency, so nothing broke -- but a direct import is a direct
 # dependency, and relying on another package's dependency tree means the day

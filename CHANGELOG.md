@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Test-dependency floors raised to the versions CI already resolves: `openpyxl>=3.1.5`,
+  `pyyaml>=6.0.3`. Test-only, so the published wheel — which has no runtime dependencies —
+  is unaffected.
+
+### Internal
+- `pytest` stays on 8 for now, and the reason is recorded where it can expire. pytest 9
+  requires Python 3.10 while this project supports 3.9, so the 3.9 CI jobs cannot resolve it
+  at all; nothing in the suite is otherwise incompatible with it. The weekly Dependabot PR is
+  silenced by an `ignore` entry — and because a silenced PR simply stops arriving, that entry
+  is tied to `requires-python` by a test, in both directions: while 3.9 is supported the
+  ignore must exist, and the moment the floor moves past 3.10 the ignore must be gone. Raising
+  the Python floor now fails the suite until the hold is released with it.
+
 ## [0.21.0] - 2026-07-30
 
 Four open design questions from the 1.0 review, decided rather than inherited. Every change
