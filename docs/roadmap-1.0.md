@@ -292,6 +292,14 @@ removing one `exclude_docs` entry put the memo into `site/` **and `--strict` sti
 checkout with no untracked files present — which is why `CONTRIBUTING.md` says not to run
 `mkdocs gh-deploy` by hand.
 
+**A new test import cannot be validated locally, and declaring it as a dev dependency does
+not help.** `tests/test_docs_site.py` imports `yaml`; `pyyaml` was added to the `dev`
+extras, the full local suite passed, and three `python-test*` jobs then failed with
+`ModuleNotFoundError`. Those jobs install an explicit minimal package list and never
+install `dev` — so the local `.venv` is a strict superset of what CI has, and any new
+third-party import in `tests/` is invisible until it fails there. Recorded in `AGENTS.md`,
+since the fix is to edit three `pip install` lines that nothing points you at.
+
 **One of the new tests was vacuous and the mutation harness caught it.** The orphan-page
 check asked `git ls-files` which pages exist. Every new page was still uncommitted, so it
 examined almost nothing and passed for the same reason an empty audit passes — the
