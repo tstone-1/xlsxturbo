@@ -14,7 +14,7 @@ body:
     id: slow-version
     attributes:
       label: Slower version
-      placeholder: 0.18.0
+      placeholder: 1.1.0
     validations:
       required: true
 
@@ -22,7 +22,7 @@ body:
     id: fast-version
     attributes:
       label: Faster version it is being compared against
-      placeholder: 0.17.2
+      placeholder: 1.0.0
     validations:
       required: true
 
@@ -35,11 +35,11 @@ body:
         report each round. Medians and spread are more useful than a single number.
       render: text
       placeholder: |
-        round 1: 0.17.2 = 1.92 s   0.18.0 = 2.41 s
-        round 2: 0.17.2 = 1.88 s   0.18.0 = 2.44 s
-        round 3: 0.17.2 = 1.95 s   0.18.0 = 2.38 s
-        round 4: 0.17.2 = 1.90 s   0.18.0 = 2.42 s
-        median:  0.17.2 = 1.91 s   0.18.0 = 2.42 s   (+27%)
+        round 1: 1.0.0 = 1.92 s   1.1.0 = 2.41 s
+        round 2: 1.0.0 = 1.88 s   1.1.0 = 2.44 s
+        round 3: 1.0.0 = 1.95 s   1.1.0 = 2.38 s
+        round 4: 1.0.0 = 1.90 s   1.1.0 = 2.42 s
+        median:  1.0.0 = 1.91 s   1.1.0 = 2.42 s   (+27%)
     validations:
       required: true
 

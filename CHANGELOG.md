@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`SECURITY.md` was three minor versions out of date.** It described the project as
+  pre-1.0, named `0.18.x` as the supported line, and said what would happen "once 1.0 ships"
+  — while the package was at 1.1.0. A support table that names an unsupported version as
+  supported is worse than no table. It now states the 1.1.x line, and says plainly why a
+  1.0.x security release is the one exception (a Python 3.9 interpreter resolves to 1.0.0
+  and cannot take a fix shipped on 1.1).
+- Issue-template version placeholders suggested `0.18.0` and `0.17.2`, including a worked
+  benchmark example comparing two pre-1.0 releases.
+
+### Internal
+- `tests/test_public_docs_are_current.py` — every correctness gate in this repository points
+  inward, at options, types, errors and workflows. None read the public policy documents, so
+  those drifted across five releases without a red build and an external reviewer found them.
+  The new tests tie `SECURITY.md` and the issue templates to the declared version.
+
+  Written twice, which is the part worth recording. The first version matched
+  `placeholder:` line by line and could not fail its own control: a Python-version
+  placeholder counted toward the population, so removing an xlsxturbo one left the count
+  above threshold. It also could not see inside a block scalar, which is exactly where one of
+  the stale references was hiding. Parsing the issue-form YAML and keying on the field `id`
+  fixed both — and only then did the control go red on the mutation written for it.
+
 ## [1.1.0] - 2026-07-30
 
 ### Removed

@@ -2,16 +2,23 @@
 
 ## Supported versions
 
-xlsxturbo is pre-1.0. Security fixes go into the next release from `main`; there are no
-maintained backport branches.
+Security fixes go into the next release from `main`. There are no maintained backport
+branches: a fix ships in a new minor or patch on the current line, never as a patch to an
+older one.
 
 | Version | Supported |
 |---------|-----------|
-| 0.18.x  | Yes       |
-| < 0.18  | No -- upgrade |
+| 1.1.x   | Yes -- the current line |
+| 1.0.x   | Security fixes only, while it remains the newest release installable on a supported Python |
+| < 1.0   | No -- upgrade |
 
-Once 1.0 ships, this table will state a real support window. Until then, "supported"
-means the latest release.
+The 1.0.x row is narrower than it looks and exists for one concrete reason: 1.1.0 dropped
+Python 3.9, so a 3.9 interpreter resolves to 1.0.0 and cannot take a fix shipped on the 1.1
+line. That is the only situation in which a 1.0.x release would be published. If you are on
+a supported Python, upgrade rather than relying on it.
+
+Support tracks the released line, not a calendar window. A single maintainer cannot promise
+a fixed number of months and honour it, so this says what will actually happen instead.
 
 ## Reporting a vulnerability
 

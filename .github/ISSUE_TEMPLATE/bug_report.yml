@@ -40,7 +40,7 @@ body:
     attributes:
       label: xlsxturbo version
       description: "`python -c \"import xlsxturbo; print(xlsxturbo.version())\"`"
-      placeholder: 0.18.0
+      placeholder: 1.1.0
     validations:
       required: true
 
