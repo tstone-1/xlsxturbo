@@ -60,6 +60,7 @@ from typing import Any
 from xlsxturbo.types import (
     CellValueOptions,
     ChartOptions,
+    CheckboxOptions,
     ColumnFormat,
     CommentOptions,
     ConditionalFormat,
@@ -110,8 +111,8 @@ class ExportOptions:
     header: bool = _UNSET
     autofit: bool = _UNSET
     freeze_panes: bool = _UNSET
-    column_widths: dict[Any, Any] | None = _UNSET
-    row_heights: dict[int, float] | None = _UNSET
+    column_widths: dict[int | str, int | float] | None = _UNSET
+    row_heights: dict[int, int | float] | None = _UNSET
 
     # Excel table
     table_style: str | None = _UNSET
@@ -125,15 +126,15 @@ class ExportOptions:
     # Content
     cells: dict[str, str | int | float | bool | CellValueOptions] | None = _UNSET
     formula_columns: dict[str, str] | None = _UNSET
-    merged_ranges: list[Any] | None = _UNSET
-    hyperlinks: list[Any] | None = _UNSET
+    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = _UNSET
+    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = _UNSET
     comments: dict[str, str | CommentOptions] | None = _UNSET
     rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = _UNSET
     validations: dict[str, ValidationOptions] | None = _UNSET
 
     # Media and charts
     images: dict[str, str | ImageOptions] | None = _UNSET
-    checkboxes: dict[str, Any] | None = _UNSET
+    checkboxes: dict[str, bool | CheckboxOptions] | None = _UNSET
     textboxes: dict[str, str | TextboxOptions] | None = _UNSET
     charts: dict[str, ChartOptions] | None = _UNSET
     sparklines: dict[str, SparklineOptions] | None = _UNSET

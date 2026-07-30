@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`ExportOptions` field types now match the signature they mirror.** Five fields disagreed
+  with `df_to_xlsx`. Four had decayed to `Any` inside a container — `column_widths`,
+  `merged_ranges`, `hyperlinks`, `checkboxes` — so a bundle gave an IDE nothing for exactly
+  the options where the shape is hardest to remember, which is most of the reason the class
+  exists.
+
+  The fifth is the one worth naming: `row_heights` was `dict[int, float]` while the function
+  accepts `dict[int, int | float]`. That direction is worse than `Any` — a checker rejected
+  `row_heights={1: 30}`, which works at runtime, so correct code was reported as wrong.
 - **`SECURITY.md` was three minor versions out of date.** It described the project as
   pre-1.0, named `0.18.x` as the supported line, and said what would happen "once 1.0 ships"
   — while the package was at 1.1.0. A support table that names an unsupported version as
@@ -18,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   benchmark example comparing two pre-1.0 releases.
 
 ### Internal
+- `tests/test_options_types_match_the_stub.py` compares every `ExportOptions` field
+  annotation against the corresponding `df_to_xlsx` parameter in `xlsxturbo.pyi`, as source
+  text, in both directions. Two surfaces describing the same options is the arrangement that
+  drifts, and nothing was watching this pair — the field *set* was pinned, the field *types*
+  were not.
 - `tests/test_public_docs_are_current.py` — every correctness gate in this repository points
   inward, at options, types, errors and workflows. None read the public policy documents, so
   those drifted across five releases without a red build and an external reviewer found them.
