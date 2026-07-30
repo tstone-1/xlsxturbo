@@ -1,0 +1,26 @@
+# Third-party packages the test suite imports.
+#
+# One file, four jobs: the three `python-test*` jobs in .github/workflows/ci.yml
+# and the `smoke-test` job in .github/workflows/release.yml. It exists because
+# this list was inlined in all four and drifted: adding `pyyaml` for
+# tests/test_docs_site.py fixed the three copies in ci.yml and missed the fourth,
+# which then failed the v0.19.0 release after every wheel had already built.
+#
+# Note this is NOT the same set as `[project.optional-dependencies] dev` in
+# pyproject.toml. The CI test jobs deliberately install a minimal set rather than
+# the dev extras, so the local `.venv` is a strict superset of CI and a new
+# third-party import in tests/ cannot be validated locally. Adding one means
+# adding it here.
+#
+# `tests/test_ci_config.py` fails if a workflow goes back to inlining the list.
+pandas>=2,<3
+polars>=1,<2
+openpyxl>=3,<4
+pytest>=8,<9
+pyyaml>=6,<7
+# tests/test_core.py imports numpy directly. It has always been installed as a
+# pandas dependency, so nothing broke -- but a direct import is a direct
+# dependency, and relying on another package's dependency tree means the day
+# pandas drops numpy is the day this suite stops collecting. Found by
+# tests/test_ci_config.py on its first run.
+numpy>=1.24

@@ -10,14 +10,23 @@ from __future__ import annotations
 import importlib
 import subprocess
 import sys
-from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.helpers import REPO_ROOT, repo_checkout_available
+
 SCRIPT = REPO_ROOT / "scripts" / "gen_capability_matrix.py"
 DOC = REPO_ROOT / "docs" / "capability-matrix.md"
+
+# This module audits the generator script and its committed output, neither of
+# which ships in the wheel. Outside a checkout there is nothing here to test --
+# see `repo_checkout_available` for why that case is real and not theoretical.
+# Inside a checkout a missing script or page is still a hard failure.
+pytestmark = pytest.mark.skipif(
+    not repo_checkout_available(),
+    reason="capability-matrix tests audit repository files, which a wheel install does not carry",
+)
 
 
 def _load_generator() -> ModuleType:

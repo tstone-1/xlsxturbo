@@ -19,12 +19,28 @@ check that matches nothing reports the same "no problems" as a clean one.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-import yaml
+import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.helpers import REPO_ROOT, repo_checkout_available
+
+# Skip before importing yaml, not after. This module audits repository files, so
+# outside a checkout it has nothing to test -- and `yaml` is a test-only
+# dependency the release smoke-test environment does not install either, so an
+# import above this guard raises ImportError and makes the skip unreachable.
+# That is exactly what happened on the first v0.19.0 release attempt: three
+# platforms reported `ModuleNotFoundError: No module named 'yaml'`, which hid
+# the fact that ten more tests in another module were failing for the same
+# underlying reason.
+if not repo_checkout_available():  # pragma: no cover - only true outside a checkout
+    pytest.skip(
+        "docs-site tests audit repository files, which a wheel install does not carry",
+        allow_module_level=True,
+    )
+
+import yaml  # deliberately below the checkout guard above -- do not hoist
+
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
 DOCS_DIR = REPO_ROOT / "docs"
 GITIGNORE = REPO_ROOT / ".gitignore"

@@ -140,8 +140,11 @@ jobs:
 
       - name: Generate Python SBOM (CycloneDX)
         run: |
-          pip install cyclonedx-bom
-          cyclonedx-py environment --output-format JSON --outfile sbom/python-environment.cdx.json
+          # Pinned: this was unpinned, floated to 7.x, and the v0.19.0 release
+          # failed on `unrecognized arguments: --outfile` -- 7.x renamed it to
+          # `-o/--output-file`. Revisit when 8.x lands.
+          pip install "cyclonedx-bom>=7,<8"
+          cyclonedx-py environment --output-format JSON -o sbom/python-environment.cdx.json
 
       - name: List SBOMs
         run: ls -la sbom/
@@ -180,7 +183,7 @@ jobs:
           path: dist
 
       - name: Install test dependencies
-        run: pip install "pandas>=2,<3" "polars>=1,<2" "openpyxl>=3,<4" "pytest>=8,<9"
+        run: pip install -r requirements-test.txt
 
       - name: Install built wheel
         shell: bash
