@@ -96,7 +96,9 @@ the review.
 - [x] `pip-audit --strict --skip-editable` over the dev and build dependency set
 - [x] CodeQL for **both `python` and `rust`**, as a `fail-fast: false` matrix
 - [x] `actions/dependency-review-action` on pull requests, `fail-on-severity: moderate`
-- [x] Pin every third-party action to a commit SHA with a trailing `# vX` comment
+- [x] Pin every third-party action to a commit SHA with a trailing **full-version**
+      comment (`# v7.0.1`, not `# v7`), plus an `action-pins` CI job that resolves each
+      labelled version to a commit and compares it against the pinned SHA
 - [x] Add an explicit `toolchain: stable` to every `dtolnay/rust-toolchain` use. That
       action takes the toolchain from its **ref name**, which a pinned SHA no longer
       carries — and a SHA from the `nightly` branch would look identical while silently
@@ -267,8 +269,28 @@ than expected rather than a code bug:**
   `maturin develop --release` cleared it. Note `test_version.py`'s drift guard cannot catch
   this — both sides of its comparison come from the same stale build.
 
-All 14 CI jobs green as of `c749d14`, including both CodeQL legs. `Dependency review` only
-runs on pull requests, and was confirmed passing on the two Dependabot PRs.
+All CI jobs green as of `8cc6620`, including both CodeQL legs. `Dependency review` only runs
+on pull requests, and was confirmed passing on the two Dependabot PRs.
+
+**The first Dependabot action bump exposed a hole in the pinning scheme**, and it is the
+kind that never announces itself. Dependabot moved `dependency-review-action` to v5.0.0's
+SHA and left the comment reading `# v4`, because it rewrites that comment only when it
+matches the tag being replaced — and `# v4` was a shorthand, not the `v4.9.0` tag. A correct
+SHA carrying a wrong human label, on a workflow that runs perfectly. Fixed three ways: full
+versions in every comment, a `check-action-pins.sh` CI job comparing label to SHA, and the
+false claim in `dependabot.yml` corrected to what Dependabot actually does.
+
+Two implementation notes for that checker, both learned by getting them wrong first:
+
+- Ask for **the commit at the tag**, not the tags at the SHA. `git/refs/tags` returns the
+  tag *object's* SHA for annotated tags, which makes a correct pin look wrong — it did for
+  `codeql-action`, whose pin is v4.37.4.
+- It **fails when it checks nothing.** An extraction pattern that stops matching after a
+  formatting change would otherwise report success over an empty set.
+
+Dependency bumps merged this cycle: `rust_xlsxwriter` 0.96 → 0.97 (full local gate set green
+on it: fmt, clippy, 80 Rust tests, 375 Python tests) and `dependency-review-action` v4 → v5
+(a node20 → node24 runtime bump, no input changes, nothing blocking it).
 
 ---
 
