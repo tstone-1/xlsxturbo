@@ -217,8 +217,11 @@ pub(crate) fn apply_charts(
                 let series_dict = item.cast::<pyo3::types::PyDict>().map_err(|_| {
                     format!("charts['{}']: series item {} must be a dict", cell_ref, idx)
                 })?;
-                let series_config = pydict_to_hashmap(series_dict)
-                    .map_err(|e| format!("charts['{}']: {}", cell_ref, e))?;
+                let series_config = pydict_to_hashmap(
+                    series_dict,
+                    &format!("charts['{}']: series item {}", cell_ref, idx),
+                )
+                .map_err(|e| e.to_string())?;
                 let series_view = OptionMap::new(
                     py,
                     &series_config,

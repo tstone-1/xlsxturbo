@@ -145,8 +145,9 @@ pub(crate) fn apply_textboxes(
                     let font_dict = bound
                         .cast::<pyo3::types::PyDict>()
                         .map_err(|_| format!("textboxes['{}']: 'font' must be a dict", cell_ref))?;
-                    let font_map = pydict_to_hashmap(font_dict)
-                        .map_err(|e| format!("textboxes['{}']: {}", cell_ref, e))?;
+                    let font_map =
+                        pydict_to_hashmap(font_dict, &format!("textboxes['{}']: 'font'", cell_ref))
+                            .map_err(|e| e.to_string())?;
                     let font = build_shape_font(py, cell_ref, &font_map)?;
                     shape = shape.set_font(&font);
                 }

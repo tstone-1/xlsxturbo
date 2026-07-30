@@ -202,6 +202,180 @@ Chasing either is exactly the "last fraction of precision" D3 declined. The reas
 them both down is that a partial list of known imprecisions reads as a complete one, and the
 next maintainer will trust it.
 
+### D7 — Phase 3's dataclass names collide with 0.19.0's TypedDicts
+
+**Status: open. Blocks Phase 3.** Found before writing any of it, by checking the proposed
+names against the shipped package rather than against the plan.
+
+The external review proposed eight dataclasses. Three of those names shipped publicly in
+`xlsxturbo.types` two hours earlier, in 0.19.0:
+
+| Name | Already in `xlsxturbo.types` as | Phase 3 would make it |
+|------|--------------------------------|-----------------------|
+| `SheetOptions` | the per-sheet options mapping accepted by `dfs_to_xlsx` | a dataclass of the same fields |
+| `ValidationOptions` | **one column's** validation rule config | a group of validation-related kwargs |
+| `ChartOptions` | **one chart's** config | a group of chart-related kwargs |
+
+`ExportOptions`, `LayoutOptions`, `TableOptions`, `FormattingOptions` and `MediaOptions` are
+free. None of the eleven `types.py` names is re-exported at package top level today — they are
+reached as `xlsxturbo.types.X` — which bounds the damage but does not remove it.
+
+The last two rows are the dangerous ones: same name, same package, **different meaning**,
+distinguished only by which module you imported from. Renaming the dataclasses avoids the
+clash and buys a worse problem — two parallel vocabularies for one set of concepts.
+
+**`SheetOptions` is the finding that matters, though.** The TypedDict *is already* the
+structured per-sheet options surface, public and type-checked since 0.19.0. A dataclass with
+the same name and the same fields differs only in construction syntax. That is not obviously
+worth a permanent touchpoint.
+
+**Recommendation — build the entry-point object, not the feature-level ones.** The real
+discoverability problem the review identified is that `df_to_xlsx` takes **27 parameters**;
+it is not that a chart config is hard to spell, since `ChartOptions` is a typed TypedDict with
+per-field documentation already. So:
+
+- Build `ExportOptions` (the ~24 option kwargs, grouped), optionally with
+  `LayoutOptions` / `TableOptions` / `FormattingOptions` / `MediaOptions` as nested fields
+  **only if each earns its keep** — a group of two fields does not.
+- Do **not** build dataclass `ValidationOptions` / `ChartOptions` / `SheetOptions`. They exist,
+  they are typed, and they are the right shape already.
+
+That drops the phase from eight new public names to between one and five, removes all three
+collisions, and makes the eighth-touchpoint tax proportional to what it buys. The coverage
+guard and D4's lower-to-kwargs design are unaffected.
+
+### D8 — What the independent review found
+
+The Phase 2 aftermath said a self-review catches "the whole approach is wrong" badly and that
+an independent read was worth having before 1.0. It was run (`codex exec`, read-only, on
+`833a889..c5e5cd9`, aimed at design rather than line-level defects). Every claim below was
+re-verified here against the built extension before being recorded — an outside reviewer's
+stated confidence is not evidence.
+
+**Verdict: the surface is not safe to freeze unchanged.** Three defects shipped in 0.19.0 and
+four are 1.0 design questions.
+
+**All three defects are fixed in 0.19.1.** The four design questions are open and belong to
+Phase 5. One consistency question surfaced while fixing the first defect and is recorded with
+it below.
+
+#### Defects in 0.19.0
+
+**1. `docs/errors.md` states a guarantee that is false.** It promises *"every failure
+xlsxturbo itself raises is an `XlsxTurboError`"*. It is not. The custom extractors still use
+bare `extract()?` for nested keys and values, so PyO3's plain `TypeError` propagates
+unclassified. Six of six probes escaped: a non-string `column_formats` key
+(`src/extract.rs:369`), a non-string `formula_columns` value (`:422`), a bad `merged_ranges`
+tuple element (`:445`), and the same shape in `comments`, `images`, `cells` and `hyperlinks`.
+
+These are not argument-conversion failures happening before the library sees the value — they
+are validations inside xlsxturbo's own extractors, which is exactly what the sentence claims
+to cover.
+
+**The test that should have caught this structurally cannot.**
+`test_base_catches_everything_the_library_raises` iterates five hand-picked triggers, one per
+exported class. It proves those five reach the hierarchy; it says nothing about the
+population, so it passes at full strength while an entire family escapes. This is the
+"a consistency check proves agreement, never completeness" failure, and it is the single
+strongest argument for having run this review: a self-review shares the author's mental model
+of what the test covers.
+
+**Fixed in 0.19.1.** An `extract_typed!` macro classifies every nested conversion and names
+the option; `pydict_to_hashmap` — the shared inner loop for every nested option dict — took a
+required `context` parameter, because its message previously said a dict key was bad without
+saying which option's. `TestNestedExtractionStaysInTheHierarchy` drives a 16-option probe
+matrix whose population is **derived from `inspect.signature`**, so option N+1 cannot arrive
+with an unclassified extractor and no failing test. Both directions were mutated: reverting one
+site to a bare `extract()?` fails exactly the aimed-at probe, and parking a real extractor
+option in the `SIGNATURE_CONVERTED` exclusion list fails the completeness check — the exclusion
+list cannot swallow a gap.
+
+**A consistency question fell out of it, and is open for 1.0.** `row_heights` and
+`defined_names` are declared in the PyO3 signature as `HashMap<u32, f64>` and
+`HashMap<String, String>`, so the binding converts them and a wrong inner type is a plain
+`TypeError`. `column_widths` is declared `&Bound<PyAny>` and read by an extractor, so the
+identical mistake there is a `ConfigurationTypeError`. Both are correct under the documented
+carve-out, and from Python the three options look the same. Either make the two raw and
+classify them, or accept the split — but decide it rather than inheriting it from which Rust
+type someone reached for. Documented in `docs/errors.md` meanwhile.
+
+**2. `xlsxturbo.types` has no `__all__`.** `PathLike`, `Literal`, `TypedDict` and `Union` are
+all exported by `from xlsxturbo.types import *`. `tests/test_types_module.py` hides them
+behind a hardcoded exclusion list, so it validates a cleaner namespace than users get, and
+every future typing helper needs another exclusion.
+
+**Fixed in 0.19.1.** `__all__` is declared and authoritative, `_runtime_shapes()` reads it, and
+three new guards check it from both sides plus one that actually executes
+`from xlsxturbo.types import *` — because a test that re-derives the answer from `__all__`
+would pass even if the module stopped declaring one. Mutated both ways: dropping a name and
+adding a nonexistent one each fail the aimed-at test.
+
+**3. Every `TypedDict` is `total=False`, including where the field is mandatory.** Verified by
+running them: `images={'D1': {}}`, `cells={'D1': {}}`, `charts={'D2': {}}`,
+`sparklines={'D2': {}}` and `comments={'D1': {}}` each raise `ConfigurationError: missing
+'...' key` at runtime, while a type checker accepts all five. The static contract is weaker
+than the real one, in the module whose entire purpose is to state the real one. Python 3.9 does
+not force this — a required base `TypedDict` plus a `total=False` subclass works there. Worth
+fixing **before** Phase 3, or the dataclass and dict APIs disagree about what is required from
+their first release together.
+
+**Fixed in 0.19.1**, for nine shapes, each verified on a real 3.9 interpreter rather than
+assumed. Each requirement is asserted twice — that the shape marks the field required, *and*
+that the runtime rejects a dict without it — since either half alone is a contract with one
+side missing. A partition check forces every shape into exactly one of "has required fields",
+"fully optional", or the single documented conditional case (`ChartSeriesOptions`, whose
+one-of a `TypedDict` cannot express), so a new shape cannot default to unexamined.
+
+Pyright then found **four existing tests** passing dicts that omit a now-required key. All four
+were tests deliberately checking the missing-key error, so each got a marker saying so — which
+is the fix working, not collateral damage.
+
+#### 1.0 design questions
+
+**4. There is no class meaning "any bad option."** `ConfigurationError` (values) and
+`ConfigurationTypeError` (types) are siblings — confirmed, `issubclass` is `False` — so a
+caller wanting all configuration problems must catch a tuple, and `XlsxTurboError` also
+catches file and input-data failures. This is the real category flaw.
+
+The review proposed renaming `ConfigurationError` to `ConfigurationValueError` beneath a new
+abstract parent. **A purely additive fix is available and better:** introduce
+`OptionError(XlsxTurboError)` and reparent both classes under it. No rename, no removal, every
+existing `except` clause keeps working, and `except OptionError` becomes possible.
+
+**5. `FileError(XlsxTurboError, OSError, ValueError)`.** The layout hazard is theoretical here
+— it works, because `ValueError` adds no fields to `OSError`'s struct. The demonstrated
+oddity is `OSError`'s argument handling, which `FileError` fully inherits: `FileError('boom')`
+has `errno is None`, while `FileError(2, 'x')` sets `errno` and changes `str()` to
+`[Errno 2] x`. So the class is nominally an `OSError` with its structured fields permanently
+unset, and `tests/test_errors.py` pins that as a contract.
+
+The 1.0 question is whether `ValueError` stays. Dropping it and populating `errno`/`filename`
+from the underlying OS error is the cleaner class — and it breaks `except ValueError` on file
+failures, which D6 chose deliberately. That is a real trade, to be taken knowingly at 1.0
+rather than inherited by default.
+
+**6. `From<String> -> ConvertError::Config` is the wrong default.** D6 already records two
+misclassifications caused by it and files them under "last fraction of precision". The review
+sharpens this usefully: the problem is not the two known instances but the *direction* — every
+new untagged failure silently becomes `ConfigurationError`, i.e. blamed on the user, unless an
+author remembers an invisible rule. **Make the fallback `Internal` instead**, so an omission
+fails visibly rather than masquerading as bad configuration. That is cheap and does not require
+the error-enum refactor D3 declined.
+
+**7. The Python 3.9 annotation split.** `typing.get_type_hints()` on these classes fails on
+3.9 and works from 3.10 — documented in D1 and accepted. The review's point is that freezing
+*documented broken introspection* at 1.0 buys nothing, and frameworks do introspect
+annotations. Either drop 3.9 and use PEP 604 throughout, or keep 3.9 and spell field unions
+with `Union[...]` too. Decide at 1.0; it resolves itself when 3.9 support ends.
+
+#### Corrected
+
+The review also reported that `tests/test_errors.py` claims picklability without testing it.
+The test-quality half is right — it asserts `__module__`/`__qualname__`, which is a proxy, and
+`EXPECTED_BASES` is a third hand-written copy of the hierarchy. But **pickling does work**:
+round-tripping `FileError`, `ConfigurationError` and `ConfigurationTypeError` each returns the
+same class object. A nitpick, not a defect.
+
 ---
 
 ## Phase 0 — Public-project hygiene
@@ -574,11 +748,31 @@ it are worth carrying forward rather than leaving in a gitignored report:
   reviewer share an author. Worth an independent read (`codex exec`, or a human) before 1.0
   freezes this surface.
 
-Still open:
+**0.19.0 is published** — PyPI has 5 wheels and an sdist, the GitHub release carries 8 assets,
+and a disposable-environment install confirms the version, all six exception classes,
+`xlsxturbo.types` importable from the wheel, a real export, and `FileError` catchable as both
+`OSError` and `ValueError`.
 
-- **Tag and publish 0.19.0.** `git tag v0.19.0 && git push origin v0.19.0` triggers the
-  release workflow through to PyPI. Not done — that step is irreversible, since a version
-  number cannot be reused.
+The release failed on its first tag, and that failure is the durable part:
+
+- **The reported symptom was not the problem.** Three smoke-test jobs reported
+  `ModuleNotFoundError: No module named 'yaml'`, which reads as one missing dependency. It was
+  not: reproducing the job locally showed **16** failures, not 3. `tests/test_docs_site.py` and
+  `tests/test_capability_matrix.py` audit *repository* files, and the smoke test runs
+  `pytest tests/` against an installed wheel from outside the checkout, with only `tests/`
+  copied. Both modules were added after v0.18.0, so this was the first release that ran them.
+  Installing pyyaml alone would have converted three import errors into sixteen assertion
+  failures. Both now skip via `tests.helpers.repo_checkout_available()`; inside a checkout a
+  missing file stays a hard failure.
+- **The dependency list had drifted three times, so it became a file and a test.** It was
+  inlined in four jobs; the fix after the first drift was a comment saying "remember the other
+  copies", which did not survive a day. It is now `requirements-test.txt` plus
+  `tests/test_ci_config.py`, which fails if a `tests/` import is undeclared or a workflow
+  re-inlines the list. That guard's **first run found a third instance**: `tests/test_core.py`
+  imports `numpy`, declared nowhere, working only because pandas pulls it in.
+- **Moving the tag was safe and worth doing.** PyPI returned 404 and `gh release view` said
+  "release not found", so nothing had been published and no version number was burned. Verify
+  both before moving a release tag; if either says otherwise, bump instead.
 
 Three things worth knowing before Phase 3 starts, none of them obvious from the diff:
 
@@ -602,8 +796,13 @@ The expensive item, deliberately fourth. It is the review's top recommendation a
 highest-cost one; sequencing it here means it lands on top of the type and exception surfaces
 it wants to reference.
 
+**Blocked on a naming decision that 0.19.0 created — see D7.** Three of the eight names below
+are already public as TypedDicts in `xlsxturbo.types`, and two of those three mean something
+different there. Resolve D7 before writing `options.py`.
+
 - [ ] `python/xlsxturbo/options.py`: `ExportOptions`, `SheetOptions`, `LayoutOptions`,
       `TableOptions`, `FormattingOptions`, `ValidationOptions`, `MediaOptions`, `ChartOptions`
+      — as listed by the external review, and **not the list to build**; D7 has the revision
 - [ ] Lower to kwargs in Python (see D4)
 - [ ] Keep every existing kwarg supported indefinitely, documented as the low-level form.
       **No deprecation in this phase**

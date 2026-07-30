@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-07-30
+
+Three defects in 0.19.0's new public surface, all found by an independent review of that
+release and all verified against the built extension before being fixed.
+
+### Fixed
+- **`docs/errors.md`'s central promise is now true.** It states that every failure xlsxturbo
+  itself raises is an `XlsxTurboError`. It was not: the option extractors used a bare
+  conversion for *nested* keys and values, so PyO3's own `TypeError` escaped the hierarchy
+  unclassified. A non-string `column_formats` key, a non-string `formula_columns` value, a
+  bad `merged_ranges` tuple element, and the same shape in `comments`, `images`, `cells`,
+  `hyperlinks`, `validations`, `rich_text`, `charts`, `sparklines`, `checkboxes`, `textboxes`
+  and `column_widths` all escaped. Every one is now a `ConfigurationTypeError`.
+
+  These errors also name the option they came from. A wrong key type inside any nested option
+  dict previously reported that a dict key was bad without saying which option's — nearly
+  useless on a call passing a dozen options.
+
+  Argument conversion done by the binding *before* xlsxturbo sees a value still raises a plain
+  `TypeError`, unchanged and documented. That now includes `row_heights` and `defined_names`,
+  which are typed in the signature rather than read by an extractor.
+- **`xlsxturbo.types` declares `__all__`.** `from xlsxturbo.types import *` previously also
+  bound `PathLike`, `Literal`, `TypedDict` and `Union`. It now binds exactly the 20 documented
+  shapes.
+- **Required option fields are marked required.** Nine shapes documented a field as "required
+  at runtime but TypedDict doesn't enforce this" — `CommentOptions.text`, `ImageOptions.path`,
+  `ChartOptions.type`, `SparklineOptions.range`, `CellValueOptions.value`,
+  `ValidationOptions.type`, `ConditionalFormat.type`, `CheckboxOptions.checked` and
+  `TextboxOptions.text`. A type checker accepted `images={"D1": {}}`, which raises at runtime.
+  It can be enforced on Python 3.9, so it now is, and each requirement is tested against the
+  error the runtime actually raises. `ChartSeriesOptions` keeps a documented one-of
+  requirement across `values_range`/`values`/`data_range` that a `TypedDict` cannot express.
+
+  **This can newly fail type checking on code that was always broken at runtime.** No runtime
+  behaviour changed.
+
 ## [0.19.0] - 2026-07-30
 
 ### Added

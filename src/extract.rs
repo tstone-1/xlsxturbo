@@ -35,6 +35,39 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "cells",
 ];
 
+/// Helper: extract a nested option value, classifying a conversion failure as a
+/// `ConfigurationTypeError` that names the option and what was expected.
+///
+/// Exists because a bare `extract()?` propagates PyO3's own `TypeError`, which is
+/// *outside* the public hierarchy. Until 0.19.1 that made `docs/errors.md`'s
+/// promise — "every failure xlsxturbo itself raises is an `XlsxTurboError`" —
+/// false for every nested key and value: a non-string `column_formats` key, a
+/// non-string `formula_columns` value, a bad `merged_ranges` tuple element and
+/// several more all escaped unclassified.
+///
+/// The reachability tests in `tests/test_errors.py` could not catch that. They
+/// exercise one trigger per exported class, which proves those five paths reach
+/// the hierarchy and says nothing about the population of extraction paths — a
+/// consistency check proves agreement, never completeness. The guard that does
+/// catch it is `TestNestedExtractionStaysInTheHierarchy` in that same file,
+/// which drives a negative-input matrix across every extractor family.
+///
+/// Takes `$value` by reference so a temporary (`item.get_item(0)?`) lives to the
+/// end of the macro's block and the caller's binding is not moved.
+macro_rules! extract_typed {
+    ($value:expr, $type_desc:literal, $($context:tt)+) => {{
+        let value = &$value;
+        value.extract().map_err(|_| {
+            crate::errors::configuration_type(format!(
+                "{}: expected {}, got {}",
+                format!($($context)+),
+                $type_desc,
+                pytype_name(value)
+            ))
+        })?
+    }};
+}
+
 /// Helper: extract an optional scalar field from a Python dict into a SheetConfig field.
 ///
 /// `$opts` is a `Bound<PyAny>`, so `.get_item($key)` goes through the mapping
@@ -173,7 +206,11 @@ pub(crate) fn extract_sheet_info<'py>(
     }
 
     let df = sheet_tuple.get_item(0)?;
-    let sheet_name: String = sheet_tuple.get_item(1)?.extract()?;
+    let sheet_name: String = extract_typed!(
+        sheet_tuple.get_item(1)?,
+        "a string",
+        "sheet tuple element 1 (sheet name)"
+    );
 
     let config = if len >= 3 {
         let opts = sheet_tuple.get_item(2)?;
@@ -207,7 +244,11 @@ pub(crate) fn extract_sheet_info<'py>(
             if val.is_none() {
                 config.table_style = Some(None);
             } else {
-                config.table_style = Some(Some(val.extract()?));
+                config.table_style = Some(Some(extract_typed!(
+                    val,
+                    "a string",
+                    "sheet option 'table_style'"
+                )));
             }
         }
 
@@ -347,7 +388,8 @@ pub(crate) fn extract_column_widths(
                 pytype_name(&k)
             )));
         };
-        widths.insert(key_str, v.extract()?);
+        let width = extract_typed!(v, "a number", "column_widths['{}']", key_str);
+        widths.insert(key_str, width);
     }
     Ok(widths)
 }
@@ -356,7 +398,7 @@ pub(crate) fn extract_column_widths(
 pub(crate) fn extract_header_format(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
 ) -> PyResult<HashMap<String, Py<PyAny>>> {
-    pydict_to_hashmap(py_dict)
+    pydict_to_hashmap(py_dict, "header_format")
 }
 
 /// Extract column_formats from Python dict (pattern -> format dict)
@@ -366,7 +408,11 @@ pub(crate) fn extract_column_formats(
 ) -> PyResult<IndexMap<String, HashMap<String, Py<PyAny>>>> {
     let mut col_fmts: IndexMap<String, HashMap<String, Py<PyAny>>> = IndexMap::new();
     for (pattern, fmt_dict) in py_dict.iter() {
-        let pattern_str: String = pattern.extract()?;
+        let pattern_str: String = extract_typed!(
+            pattern,
+            "a string column name or pattern",
+            "column_formats key"
+        );
         let inner_dict = fmt_dict.cast::<pyo3::types::PyDict>().map_err(|_| {
             crate::errors::configuration_type(format!(
                 "column_formats['{}']: expected dict, got {}",
@@ -374,7 +420,8 @@ pub(crate) fn extract_column_formats(
                 pytype_name(&fmt_dict)
             ))
         })?;
-        col_fmts.insert(pattern_str, pydict_to_hashmap(inner_dict)?);
+        let inner = pydict_to_hashmap(inner_dict, &format!("column_formats['{}']", pattern_str))?;
+        col_fmts.insert(pattern_str, inner);
     }
     Ok(col_fmts)
 }
@@ -386,7 +433,11 @@ pub(crate) fn extract_conditional_formats(
 ) -> PyResult<ConditionalFormatConfigs> {
     let mut cond_fmts: ConditionalFormatConfigs = IndexMap::new();
     for (col_name, fmt_value) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
+        let col_str: String = extract_typed!(
+            col_name,
+            "a string column name or pattern",
+            "conditional_formats key"
+        );
         // Accept either a single dict or a list of dicts
         if let Ok(list) = fmt_value.cast::<pyo3::types::PyList>() {
             let mut configs = Vec::new();
@@ -397,11 +448,16 @@ pub(crate) fn extract_conditional_formats(
                         col_str, i
                     ))
                 })?;
-                configs.push(pydict_to_hashmap(d)?);
+                configs.push(pydict_to_hashmap(
+                    d,
+                    &format!("conditional_formats['{}'] list item {}", col_str, i),
+                )?);
             }
             cond_fmts.insert(col_str, configs);
         } else if let Ok(inner_dict) = fmt_value.cast::<pyo3::types::PyDict>() {
-            cond_fmts.insert(col_str, vec![pydict_to_hashmap(inner_dict)?]);
+            let inner =
+                pydict_to_hashmap(inner_dict, &format!("conditional_formats['{}']", col_str))?;
+            cond_fmts.insert(col_str, vec![inner]);
         } else {
             return Err(crate::errors::configuration_type(format!(
                 "conditional_formats['{}']: value must be a dict or list of dicts",
@@ -419,8 +475,14 @@ pub(crate) fn extract_formula_columns(
 ) -> PyResult<IndexMap<String, String>> {
     let mut formulas: IndexMap<String, String> = IndexMap::new();
     for (col_name, formula) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
-        let formula_str: String = formula.extract()?;
+        let col_str: String =
+            extract_typed!(col_name, "a string column name", "formula_columns key");
+        let formula_str: String = extract_typed!(
+            formula,
+            "a string formula template",
+            "formula_columns['{}']",
+            col_str
+        );
         formulas.insert(col_str, formula_str);
     }
     Ok(formulas)
@@ -442,8 +504,17 @@ pub(crate) fn extract_merged_ranges(
             )));
         }
 
-        let range_str: String = item.get_item(0)?.extract()?;
-        let text: String = item.get_item(1)?.extract()?;
+        let range_str: String = extract_typed!(
+            item.get_item(0)?,
+            "a string range",
+            "merged_ranges tuple element 0"
+        );
+        let text: String = extract_typed!(
+            item.get_item(1)?,
+            "a string",
+            "merged_ranges['{}'] element 1 (text)",
+            range_str
+        );
 
         let format_dict = if tuple_len >= 3 {
             let fmt_item = item.get_item(2)?;
@@ -455,7 +526,10 @@ pub(crate) fn extract_merged_ranges(
                         pytype_name(&fmt_item)
                     ))
                 })?;
-                Some(pydict_to_hashmap(dict)?)
+                Some(pydict_to_hashmap(
+                    dict,
+                    &format!("merged_ranges['{}'] format", range_str),
+                )?)
             } else {
                 None
             }
@@ -485,13 +559,27 @@ pub(crate) fn extract_hyperlinks(
             )));
         }
 
-        let cell_ref: String = item.get_item(0)?.extract()?;
-        let url: String = item.get_item(1)?.extract()?;
+        let cell_ref: String = extract_typed!(
+            item.get_item(0)?,
+            "a string cell reference",
+            "hyperlinks tuple element 0"
+        );
+        let url: String = extract_typed!(
+            item.get_item(1)?,
+            "a string URL",
+            "hyperlinks['{}'] element 1 (url)",
+            cell_ref
+        );
 
         let display_text = if tuple_len >= 3 {
             let text_item = item.get_item(2)?;
             if !text_item.is_none() {
-                Some(text_item.extract()?)
+                Some(extract_typed!(
+                    text_item,
+                    "a string",
+                    "hyperlinks['{}'] element 2 (display text)",
+                    cell_ref
+                ))
             } else {
                 None
             }
@@ -514,7 +602,7 @@ pub(crate) fn extract_comments(
     let mut comments: IndexMap<String, Comment> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "comments key");
 
         // Check if value is a dict or simple string
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
@@ -524,18 +612,22 @@ pub(crate) fn extract_comments(
                 &["text", "author"],
             )?;
             // Dict format: {'text': '...', 'author': '...'}
-            let text: String = inner_dict
-                .get_item("text")?
-                .ok_or_else(|| {
-                    crate::errors::configuration(format!(
-                        "Comment at '{}' missing 'text' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
+            let text_item = inner_dict.get_item("text")?.ok_or_else(|| {
+                crate::errors::configuration(format!(
+                    "Comment at '{}' missing 'text' key",
+                    cell_str
+                ))
+            })?;
+            let text: String =
+                extract_typed!(text_item, "a string", "comments['{}']['text']", cell_str);
             let author: Option<String> = if let Ok(Some(a)) = inner_dict.get_item("author") {
                 if !a.is_none() {
-                    Some(a.extract()?)
+                    Some(extract_typed!(
+                        a,
+                        "a string",
+                        "comments['{}']['author']",
+                        cell_str
+                    ))
                 } else {
                     None
                 }
@@ -545,7 +637,12 @@ pub(crate) fn extract_comments(
             comments.insert(cell_str, (text, author));
         } else {
             // Simple string format
-            let text: String = value.extract()?;
+            let text: String = extract_typed!(
+                value,
+                "a string or a dict with a 'text' key",
+                "comments['{}']",
+                cell_str
+            );
             comments.insert(cell_str, (text, None));
         }
     }
@@ -559,9 +656,14 @@ pub(crate) fn extract_validations(
 ) -> PyResult<IndexMap<String, ValidationConfig>> {
     let mut validations: IndexMap<String, ValidationConfig> = IndexMap::new();
     for (col_name, config) in py_dict.iter() {
-        let col_str: String = col_name.extract()?;
+        let col_str: String = extract_typed!(
+            col_name,
+            "a string column name or pattern",
+            "validations key"
+        );
         if let Ok(inner_dict) = config.cast::<pyo3::types::PyDict>() {
-            validations.insert(col_str, pydict_to_hashmap(inner_dict)?);
+            let inner = pydict_to_hashmap(inner_dict, &format!("validations['{}']", col_str))?;
+            validations.insert(col_str, inner);
         } else {
             return Err(crate::errors::configuration_type(format!(
                 "validations['{}']: expected dict, got {}",
@@ -581,7 +683,7 @@ pub(crate) fn extract_rich_text(
     let mut rich_text: IndexMap<String, Vec<RichTextSegment>> = IndexMap::new();
 
     for (cell_ref, segments_list) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "rich_text key");
         let mut segments: Vec<RichTextSegment> = Vec::new();
 
         if let Ok(list) = segments_list.cast::<pyo3::types::PyList>() {
@@ -596,7 +698,13 @@ pub(crate) fn extract_rich_text(
                             tuple.len()
                         )));
                     }
-                    let text: String = tuple.get_item(0)?.extract()?;
+                    let text: String = extract_typed!(
+                        tuple.get_item(0)?,
+                        "a string",
+                        "rich_text['{}']: segment {} text",
+                        cell_str,
+                        idx
+                    );
                     let fmt_item = tuple.get_item(1)?;
                     let format_dict = if fmt_item.is_none() {
                         None
@@ -609,7 +717,10 @@ pub(crate) fn extract_rich_text(
                                 pytype_name(&fmt_item)
                             ))
                         })?;
-                        Some(pydict_to_hashmap(dict)?)
+                        Some(pydict_to_hashmap(
+                            dict,
+                            &format!("rich_text['{}'] segment {} format", cell_str, idx),
+                        )?)
                     };
                     segments.push((text, format_dict));
                 } else if let Ok(text) = item.extract::<String>() {
@@ -648,21 +759,17 @@ pub(crate) fn extract_images(
     let mut images: IndexMap<String, ImageConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "images key");
 
         // Check if value is a dict or simple string (path)
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
             // Dict format: {'path': '...', 'scale_width': 0.5, ...}
-            let path: String = inner_dict
-                .get_item("path")?
-                .ok_or_else(|| {
-                    crate::errors::configuration(format!(
-                        "Image at '{}' missing 'path' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
-            let mut options = pydict_to_hashmap(inner_dict)?;
+            let path_item = inner_dict.get_item("path")?.ok_or_else(|| {
+                crate::errors::configuration(format!("Image at '{}' missing 'path' key", cell_str))
+            })?;
+            let path: String =
+                extract_typed!(path_item, "a string path", "images['{}']['path']", cell_str);
+            let mut options = pydict_to_hashmap(inner_dict, &format!("images['{}']", cell_str))?;
             options.remove("path");
             images.insert(
                 cell_str,
@@ -673,7 +780,12 @@ pub(crate) fn extract_images(
             );
         } else {
             // Simple string format (just path)
-            let path: String = value.extract()?;
+            let path: String = extract_typed!(
+                value,
+                "a string path or a dict with a 'path' key",
+                "images['{}']",
+                cell_str
+            );
             images.insert(
                 cell_str,
                 ImageConfig {
@@ -697,7 +809,8 @@ pub(crate) fn extract_checkboxes(
     let mut checkboxes: IndexMap<String, CheckboxConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String =
+            extract_typed!(cell_ref, "a string cell reference", "checkboxes key");
 
         // Dict form must be tried before bool, since a dict would extract as False for bool otherwise.
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
@@ -706,20 +819,26 @@ pub(crate) fn extract_checkboxes(
                 &format!("checkboxes['{}']", cell_str),
                 &["checked", "format"],
             )?;
-            let checked: bool = inner_dict
-                .get_item("checked")?
-                .ok_or_else(|| {
-                    crate::errors::configuration(format!(
-                        "checkboxes['{}'] dict missing 'checked' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
+            let checked_item = inner_dict.get_item("checked")?.ok_or_else(|| {
+                crate::errors::configuration(format!(
+                    "checkboxes['{}'] dict missing 'checked' key",
+                    cell_str
+                ))
+            })?;
+            let checked: bool = extract_typed!(
+                checked_item,
+                "a bool",
+                "checkboxes['{}']['checked']",
+                cell_str
+            );
             let format_dict = if let Ok(Some(fmt)) = inner_dict.get_item("format") {
                 if fmt.is_none() {
                     None
                 } else if let Ok(d) = fmt.cast::<pyo3::types::PyDict>() {
-                    Some(pydict_to_hashmap(d)?)
+                    Some(pydict_to_hashmap(
+                        d,
+                        &format!("checkboxes['{}']['format']", cell_str),
+                    )?)
                 } else {
                     return Err(crate::errors::configuration_type(format!(
                         "checkboxes['{}']: 'format' must be a dict",
@@ -767,19 +886,18 @@ pub(crate) fn extract_textboxes(
     let mut textboxes: IndexMap<String, TextboxConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "textboxes key");
 
         if let Ok(inner_dict) = value.cast::<pyo3::types::PyDict>() {
-            let text: String = inner_dict
-                .get_item("text")?
-                .ok_or_else(|| {
-                    crate::errors::configuration(format!(
-                        "textboxes['{}'] dict missing 'text' key",
-                        cell_str
-                    ))
-                })?
-                .extract()?;
-            let mut options = pydict_to_hashmap(inner_dict)?;
+            let text_item = inner_dict.get_item("text")?.ok_or_else(|| {
+                crate::errors::configuration(format!(
+                    "textboxes['{}'] dict missing 'text' key",
+                    cell_str
+                ))
+            })?;
+            let text: String =
+                extract_typed!(text_item, "a string", "textboxes['{}']['text']", cell_str);
+            let mut options = pydict_to_hashmap(inner_dict, &format!("textboxes['{}']", cell_str))?;
             options.remove("text");
             textboxes.insert(
                 cell_str,
@@ -816,7 +934,7 @@ pub(crate) fn extract_charts(
     let mut charts: IndexMap<String, ChartConfig> = IndexMap::new();
 
     for (cell_ref, value) in py_dict.iter() {
-        let cell_str: String = cell_ref.extract()?;
+        let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "charts key");
         let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
             crate::errors::configuration_type(format!(
                 "charts['{}']: expected dict, got {}",
@@ -824,7 +942,8 @@ pub(crate) fn extract_charts(
                 pytype_name(&value)
             ))
         })?;
-        charts.insert(cell_str, pydict_to_hashmap(inner_dict)?);
+        let inner = pydict_to_hashmap(inner_dict, &format!("charts['{}']", cell_str))?;
+        charts.insert(cell_str, inner);
     }
 
     Ok(charts)
@@ -838,7 +957,8 @@ pub(crate) fn extract_sparklines(
     let mut sparklines: IndexMap<String, SparklineConfig> = IndexMap::new();
 
     for (loc_ref, value) in py_dict.iter() {
-        let loc_str: String = loc_ref.extract()?;
+        let loc_str: String =
+            extract_typed!(loc_ref, "a string location reference", "sparklines key");
         let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
             crate::errors::configuration_type(format!(
                 "sparklines['{}']: expected dict, got {}",
@@ -846,7 +966,8 @@ pub(crate) fn extract_sparklines(
                 pytype_name(&value)
             ))
         })?;
-        sparklines.insert(loc_str, pydict_to_hashmap(inner_dict)?);
+        let inner = pydict_to_hashmap(inner_dict, &format!("sparklines['{}']", loc_str))?;
+        sparklines.insert(loc_str, inner);
     }
 
     Ok(sparklines)
@@ -856,7 +977,7 @@ pub(crate) fn extract_sparklines(
 pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Vec<CellWrite>> {
     let mut cells = Vec::new();
     for (key, value) in py_dict.iter() {
-        let cell_ref: String = key.extract()?;
+        let cell_ref: String = extract_typed!(key, "a string cell reference", "cells key");
         let (row, col) = parse_cell_ref(&cell_ref).map_err(crate::errors::configuration)?;
 
         // Check if value is a dict with "value" and optional formatting keys

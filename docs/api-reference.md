@@ -74,7 +74,15 @@ xlsxturbo.df_to_xlsx(df, "out.xlsx", header_format=header, charts={"D2": chart})
 
 The module imports nothing beyond the standard library, so importing it costs nothing and
 works before the extension is built. `SheetOptions` is the shape of a `dfs_to_xlsx`
-per-sheet dict, and `PathArg` is what the path parameters accept.
+per-sheet dict, and `PathArg` is what the path parameters accept. `__all__` lists exactly
+these 20 names, so `import *` brings in the shapes and nothing else.
+
+**Fields the library requires are marked required.** `ImageOptions` needs `path`,
+`ChartOptions` needs `type`, `SparklineOptions` needs `range`, and so on — so a checker
+rejects `images={"D1": {}}` rather than leaving it for the runtime. `ChartSeriesOptions` is
+the exception: it requires one of `values_range` / `values` / `data_range`, which a
+`TypedDict` cannot express, so all three stay optional to the checker and the runtime
+enforces the choice.
 
 Field annotations are unevaluated strings, which is what lets a field be written `bool | str`
 while the package still supports Python 3.9. The one consequence:

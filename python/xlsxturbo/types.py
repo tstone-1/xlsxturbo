@@ -29,6 +29,36 @@ from __future__ import annotations
 from os import PathLike
 from typing import Literal, TypedDict, Union
 
+# The public surface, authoritative rather than descriptive: `from
+# xlsxturbo.types import *` gives exactly these names. Without it the four
+# imports above were re-exported too, and `tests/test_types_module.py` had to
+# hide them behind a hardcoded exclusion list -- which meant the test validated
+# a cleaner namespace than users actually received, and every future typing
+# helper would have needed another exclusion. That test now compares against
+# this list.
+__all__ = [
+    "CellValueOptions",
+    "ChartOptions",
+    "ChartSeriesOptions",
+    "ChartType",
+    "CheckboxOptions",
+    "ColumnFormat",
+    "CommentOptions",
+    "ConditionalFormat",
+    "DateOrder",
+    "HeaderFormat",
+    "ImageOptions",
+    "PathArg",
+    "RichTextFormat",
+    "SheetOptions",
+    "SparklineOptions",
+    "SparklineType",
+    "TextboxFont",
+    "TextboxOptions",
+    "ValidationOptions",
+    "ValidationType",
+]
+
 PathArg = Union[str, PathLike[str]]
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
@@ -43,6 +73,7 @@ ValidationType = Literal[
     "textlength",
     "length",
 ]
+
 
 class HeaderFormat(TypedDict, total=False):
     """Header cell formatting options. All fields are optional."""
@@ -62,6 +93,7 @@ class HeaderFormat(TypedDict, total=False):
     align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
     wrap_text: bool  # Enable text wrapping within cell
+
 
 class ColumnFormat(TypedDict, total=False):
     """Column cell formatting options. All fields are optional."""
@@ -83,7 +115,19 @@ class ColumnFormat(TypedDict, total=False):
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
     wrap_text: bool  # Enable text wrapping within cell
 
-class ConditionalFormat(TypedDict, total=False):
+
+class _ConditionalRequired(TypedDict):
+    """Required field of :class:`ConditionalFormat`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
+    """
+
+    type: str  # Required: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'
+
+
+class ConditionalFormat(_ConditionalRequired, total=False):
     """Conditional formatting options for a column. 'type' is required.
 
     Supported types:
@@ -97,7 +141,6 @@ class ConditionalFormat(TypedDict, total=False):
     Multiple rules on one column: pass a list of ConditionalFormat dicts instead of a single dict.
     """
 
-    type: str  # Required: '2_color_scale', '3_color_scale', 'data_bar', 'icon_set', 'cell'
     # For color scales:
     min_color: str  # '#RRGGBB' or named color for minimum value
     mid_color: str  # '#RRGGBB' or named color for midpoint (3_color_scale only)
@@ -118,16 +161,36 @@ class ConditionalFormat(TypedDict, total=False):
     max_value: int | float  # Max value for 'between'/'not_between' criteria
     format: ColumnFormat  # Format to apply when condition is met (bg_color, font_color, bold, etc.)
 
-class CommentOptions(TypedDict, total=False):
-    """Options for cell comments/notes.
 
-    Note: 'text' is required at runtime but TypedDict doesn't enforce this.
+class _CommentRequired(TypedDict):
+    """Required field of :class:`CommentOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
-    text: str  # The comment text (required at runtime)
+    text: str  # The comment text (required)
+
+
+class CommentOptions(_CommentRequired, total=False):
+    """Options for cell comments/notes."""
+
     author: str  # Author name for the comment
 
-class ValidationOptions(TypedDict, total=False):
+
+class _ValidationRequired(TypedDict):
+    """Required field of :class:`ValidationOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
+    """
+
+    type: ValidationType  # Required: validation type
+
+
+class ValidationOptions(_ValidationRequired, total=False):
     """Data validation options for a column. 'type' is required.
 
     Supported types:
@@ -141,7 +204,6 @@ class ValidationOptions(TypedDict, total=False):
     naming the field and range, instead of a misleading generic type error.
     """
 
-    type: ValidationType  # Required: validation type
     values: list[str]  # For 'list' type: dropdown options
     min: int | float  # For number/text_length: minimum value (defaults to type minimum if omitted)
     max: int | float  # For number/text_length: maximum value (defaults to type maximum if omitted)
@@ -149,6 +211,7 @@ class ValidationOptions(TypedDict, total=False):
     input_message: str  # Message for input prompt
     error_title: str  # Title for error message
     error_message: str  # Message for error message
+
 
 class RichTextFormat(TypedDict, total=False):
     """Format options for a rich text segment.
@@ -165,25 +228,42 @@ class RichTextFormat(TypedDict, total=False):
     font_size: float
     underline: bool
 
-class ImageOptions(TypedDict, total=False):
-    """Options for embedding images.
 
-    Note: 'path' is required at runtime but TypedDict doesn't enforce this.
+class _ImageRequired(TypedDict):
+    """Required field of :class:`ImageOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
-    path: str  # Path to image file - PNG, JPEG, GIF, BMP (required at runtime)
+    path: str  # Path to image file - PNG, JPEG, GIF, BMP (required)
+
+
+class ImageOptions(_ImageRequired, total=False):
+    """Options for embedding images."""
+
     scale_width: float  # Scale factor for width (1.0 = original)
     scale_height: float  # Scale factor for height (1.0 = original)
     alt_text: str  # Alternative text for accessibility
 
-class CheckboxOptions(TypedDict, total=False):
-    """Options for interactive cell checkboxes.
 
-    Note: 'checked' is required at runtime but TypedDict doesn't enforce this.
+class _CheckboxRequired(TypedDict):
+    """Required field of :class:`CheckboxOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
     checked: bool  # Initial state: True (checked) or False (unchecked) - required at runtime
+
+
+class CheckboxOptions(_CheckboxRequired, total=False):
+    """Options for interactive cell checkboxes."""
+
     format: ColumnFormat  # Optional cell format (bg_color, font_color, border, etc.)
+
 
 class TextboxFont(TypedDict, total=False):
     """Font options for textbox text."""
@@ -195,13 +275,21 @@ class TextboxFont(TypedDict, total=False):
     underline: bool
     color: str  # '#RRGGBB' or named color
 
-class TextboxOptions(TypedDict, total=False):
-    """Options for floating text shapes (textboxes).
 
-    Note: 'text' is required at runtime but TypedDict doesn't enforce this.
+class _TextboxRequired(TypedDict):
+    """Required field of :class:`TextboxOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
-    text: str  # Textbox contents (required at runtime)
+    text: str  # Textbox contents (required)
+
+
+class TextboxOptions(_TextboxRequired, total=False):
+    """Options for floating text shapes (textboxes)."""
+
     width: int  # Width in pixels (default 192)
     height: int  # Height in pixels (default 120)
     x_offset: int  # Horizontal offset within the anchor cell (pixels)
@@ -226,6 +314,7 @@ ChartType = Literal[
     "scatter_smooth", "scatter_smooth_with_markers", "stock",
 ]
 
+
 class ChartSeriesOptions(TypedDict, total=False):
     """Options for one chart data series.
 
@@ -242,7 +331,19 @@ class ChartSeriesOptions(TypedDict, total=False):
     name: str  # Series name or formula reference
     series_name: str  # Alias for name
 
-class ChartOptions(TypedDict, total=False):
+
+class _ChartRequired(TypedDict):
+    """Required field of :class:`ChartOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
+    """
+
+    type: ChartType
+
+
+class ChartOptions(_ChartRequired, total=False):
     """Options for native Excel charts.
 
     Note: 'type' and either 'data_range'/'values_range' or 'series' are required at runtime.
@@ -252,7 +353,6 @@ class ChartOptions(TypedDict, total=False):
     used as the fallback for series that don't specify their own.
     """
 
-    type: ChartType
     data_range: str  # Alias for values_range
     values_range: str  # Excel range for a single series values
     values: str  # Alias for values_range
@@ -275,13 +375,21 @@ class ChartOptions(TypedDict, total=False):
 
 SparklineType = Literal["line", "column", "col", "win_loss", "win_lose", "winloss", "winlose"]
 
-class SparklineOptions(TypedDict, total=False):
-    """Options for a native Excel sparkline (mini in-cell chart).
 
-    Note: 'range' is required at runtime but TypedDict doesn't enforce this.
+class _SparklineRequired(TypedDict):
+    """Required field of :class:`SparklineOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
     range: str  # Sheet-qualified data range, e.g. 'Sheet1!A2:C2' (1D) or 'Sheet1!A2:C10' (2D, group)
+
+
+class SparklineOptions(_SparklineRequired, total=False):
+    """Options for a native Excel sparkline (mini in-cell chart)."""
+
     type: SparklineType  # Sparkline style (default 'line')
     style: int  # Built-in sparkline style id, 1-36
     markers: bool  # Show a marker on every data point
@@ -308,17 +416,26 @@ class SparklineOptions(TypedDict, total=False):
     custom_min: float  # Custom vertical-axis minimum
     date_range: str  # Sheet-qualified range supplying X-axis date values, e.g. 'Sheet1!A1:C1'
 
-class CellValueOptions(TypedDict, total=False):
-    """Options for a cell write with custom formatting.
 
-    Note: 'value' is required at runtime but TypedDict doesn't enforce this.
+class _CellValueRequired(TypedDict):
+    """Required field of :class:`CellValueOptions`; see there for the full shape.
+
+    Split out so the requirement is expressed in the type rather than only
+    in prose. A single ``total=False`` TypedDict would let a checker accept
+    an empty dict, which the runtime rejects.
     """
 
-    value: str | int | float | bool  # The cell value (required at runtime)
+    value: str | int | float | bool  # The cell value (required)
+
+
+class CellValueOptions(_CellValueRequired, total=False):
+    """Options for a cell write with custom formatting."""
+
     num_format: str  # Excel number format string, e.g. '@' for text, '0.00' for decimal
     align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
     wrap_text: bool  # Enable text wrapping within cell
+
 
 class SheetOptions(TypedDict, total=False):
     """Per-sheet options for dfs_to_xlsx. All fields are optional.

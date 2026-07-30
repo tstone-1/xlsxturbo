@@ -24,8 +24,11 @@ classes and not the ones originally planned.
 
 from __future__ import annotations
 
+import inspect
+import pickle
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -253,10 +256,25 @@ class TestExports:
 
     @pytest.mark.parametrize("name", sorted(EXPECTED_BASES))
     def test_module_and_qualname_read_as_the_public_path(self, name: str) -> None:
-        """``repr()`` names the path users import from, and pickling follows it."""
+        """``repr()`` names the path users import from."""
         cls = getattr(xlsxturbo, name)
         assert cls.__module__ == "xlsxturbo"
         assert cls.__qualname__ == name
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED_BASES))
+    def test_instances_survive_a_pickle_round_trip(self, name: str) -> None:
+        """The class pickles to the same class object, not a lookalike.
+
+        ``__module__``/``__qualname__`` above are the *mechanism* that makes this
+        work, not the property itself -- asserting the mechanism and calling it
+        picklability is asserting a proxy. Pickle is how an exception crosses a
+        process boundary, so a multiprocessing pool that re-raises one depends on
+        this exactly.
+        """
+        cls = getattr(xlsxturbo, name)
+        restored = pickle.loads(pickle.dumps(cls("boom")))  # noqa: S301 - our own object
+        assert type(restored) is cls
+        assert str(restored) == "boom"
 
     @pytest.mark.parametrize("name", sorted(EXPECTED_BASES))
     def test_class_has_a_docstring(self, name: str) -> None:
@@ -264,3 +282,132 @@ class TestExports:
         doc = getattr(xlsxturbo, name).__doc__
         assert doc is not None
         assert len(doc.strip()) > 40
+
+
+# Options whose value the PyO3 signature converts before xlsxturbo sees it. A
+# wrong type here raises a plain `TypeError` by design -- see "What is not in the
+# hierarchy" in docs/errors.md. They are listed so the completeness check below
+# can subtract them and still fail on a genuinely new option.
+SIGNATURE_CONVERTED = frozenset(
+    {
+        "df",
+        "output_path",
+        "sheet_name",
+        "header",
+        "autofit",
+        "table_style",
+        "freeze_panes",
+        "table_name",
+        "constant_memory",
+        # Typed in the PyO3 signature as `HashMap<u32, f64>` / `HashMap<String,
+        # String>`, so a wrong inner type is converted -- and rejected -- by the
+        # binding before any xlsxturbo code runs. Verified, not assumed: they are
+        # the only two dict options declared with a concrete Rust map type rather
+        # than `&Bound<PyAny>`, which is why `column_widths` classifies and
+        # `row_heights` does not. Recorded as a 1.0 consistency question in
+        # docs/roadmap-1.0.md D8.
+        "row_heights",
+        "defined_names",
+    }
+)
+
+# One deliberately wrong nested key or value per extractor family. Each must
+# surface inside the hierarchy rather than as PyO3's own TypeError.
+NESTED_TYPE_PROBES: dict[str, dict[str, Any]] = {
+    "column_widths": {"column_widths": {0: "wide"}},
+    "header_format": {"header_format": {1: True}},
+    "column_formats": {"column_formats": {1: {"bold": True}}},
+    "conditional_formats": {"conditional_formats": {1: {"type": "data_bar"}}},
+    "formula_columns": {"formula_columns": {"X": 123}},
+    "merged_ranges": {"merged_ranges": [(1, "text")]},
+    "hyperlinks": {"hyperlinks": [(1, "https://example.com")]},
+    "comments": {"comments": {"D1": 123}},
+    "validations": {"validations": {1: {"type": "list"}}},
+    "rich_text": {"rich_text": {1: ["a"]}},
+    "images": {"images": {"D1": 123}},
+    "checkboxes": {"checkboxes": {"D1": {"checked": "yes"}}},
+    "textboxes": {"textboxes": {"D1": {"text": 123}}},
+    "charts": {"charts": {1: {"type": "bar"}}},
+    "sparklines": {"sparklines": {1: {"range": "Sheet1!A1:B1"}}},
+    "cells": {"cells": {1: "value"}},
+}
+
+
+class TestNestedExtractionStaysInTheHierarchy:
+    """A wrong type *inside* an option must still be an ``XlsxTurboError``.
+
+    This is the guard that ``TestReachability`` structurally cannot be. That
+    class exercises one trigger per exported class, which proves those five
+    paths reach the hierarchy and says nothing about the population of
+    extraction paths -- a consistency check proves agreement, never
+    completeness.
+
+    It was not hypothetical. Until 0.19.1 every custom extractor used a bare
+    ``extract()?`` for its nested keys and values, so a non-string
+    ``column_formats`` key, a non-string ``formula_columns`` value, a bad
+    ``merged_ranges`` tuple element and a dozen more all propagated PyO3's plain
+    ``TypeError``. ``docs/errors.md`` promised the opposite, and the whole suite
+    was green. An independent review found it; nothing in this file could have.
+    """
+
+    @pytest.mark.parametrize("option", sorted(NESTED_TYPE_PROBES))
+    def test_bad_nested_value_raises_in_the_hierarchy(
+        self, option: str, tmp_path: Path
+    ) -> None:
+        """Each extractor family classifies its own nested conversion failures.
+
+        Args:
+            option: The option under test, used to look up its probe.
+            tmp_path: pytest's per-test temporary directory.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError):
+            xlsxturbo.df_to_xlsx(
+                _frame(), tmp_path / "out.xlsx", **NESTED_TYPE_PROBES[option]
+            )
+
+    @pytest.mark.parametrize("option", sorted(NESTED_TYPE_PROBES))
+    def test_the_message_names_the_option(self, option: str, tmp_path: Path) -> None:
+        """The error says which option was wrong, not just that something was.
+
+        A classified error carrying PyO3's bare ``'int' object cannot be
+        converted`` would pass the test above while telling the caller nothing
+        about where to look.
+
+        Args:
+            option: The option under test, used to look up its probe.
+            tmp_path: pytest's per-test temporary directory.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError) as caught:
+            xlsxturbo.df_to_xlsx(
+                _frame(), tmp_path / "out.xlsx", **NESTED_TYPE_PROBES[option]
+            )
+        assert option in str(caught.value), (
+            f"message does not name the option: {caught.value!r}"
+        )
+
+    def test_every_non_scalar_option_has_a_probe(self) -> None:
+        """The probe table covers every option that has its own extractor.
+
+        Derived from the real signature rather than hand-listed, so option N+1
+        cannot be added with an unclassified extractor and no failing test. The
+        same mechanism as ``tests/test_option_coverage.py``, aimed at error
+        classification instead of at whether the option does anything.
+        """
+        params = set(inspect.signature(xlsxturbo.df_to_xlsx).parameters)
+        assert len(params) > 20, f"signature introspection returned only {len(params)}"
+
+        needs_probe = params - SIGNATURE_CONVERTED
+        missing = needs_probe - set(NESTED_TYPE_PROBES)
+        extra = set(NESTED_TYPE_PROBES) - needs_probe
+        assert not missing, f"option(s) with no nested-type probe: {sorted(missing)}"
+        assert not extra, f"probes for nonexistent option(s): {sorted(extra)}"
+
+    def test_signature_converted_list_is_not_hiding_a_real_extractor(self) -> None:
+        """Every name excused above really is converted by the binding.
+
+        Otherwise the exclusion list becomes a place to quietly park an option
+        that fails the guard -- the exclusion file that swallows its own
+        coverage gap.
+        """
+        stale = SIGNATURE_CONVERTED - set(inspect.signature(xlsxturbo.df_to_xlsx).parameters)
+        assert not stale, f"SIGNATURE_CONVERTED names non-parameters: {sorted(stale)}"

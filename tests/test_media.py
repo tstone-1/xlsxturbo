@@ -107,7 +107,8 @@ class TestCheckboxes:
         """Dict form without 'checked' raises a clear error."""
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(ValueError, match="checked"):
-            xlsxturbo.df_to_xlsx(df, tmp_xlsx, checkboxes={"B2": {"format": {"bold": True}}})
+            # Deliberately omits the required 'checked' key.
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, checkboxes={"B2": {"format": {"bold": True}}})  # type: ignore[dict-item]
 
     def test_checkbox_format_not_dict_raises(self, tmp_xlsx: str) -> None:
         """'format' field present but not a dict raises TypeError."""
@@ -235,7 +236,8 @@ class TestTextboxes:
         """Dict form without 'text' raises ValueError."""
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(ValueError, match="text"):
-            xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"width": 100}})
+            # Deliberately omits the required 'text' key.
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"width": 100}})  # type: ignore[dict-item]
 
     def test_textbox_unknown_option_raises(self, tmp_xlsx: str) -> None:
         """Unknown top-level option raises with the list of valid keys."""
@@ -621,7 +623,7 @@ class TestSparklines:
         """Omitting the required 'range' key raises a clear error."""
         df = pd.DataFrame({"A": [1, 2]})
         # Intentionally invalid: no 'range' key.
-        sparklines: dict[str, SparklineOptions] = {"D2": {"type": "line"}}
+        sparklines: dict[str, SparklineOptions] = {"D2": {"type": "line"}}  # type: ignore[typeddict-item]
         with pytest.raises(ValueError, match="missing required 'range'"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, sparklines=sparklines)
 

@@ -83,6 +83,13 @@ Argument conversion performed by the Python/Rust binding before xlsxturbo sees t
 raises a plain `TypeError`. Passing a non-string where the signature requires `str` is the
 usual way to hit this. Everything xlsxturbo itself validates is in the hierarchy.
 
+Two dict-valued options fall on the binding's side of that line, which is worth knowing
+because their neighbours do not: **`row_heights` and `defined_names`** are typed in the
+signature, so a wrong inner type is rejected by the conversion and arrives as a plain
+`TypeError`. `column_widths` looks identical from Python and is read by an extractor, so the
+same mistake there is a `ConfigurationTypeError`. Catch `(XlsxTurboError, TypeError)` if you
+need to treat all option-type mistakes alike.
+
 A dtype problem discovered deep in the write pipeline surfaces as `ConfigurationError`
 rather than `InputDataError`: the pipeline reports it as a message without a category, and
 inventing one from the text would be guesswork. `InputDataError` covers the case that

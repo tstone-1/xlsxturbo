@@ -64,7 +64,10 @@ class TestCells:
         """Dict-style cell without 'value' key raises ValueError."""
         df = pd.DataFrame({"a": [1]})
         with pytest.raises(ValueError, match="missing 'value' key"):
-            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells={"A1": {"num_format": "@"}})
+            # Deliberately omits the required 'value' key -- that is what is
+            # under test. The shape marks it required since 0.19.1, so the
+            # checker is right and the ignore is the assertion.
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells={"A1": {"num_format": "@"}})  # type: ignore[dict-item]
 
     def test_cell_dict_unknown_key_raises(self, tmp_xlsx: str) -> None:
         """A stray key like 'bold' (a format concern, not a cell key) is rejected, not silently dropped."""

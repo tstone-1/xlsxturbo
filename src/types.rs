@@ -323,9 +323,9 @@ impl<'py, 'm> OptionMap<'py, 'm> {
                 pytype_name(bound)
             )
         })?;
-        pydict_to_hashmap(inner)
+        pydict_to_hashmap(inner, &format!("{}: '{}'", self.context, key))
             .map(Some)
-            .map_err(|e| format!("{}: {}", self.context, e))
+            .map_err(|e| e.to_string())
     }
 
     /// Reject any key not in `allowed`, using this view's context and no
@@ -401,12 +401,28 @@ pub(crate) fn reject_unknown_keys<'a, I: IntoIterator<Item = &'a str>>(
 /// Lives in the lowest layer so both `extract` (Python→Rust) and `apply`
 /// (which re-reads nested option dicts at write time) can use it without
 /// `apply` depending back up on `extract`.
+/// `context` names the option being read (`"header_format"`,
+/// `"charts['D2']"`), and is required rather than optional because this is the
+/// shared inner loop for *every* nested option dict: without it a wrong key type
+/// produces a message that says a dict key was bad but not which option's, which
+/// is nearly useless on a call passing a dozen options.
 pub(crate) fn pydict_to_hashmap(
     dict: &Bound<'_, pyo3::types::PyDict>,
+    context: &str,
 ) -> PyResult<HashMap<String, Py<PyAny>>> {
     let mut map = HashMap::new();
     for (k, v) in dict.iter() {
-        map.insert(k.extract()?, v.unbind());
+        // Classified rather than a bare `extract()?`: a non-string key here was
+        // the single most reachable way to escape the public exception
+        // hierarchy before 0.19.1.
+        let key: String = k.extract().map_err(|_| {
+            crate::errors::configuration_type(format!(
+                "{}: option dict keys must be strings, got {}",
+                context,
+                pytype_name(&k)
+            ))
+        })?;
+        map.insert(key, v.unbind());
     }
     Ok(map)
 }
