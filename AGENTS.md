@@ -207,6 +207,41 @@ makes proptest save a seed for every property that correctly went red, describin
 longer exists. Promote a genuine failing case to a named test instead — it states the input
 where a reader can see it.
 
+## The stability promise (1.0.0+)
+
+`docs/stability.md` is the public contract: which names are covered, what counts as a
+breaking change, the deprecation terms, and the supported Python and platform matrices.
+Read it before changing anything user-visible — from 1.0.0 a rename, a narrowed option
+value, or a different exception for an existing failure is a 2.0.0 event, not a minor.
+
+It is **checked, not maintained by hand**. `tests/test_stability_policy.py` compares the
+page against the four places that actually decide its contents — the trove classifiers and
+`requires-python` in `pyproject.toml`, the interpreter matrix in `ci.yml`, the wheel targets
+in `release.yml`, and `xlsxturbo.__all__` — in both directions. Consequences:
+
+- **A new exported name fails the suite until the page names it.** That is deliberate: the
+  page is the list of things that cannot be removed before 2.0.0, so adding to it should be a
+  decision rather than a side effect. New *options* need nothing here; the 7-touchpoint
+  checklist already covers those.
+- **Adding a Python version to the CI matrix fails until the classifier and the page agree.**
+  A version tested and nowhere else declared reads as a widened promise when it is only a
+  widened test.
+- **Dropping Python 3.9 will fail two suites at once** — this one, and the Dependabot hold in
+  `tests/test_ci_config.py` that exists only because pytest 9 needs 3.10. Both are the point:
+  the work that must accompany the drop is spelled out in the failure messages.
+
+### Output is deterministic except for one part, and the obvious measurement says otherwise
+
+Two exports of the same frame differ, because `docProps/core.xml` records the creation time.
+Every other member of the archive is byte-identical across runs.
+
+The trap is that writing both files and hashing them reports **identical** — that timestamp
+has one-second resolution, so a loop with no delay measures nothing. It was one step from
+being published as "output is byte-reproducible".
+`TestGeneratedFileDeterminism` waits 1.1 s deliberately, and mutating that wait to zero turns
+both of its tests red, which is what proves neither passes by accident. If a reproducible-build
+option is ever added, it belongs here as an opt-in — and it is additive, so it needs no major.
+
 ## Benchmarks
 
 - The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the tables on `docs/performance.md` and `--json` for machine-readable output. (Those tables were on the README until the 0.19.0 documentation split; the README now carries only the headline ratios in prose.)

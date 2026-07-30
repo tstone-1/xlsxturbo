@@ -4,8 +4,11 @@ xlsxturbo's niche is **high-performance DataFrame and CSV export** with a simple
 Most commonly requested Excel features are now implemented; this roadmap tracks the remaining
 feature gaps first, then records completed milestones.
 
-For the engineering work between here and a 1.0 release - API shape, exception model,
-documentation, supply-chain checks - see [docs/roadmap-1.0.md](docs/roadmap-1.0.md).
+The engineering work that led to 1.0 - API shape, exception model, documentation,
+supply-chain checks - is complete; [docs/roadmap-1.0.md](docs/roadmap-1.0.md) records what
+was decided and why. What 1.0 promises about the API from here on is in
+[docs/stability.md](docs/stability.md): additive changes land in minors, and anything that
+would change an existing result waits for 2.0.
 
 ## Remaining
 

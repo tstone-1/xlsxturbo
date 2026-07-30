@@ -5,15 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-07-30
+
+**No behaviour changes. Nothing was renamed, removed, or reinterpreted.** 1.0.0 is the
+version that stops reserving the right to.
+
+The API surface was fixed over 0.19.0–0.21.0 — the exception hierarchy, the runtime option
+types, `ExportOptions`, and the four design questions the review left open. What remained
+for 1.0 was to say what is now promised, and to make the promise checkable rather than
+aspirational.
+
+### Added
+- **[Stability and support](https://tstone-1.github.io/xlsxturbo/stability/)** — the public
+  surface named exhaustively, what does and does not count as a breaking change, the
+  deprecation policy, the supported Python and platform matrices, and what is guaranteed
+  about generated files.
+
+  The policy in one line: everything reachable from `import xlsxturbo` without a leading
+  underscore is covered and will not break before 2.0.0. Anything removed gets a
+  `DeprecationWarning` naming its replacement and its removal version, shipped for at least
+  one minor release and at least six months, with removal only in a major.
+
+  The page is checked against what it describes rather than kept in step by hand
+  (`tests/test_stability_policy.py`): the Python table against the trove classifiers and the
+  CI matrix in both directions, `requires-python` against the oldest row, the platform table
+  against the wheel targets in `release.yml`, and the surface table against `__all__`.
+
+- **A measured statement about output determinism.** Two exports of identical data are *not*
+  identical files — `docProps/core.xml` records the creation time — but every other member
+  of the archive is byte-identical across runs. Both halves are pinned by tests, so the
+  caveat cannot rot into folklore and a future non-determinism elsewhere cannot hide behind
+  it.
+
+  Worth stating because the obvious measurement lies: two exports written inside the same
+  clock second hash identically, which reads as full reproducibility. The test waits out a
+  second deliberately.
 
 ### Changed
+- `Development Status :: 5 - Production/Stable` is now accurate. It has been declared since
+  well before this release while the version stayed on `0.x`, which is a contradiction —
+  a 0.x version reserves the right to break anything.
 - Test-dependency floors raised to the versions CI already resolves: `openpyxl>=3.1.5`,
   `pyyaml>=6.0.3`. Test-only, so the published wheel — which has no runtime dependencies —
   is unaffected.
 
+### Known and unchanged
+- **Python 3.9 is supported and is past upstream end of life** (October 2025). Dropping it is
+  a user-visible change, not a tidy-up, so it will happen in a future minor release and be
+  announced. The cost of keeping it is visible in `python/xlsxturbo/types.py`, which writes
+  `Union[str, int]` where every other supported version would allow `str | int`.
+- **`NaN`, `Inf` and `Infinity` as text still empty their cell.** Documented in
+  [DataFrame export](https://tstone-1.github.io/xlsxturbo/dataframe-export/) since 0.21.0 and
+  deliberately not changed here: fixing it means changing the value written for an input that
+  already works, which is exactly what this release promises not to do outside a major.
+
 ### Internal
-- `pytest` stays on 8 for now, and the reason is recorded where it can expire. pytest 9
+- `pytest` stays on 8, and the reason is recorded where it can expire. pytest 9
   requires Python 3.10 while this project supports 3.9, so the 3.9 CI jobs cannot resolve it
   at all; nothing in the suite is otherwise incompatible with it. The weekly Dependabot PR is
   silenced by an `ignore` entry — and because a silenced PR simply stops arriving, that entry

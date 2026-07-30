@@ -77,5 +77,6 @@ nav:
       - API reference: api-reference.md
       - Capability matrix: capability-matrix.md
       - Errors and warnings: errors.md
+      - Stability and support: stability.md
       - Compatibility: compatibility.md
       - Performance: performance.md

@@ -1,5 +1,12 @@
 # Roadmap to 1.0
 
+**Complete. All six phases landed; 1.0.0 shipped 2026-07-30.** This file is kept as the
+record of what was decided and why — the D-numbered decisions and the per-phase "what this
+found" sections are the parts worth reading later. It is no longer a plan, and nothing here
+is waiting to be done: what survived unbuilt is in [Deferred, with
+reasons](#deferred-with-reasons), and the promises 1.0 now carries are in
+[`docs/stability.md`](stability.md).
+
 Working plan for the 0.19 -> 1.0 cycle. `ROADMAP.md` tracks *feature* gaps; this file
 tracks the engineering work needed to turn a feature-complete library into a stable,
 adoptable public package.
@@ -8,11 +15,10 @@ Written 2026-07-30 following an independent external project review. The review'
 were fact-checked against the tree at `v0.18.0`; the baseline it produced is recorded under
 [Baseline](#baseline-verified-2026-07-30) so a later session can tell what has since moved.
 
-**How to use this file:** phases are ordered and mostly sequential — Phase 3 depends on
-Phase 2's public surface, and Phase 5 must follow both. Phases 0 and 1 are independent of
-everything and can be done in any order. Tick boxes as work lands. Each phase ends at the
-gate set in `AGENTS.md`; phases 2 and 3 additionally get a deep diff review before the next
-phase builds on them.
+**How the phases were run:** ordered and mostly sequential — Phase 3 depended on Phase 2's
+public surface, and Phase 5 followed both. Phases 0 and 1 were independent of everything.
+Each phase ended at the gate set in `AGENTS.md`; phases 2 and 3 additionally got a deep diff
+review before the next phase built on them.
 
 ---
 
@@ -990,15 +996,50 @@ existing unit test covered one.
 Only after phases 2 and 3, since both change the public surface. Shipping 1.0 and then
 wanting an options object is the wrong order.
 
-- [ ] Stable names and semantics for `df_to_xlsx`, `dfs_to_xlsx`, `csv_to_xlsx`
-- [ ] Published deprecation policy
-- [ ] Supported Python and platform matrix stated as a promise (already `>=3.9`, abi3,
-      `manylinux_2_28` — this is documentation, not change)
-- [ ] Stable exception model (delivered in Phase 2)
-- [ ] Stable interpretation of existing options
-- [ ] Documented compatibility guarantees for generated XLSX files
-- [ ] `Development Status :: 5 - Production/Stable` becomes accurate rather than
-      contradictory — it currently sits on an 0.x version
+Landed as **1.0.0**, entirely in `docs/stability.md` plus the guard suite behind it. No
+source behaviour changed — which was the point: by the time this phase started, phases 2-4
+had already moved everything that needed moving, so 1.0 is the release that stops reserving
+the right to move it again.
+
+- [x] Stable names and semantics for `df_to_xlsx`, `dfs_to_xlsx`, `csv_to_xlsx`
+- [x] Published deprecation policy — replacement first, `DeprecationWarning` naming the
+      replacement *and* the removal version, at least one minor release and at least six
+      months, removal only in a major
+- [x] Supported Python and platform matrix stated as a promise
+- [x] Stable exception model (delivered in Phase 2)
+- [x] Stable interpretation of existing options
+- [x] Documented compatibility guarantees for generated XLSX files
+- [x] `Development Status :: 5 - Production/Stable` becomes accurate rather than
+      contradictory
+
+### What this phase found
+
+- **The obvious reproducibility measurement lies.** Writing the same frame twice and hashing
+  both files reported *identical* — which would have gone onto the page as "output is
+  byte-reproducible". It was an artifact of both writes landing in the same clock second;
+  `docProps/core.xml` embeds the creation time to one-second resolution. Separated by 1.1 s
+  the files differ, and exactly one archive member is responsible. Both facts are now pinned
+  by tests, and the test that proves non-reproducibility is the control for the one that
+  names the single differing part.
+
+  Same family as the timing traps in the personal agent-memory policy: nothing in the first
+  measurement read a clock, and the whole result was about one.
+
+- **A support matrix is four separate sources pretending to be one.** `requires-python`, the
+  trove classifiers, the `ci.yml` interpreter matrix, and the `release.yml` wheel matrix all
+  say part of it, none of them says all of it, and each moves without anyone opening the
+  page. `tests/test_stability_policy.py` compares the page against all four, in both
+  directions — a version added to CI and nowhere else fails just as loudly as a row deleted
+  from the page.
+
+- **Documenting the promise surfaced that 3.9 is already past EOL** (October 2025, and it is
+  now July 2026). Kept deliberately — `requires-python = ">=3.9"` is a promise, and dropping
+  it is a user-visible change rather than a tidy-up — but the page now states when it goes
+  and why, instead of leaving a reader to infer that 3.9 is current.
+
+- **Nine mutations, nine caught**, including the one that matters most: removing the
+  deliberate 1.1 s wait turns the determinism pair red, so neither of them can be passing by
+  accident.
 
 ---
 

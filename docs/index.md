@@ -59,6 +59,8 @@ tool.
 - **[API reference](api-reference.md)** -- the three entry points and their arguments.
 - **[Errors](errors.md)** -- what gets raised, when, and what the file on disk looks
   like afterwards.
+- **[Stability and support](stability.md)** -- what 1.0 promises, how long a deprecation
+  lasts, and which Pythons and platforms are supported.
 - **[Compatibility](compatibility.md)** -- known limitations and the parts of Excel's
   data model that do not round-trip.
 
