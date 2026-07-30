@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.19.0] - Unreleased
+## [0.19.0] - 2026-07-30
 
 ### Added
 - **A typed exception hierarchy, rooted at `xlsxturbo.XlsxTurboError`.** `except XlsxTurboError` now catches everything this library raises and nothing else. Five subclasses say what kind of failure it was: `ConfigurationError` (an option or argument *value*), `ConfigurationTypeError` (wrong *type*), `InputDataError` (not a supported DataFrame), `FileError` (a filesystem read or write), and `WorkbookValidationError` (well-formed configuration that Excel forbids). All six are exported from the package and covered by the type stubs.

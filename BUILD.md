@@ -45,35 +45,56 @@ cargo fmt
 
 ## Pre-Push Checklist
 
-Before pushing to main or creating a PR, verify all checks pass locally:
+Before pushing to main or creating a PR, verify all checks pass locally.
+
+**These commands are copied verbatim from `.github/workflows/ci.yml`, flags included.**
+That matters: a checklist that is weaker than the gate it exists to satisfy buys false
+confidence, and the failure then arrives after the push. If you change a gate in CI,
+change it here in the same commit. Two of these once drifted — `ruff` was missing
+`scripts` and `cargo test` was missing `--release` — so a clean local run could still
+go red on `main`.
 
 ```bash
-# 1. Format check
+# 1. Format check                                    (CI: lint)
 cargo fmt --check
 
-# 2. Linter (no warnings)
+# 2. Linter, warnings are errors                     (CI: lint)
 cargo clippy --all-targets -- -D warnings
 
-# 3. Rust tests
-cargo test
+# 3. Rust tests, in release mode as CI runs them     (CI: test)
+cargo test --release
 
-# 4. Build release
-uv run maturin develop --release
+# 4. Build the extension into the venv
+maturin develop --release
 
-# 5. Python tests
-uv run pytest tests/
+# 5. Python tests                                    (CI: python-test*)
+.venv/Scripts/python.exe -m pytest tests/ -q        # Windows
+.venv/bin/python -m pytest tests/ -q                # macOS / Linux
 
-# 6. Ruff (Python lint)
-uv run ruff check python tests benchmarks
+# 6. Ruff — note `scripts`                           (CI: python-lint)
+.venv/bin/ruff check python tests benchmarks scripts
 
-# 7. Bandit (Python security)
-uv run bandit -c pyproject.toml -r python
+# 7. Bandit                                          (CI: python-lint)
+.venv/bin/bandit -c pyproject.toml -r python
 
-# 8. Pyright (Python types)
-uv run pyright
+# 8. Pyright                                         (CI: python-lint)
+.venv/bin/pyright
+
+# 9. Capability matrix is not stale                  (CI: python-test, via pytest)
+python scripts/gen_capability_matrix.py --check
+
+# 10. Supply chain                                   (CI: cargo audit / pip-audit)
+cargo audit --deny warnings
+
+# 11. Action pins still name their SHAs              (CI: Action pin comments)
+bash .github/scripts/check-action-pins.sh
 ```
 
-All 8 steps must succeed before pushing.
+Steps 1-9 must succeed before pushing. Steps 10-11 rarely fail from a code change, but
+they are gates on `main`, so a release must not skip them.
+
+CI additionally runs `pip-audit`, CodeQL for Python and Rust, and — on pull requests
+only — dependency review. Those need no local equivalent.
 
 ## Release Process
 
@@ -100,9 +121,13 @@ Add entry for new version with:
 
 ```bash
 git add Cargo.toml pyproject.toml CHANGELOG.md
-git commit -m "chore: bump version to X.Y.Z"
+git commit -m "Release X.Y.Z: <one-line summary of what ships>"
 git push origin main
 ```
+
+The `Release X.Y.Z: ...` subject is the convention every release since 0.17.0 has used;
+`.github/scripts/release-notes.sh` does not depend on it, but the history is easier to
+read when it is consistent.
 
 ### 4. Check Dependabot PRs
 
