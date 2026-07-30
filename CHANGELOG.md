@@ -52,6 +52,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sparklines. `tests/upstream_defect.rs` asserts the upstream bug is *still present*, so the day
   it is fixed a test fails and the workaround gets removed instead of outliving its reason.
 
+### Documentation
+- **The type-detection table now covers the three places a value changes kind.** All three
+  were already the implemented behaviour and none was written down: any spelling of a
+  non-finite number (`nan`, `+Inf`, `Infinity`, …) becomes an empty cell — which is a trap for
+  a *text* column that happens to contain one of those words; dates before 1900-03-01 are
+  written as text because Excel numbers them a day out; and integers past 2^53 are written as
+  text so no digits are lost.
+
+### Internal
+- **Property tests over `src/parse/`**, stated as round-trips, idempotences and equivalences
+  to the `str` method each parser claims to implement, plus boundary tests for the Excel
+  serial-date scale, the 1900 leap-year gap and the 2^53 integer cutoff.
+
+  Two of the properties did not test what they appeared to, and were only found by mutating
+  the code they guard: one could reach its failing input roughly once in seventy thousand
+  draws, and one never entered the branch it was written for at all. Both generators were
+  narrowed until the interesting case is common. Every property and every boundary test has
+  since been shown to go red under a deliberate single-edit mutation of the code it covers.
+- **`scripts/coverage_report.py`** reports coverage of the Rust core and the Python layer.
+  Deliberately no threshold, in CI or out of it: the useful output is *which* branches are
+  unexercised.
+
+  It measures both test suites together because neither is honest alone. `cargo test` on its
+  own reports 26% and shows every `src/apply/*.rs` file at zero — those paths are covered
+  thoroughly, from Python. The Python suite alone misses the parser branches only the Rust
+  property tests reach.
+
 ## [0.19.1] - 2026-07-30
 
 Three defects in 0.19.0's new public surface, all found by an independent review of that

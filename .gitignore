@@ -41,3 +41,29 @@ agent-memory-audit*.csv
 
 # Built documentation site
 site/
+
+# proptest's saved failure seeds.
+#
+# The usual advice is to commit these. It does not hold here, because this
+# repository mutation-tests its own suite: deliberately breaking `src/parse/`
+# to prove each property can fail makes proptest save a seed for every
+# property that correctly went red, and those seeds describe code that no
+# longer exists. Committed, they would re-run on every build as a permanent
+# record of failures that were the point.
+#
+# A genuine failing case is promoted to a named test instead -- which states
+# the input in the source where it can be read, rather than hiding it behind a
+# hash. `float_literal_words_are_emptied_not_stored` is one such promotion.
+proptest-regressions/
+
+# Coverage output from scripts/coverage_report.py.
+#
+# `*.profraw` is deliberately unanchored: the script directs profiles into
+# target/coverage/, but an instrumented binary run *without* LLVM_PROFILE_FILE
+# set drops one wherever it happens to be working, which is usually the
+# repository root.
+coverage.info
+coverage.txt
+.coverage
+*.profraw
+*.profdata

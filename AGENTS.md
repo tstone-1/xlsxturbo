@@ -139,6 +139,51 @@ Scoping notes (intentional, do not "fix" by widening):
 - When changing the `dev` deps, run `uv lock` (the lockfile is tracked).
 - pandas-stubs rejects `pd.to_datetime([..., pd.NaT, ...])` (mixed `list[str | NaTType]`); use the string `"NaT"` instead — pandas parses it to NaT, keeping test data identical.
 
+## Coverage, and why the obvious command lies
+
+`python scripts/coverage_report.py` (add `--html` for a browsable report). It needs
+`rustup component add llvm-tools-preview`; everything else is in the dev extras.
+
+**Do not use `cargo llvm-cov` on its own to judge this codebase.** It reports **26%** and
+shows every `src/apply/*.rs` file at 0%, which reads as an untested library and is false —
+those paths are covered thoroughly from the Python suite, on the other side of the FFI
+boundary. The script instruments both the Rust test binaries *and* the extension module,
+runs both suites, and merges the profiles: 92.96% of lines in the Rust core, 100% of the
+Python layer. `cargo-llvm-cov` is deliberately not a dependency, because its `report`
+subcommand takes no extra `--object` and the extension module is exactly that; the script
+drives `llvm-profdata`/`llvm-cov` directly instead.
+
+**There is no threshold, in CI or out, and adding one would be a regression.** A coverage
+target gets met by tests that execute lines without asserting anything. The CI job is
+informational: it publishes the table to the job summary and uploads HTML. It can still fail,
+and a failure means the measurement broke, never that coverage fell.
+
+Two filtering caveats the numbers depend on: `tests/`, `src/parse/proptests.rs` and
+`src/parse/boundaries.rs` are excluded as test code, but the `#[cfg(test)] mod tests` *inside*
+`src/parse/mod.rs` cannot be — `llvm-cov` has no sub-file filter — so that row means "the
+tests in this file all ran", not anything about the parsers.
+
+## Property tests
+
+`src/parse/proptests.rs`. Three rules that are the difference between a property and a
+decoration, each learned by writing one that failed the test:
+
+- **State it as an equivalence, not an implication.** "A prefix pattern matches a string
+  starting with the prefix" is satisfied by an implementation matching *everything*. Each
+  pattern property asserts equality with the `str` method it claims to implement.
+- **Check the generator can reach the failing case, by mutating the code.** A property over
+  all printable ASCII stayed green when the guard it defends was deleted: the discriminating
+  inputs were one in seventy thousand of that space. Narrow the alphabet until a near-miss is
+  common, and where the case is nameable, write a second property whose generator *is* the
+  case.
+- **`".*"` generates short strings.** A property asserting a 255-character cap never entered
+  the truncation branch. Anything about a length boundary needs a generator that straddles it.
+
+`proptest-regressions/` is gitignored, against the usual advice: mutation-testing the suite
+makes proptest save a seed for every property that correctly went red, describing code that no
+longer exists. Promote a genuine failing case to a named test instead — it states the input
+where a reader can see it.
+
 ## Benchmarks
 
 - The main comparison suite is `benchmarks/benchmark.py`; use `--markdown` to regenerate the tables on `docs/performance.md` and `--json` for machine-readable output. (Those tables were on the README until the 0.19.0 documentation split; the README now carries only the headline ratios in prose.)

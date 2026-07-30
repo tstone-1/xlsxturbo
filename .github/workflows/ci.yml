@@ -215,6 +215,84 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
+  coverage:
+    name: Coverage (informational)
+    runs-on: ubuntu-latest
+    # This job REPORTS coverage. It must never gate a merge on the number, and
+    # `scripts/coverage_report.py` deliberately passes no `--fail-under`.
+    #
+    # A coverage threshold is a target, and a target gets met -- by tests that
+    # execute lines without asserting anything, which is worse than no data
+    # because it reads as progress. What is worth reading here is *which*
+    # branches are unexercised; the percentage is context for that list.
+    #
+    # The job can still fail, and should: a failure here means the measurement
+    # broke, not that coverage fell.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (no tag)
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-coverage-
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install "maturin>=1.4,<2.0" "coverage[toml]>=7" -r requirements-test.txt
+
+      - name: Measure coverage
+        run: |
+          # `pipefail` is not on by default in an Actions `run:` step, and
+          # `tee` reports its own exit status -- so without this a script that
+          # died mid-run would still mark the step green.
+          set -o pipefail
+          source .venv/bin/activate
+          python scripts/coverage_report.py --html --lcov coverage.info | tee coverage.txt
+
+      - name: Publish the report to the job summary
+        # `always()` so a failed measurement still shows whatever it got to
+        # before it stopped, which is where the diagnosis starts.
+        if: always()
+        run: |
+          {
+            echo '## Coverage (informational — no threshold)'
+            echo
+            echo '```'
+            cat coverage.txt || echo 'the measurement produced no output'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the browsable report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: |
+            target/coverage-html
+            coverage.info
+            coverage.txt
+          if-no-files-found: warn
+          retention-days: 14
+
   python-lint:
     runs-on: ubuntu-latest
     steps:

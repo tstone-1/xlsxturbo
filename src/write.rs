@@ -382,3 +382,59 @@ pub(crate) fn write_py_value_with_format(
         .to_string();
     write_str(worksheet, row, col, s, column_format)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{int_fits_f64, MAX_SAFE_INT};
+
+    /// The cutoff is a claim about IEEE-754, so check the claim rather than the
+    /// constant.
+    ///
+    /// `int_fits_f64` says every magnitude up to and including 2^53 survives a
+    /// round trip through `f64`. That is only worth asserting against the
+    /// hardware: a test comparing the constant to itself would pass with the
+    /// boundary set anywhere at all.
+    #[test]
+    fn the_cutoff_is_where_f64_actually_stops_being_exact() {
+        for magnitude in [1u64, 2, MAX_SAFE_INT as u64 - 1, MAX_SAFE_INT as u64] {
+            assert!(int_fits_f64(magnitude), "{} should fit", magnitude);
+            assert_eq!(
+                magnitude as f64 as u64, magnitude,
+                "{} claimed to fit but does not round-trip",
+                magnitude
+            );
+        }
+
+        // 2^53 + 1 is the first integer f64 cannot represent: it rounds to
+        // 2^53, so the round trip silently returns a different number. This is
+        // the whole reason for the string fallback.
+        let first_lossy = MAX_SAFE_INT as u64 + 1;
+        assert!(!int_fits_f64(first_lossy));
+        assert_ne!(first_lossy as f64 as u64, first_lossy);
+    }
+
+    /// Both extremes of `i64` take the string path, `i64::MIN` included.
+    ///
+    /// `i64::MIN.abs()` overflows, and in a release build (no overflow checks)
+    /// it wraps back to `i64::MIN`, which compares as *less* than the cutoff --
+    /// so the one value most in need of the string fallback would have taken
+    /// the lossy numeric path. `unsigned_abs` is what makes this pass; the test
+    /// exists so a revert to `abs()` cannot go unnoticed.
+    #[test]
+    fn both_i64_extremes_are_too_large_for_f64() {
+        assert!(!int_fits_f64(i64::MAX.unsigned_abs()));
+        assert!(!int_fits_f64(i64::MIN.unsigned_abs()));
+        assert_eq!(i64::MIN.unsigned_abs(), 1u64 << 63);
+    }
+
+    /// Magnitude, not value: the cutoff is symmetric about zero.
+    #[test]
+    fn the_cutoff_is_symmetric() {
+        for v in [MAX_SAFE_INT, -MAX_SAFE_INT] {
+            assert!(int_fits_f64(v.unsigned_abs()));
+        }
+        for v in [MAX_SAFE_INT + 1, -(MAX_SAFE_INT + 1)] {
+            assert!(!int_fits_f64(v.unsigned_abs()));
+        }
+    }
+}

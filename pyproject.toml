@@ -54,6 +54,9 @@ dev = [
     # tree -- that breaks silently the day bandit drops it.
     "pyyaml",
     "types-PyYAML",
+    # scripts/coverage_report.py measures the pure-Python layer. The Rust half
+    # needs `rustup component add llvm-tools-preview`, which pip cannot supply.
+    "coverage[toml]>=7",
 ]
 
 [tool.maturin]

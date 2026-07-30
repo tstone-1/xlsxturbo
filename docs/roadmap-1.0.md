@@ -852,15 +852,15 @@ guard above is what keeps it from becoming a correctness problem as well as a co
 
 ## Phase 4 — Property tests and coverage visibility
 
-- [ ] `proptest` over `src/parse/` — the strongest fit in the codebase: cell references,
-      ranges, colors, table names, already 63 unit tests deep with cheaply stated invariants
-      (`A1 <-> (row, col)` round-trip, range-normalisation idempotence, color parsing total
-      over the accepted alphabet)
-- [ ] Boundary tests: dates, Excel serial values, integers near 2^53
-- [ ] Coverage reporting: `cargo-llvm-cov` for Rust, `coverage.py` for the Python layer.
-      Publish as information, not as a threshold — the useful question is which
-      error-handling branches are unexercised, which is exactly where Phase 2's
-      classification wants evidence
+- [x] `proptest` over `src/parse/` — 31 properties in `src/parse/proptests.rs`: the
+      `A1 <-> (row, col)` round-trip, range corner ordering, colour parsing as an *iff*,
+      table-name validity and idempotence, each pattern form as an equivalence to the `str`
+      method it claims to implement, and the Excel serial scale as linearity from one anchor
+- [x] Boundary tests: `src/parse/boundaries.rs` (the 1900 leap-year gap, Excel's first and
+      last representable days, leap seconds), `src/write.rs` tests (the 2^53 cutoff, both
+      `i64` extremes), and `tests/test_boundaries.py` end-to-end for all three
+- [x] Coverage reporting: `scripts/coverage_report.py`, plus an informational CI job.
+      No threshold anywhere
 
 **Deliberately dropped from the review's proposal:** fuzzing the CSV parser. That path
 delegates to the `csv` crate, which is fuzzed upstream — real setup cost, little marginal
@@ -870,7 +870,57 @@ value.
 one edit at a time, and write down which mutation each property is meant to catch *before*
 running it. A property that holds by construction passes exactly like one that discriminates.
 
-**Release:** rolls into whatever ships next.
+**Release:** rolls into whatever ships next — folded into the unreleased 0.20.0.
+
+### What the mutation pass actually found
+
+18 single-edit mutations, 15 against `src/parse/` and 3 against the compiled extension. All
+were eventually caught, but not on the first attempt, and the two failures are the point of
+the exercise:
+
+- **A property can be correct and still never reach its case.** `six_ascii_chars_are_a_color_iff_all_hex`
+  generated six printable ASCII characters and asserted the `iff`. Removing the
+  `is_ascii_hexdigit` guard it exists to defend left it green: the inputs that discriminate
+  (a sign character followed by five hex digits) are about one in seventy thousand of that
+  space, so 256 cases never drew one. Narrowing the alphabet to hex digits plus `+` and `-`
+  makes a near-miss appear in roughly one case in nine. A companion property whose generator
+  *is* the case — sign, then five hex digits — was added beside it, because a generator that
+  merely makes the case likely can still get unlucky.
+- **A property can never enter the branch it was written for.** `sanitized_table_names_are_always_valid`
+  asserted the 255-character cap over `".*"`, which produces short strings. Swapping the
+  truncate and prepend steps — which pushes a 255-character digit-leading name to 256 —
+  survived untouched. It now has a sibling generating names that straddle the cap.
+
+**A property also caught its own author.** `strings_keep_their_original_padding` failed on
+`"\tNan\t"`, which looks like a data-loss bug and is not: `Nan` is a valid `f64` literal, and
+a non-finite number is deliberately written as an empty cell. The test encoded an assumption
+the code documents the opposite of. Fixed by excluding numeric literals from the generator
+and pinning the excluded case as its own property, which covers eight spellings where the
+existing unit test covered one.
+
+**Two design notes worth keeping:**
+
+- `proptest-regressions/` is gitignored here, against the usual advice. Mutation-testing the
+  suite makes proptest save a seed for every property that correctly went red, describing
+  code that no longer exists. A genuine failing case is promoted to a named test instead,
+  which states the input where it can be read rather than hiding it behind a hash.
+- Coverage is measured from **both** suites, merged. `cargo test` alone reports 26% and shows
+  every `src/apply/*.rs` at zero — a number that would be actively misleading, since those
+  paths are exercised thoroughly from Python. Python alone misses the parser branches only
+  the Rust tests reach. Together: 92.96% of lines in the Rust core, 100% of the Python layer.
+  `cargo-llvm-cov` is not used, despite being the better tool for the Rust half, because its
+  `report` subcommand cannot be pointed at an extra object file — and the extension module is
+  exactly that.
+
+### Carried into Phase 5
+
+- **`NaN`/`Inf` spellings silently empty a text cell.** Documented and intentional, but the
+  words `NAN`, `Inf`, `Infinity` are also ordinary text, and a column containing one loses it
+  with no warning. Changing it is a behaviour change, so it belongs with the other surface
+  decisions rather than in a test phase. Now at least documented in `docs/dataframe-export.md`.
+- **The column bound is enforced by this crate, the row bound by rust_xlsxwriter.** Both raise
+  `ConfigurationError` and both messages are clear, so this is cosmetic — but the two messages
+  have different shapes for the same class of mistake.
 
 ---
 

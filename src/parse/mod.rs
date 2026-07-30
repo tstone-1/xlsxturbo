@@ -18,6 +18,12 @@ pub(crate) use tables::{parse_table_style, sanitize_table_name};
 pub(crate) use values::{naive_date_to_excel, naive_datetime_to_excel, parse_value};
 
 #[cfg(test)]
+mod boundaries;
+
+#[cfg(test)]
+mod proptests;
+
+#[cfg(test)]
 mod tests {
     use super::formats::parse_border_style;
     use super::{

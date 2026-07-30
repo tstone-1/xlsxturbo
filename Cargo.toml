@@ -37,6 +37,10 @@ tempfile = "3"
 # Reads generated .xlsx archives in tests/upstream_defect.rs. Already in the tree
 # via rust_xlsxwriter, so this adds no new download.
 zip = { version = "8", default-features = false, features = ["deflate"] }
+# Property tests over src/parse/ (src/parse/proptests.rs). `default-features =
+# false` drops the `fork`/`timeout` features, which pull in `rusty-fork` and
+# `wait-timeout` and are unused here; `std` is still needed for the runner.
+proptest = { version = "1.11", default-features = false, features = ["std", "bit-set"] }
 
 [profile.release]
 opt-level = 3
