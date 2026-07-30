@@ -44,7 +44,7 @@ Python lint, type and security gates:
 
 | Gate | Windows | macOS / Linux |
 |------|---------|---------------|
-| ruff | `.venv\Scripts\ruff.exe check python tests benchmarks` | `.venv/bin/ruff check python tests benchmarks` |
+| ruff | `.venv\Scripts\ruff.exe check python tests benchmarks scripts` | `.venv/bin/ruff check python tests benchmarks scripts` |
 | bandit | `.venv\Scripts\bandit.exe -c pyproject.toml -r python` | `.venv/bin/bandit -c pyproject.toml -r python` |
 | pyright | `.venv\Scripts\pyright.exe` | `.venv/bin/pyright` |
 

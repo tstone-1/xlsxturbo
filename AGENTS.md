@@ -46,15 +46,17 @@
 6. `python/xlsxturbo/xlsxturbo.pyi` - TypedDict for the options, kwarg on both signatures and `SheetOptions`, docstrings. This compiled-extension stub is the type source of truth; `__init__.pyi` is a thin re-export - never hand-edit it for new options.
 7. `tests/test_<feature area>.py` - a `TestXxx` class following the existing per-feature test files (behavior-coupled: read the produced xlsx back via openpyxl or XML).
 
+Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py --write`. `docs/capability-matrix.md` is GENERATED from the Rust sources and must never be hand-edited; `tests/test_capability_matrix.py` fails if the committed page is stale. The generator parses `SHEET_OPTION_NAMES`, `define_options!`, `CONSTANT_MEMORY_SAFE_OPTIONS`, `warn_constant_memory_skips` and the three `#[pyo3(signature)]` blocks, so touching any of those changes the page. Each parser raises rather than returning an empty list, because a structural audit that matches nothing reads exactly like a clean result — and each parsed parameter must be a Python identifier, which is what caught a regex that spanned from the file's first pyo3 attribute through to the requested function and produced "parameters" like `) -> PyResult<(u32`.
+
 ## Python Lint, Type, and Security Gates
 
-The Python tree (`python/`, `tests/`, `benchmarks/`) must stay clean under ruff, bandit, and pyright, with docstrings and type annotations on all functions. Config lives in `pyproject.toml`; the tools are in the `dev` optional-deps. These same three gates also run in CI (`python-lint` job in `.github/workflows/ci.yml`). Run from the repo root using the project-local `.venv`:
+The Python tree (`python/`, `tests/`, `benchmarks/`, `scripts/`) must stay clean under ruff, bandit, and pyright, with docstrings and type annotations on all functions. Config lives in `pyproject.toml`; the tools are in the `dev` optional-deps. These same three gates also run in CI (`python-lint` job in `.github/workflows/ci.yml`). Run from the repo root using the project-local `.venv`:
 
 On Windows the venv's executables live in `.venv\Scripts\`, on macOS/Linux in `.venv/bin/` — this repo is worked on from both, so use the pair for the machine you are on:
 
 | Gate | Windows | macOS / Linux |
 |------|---------|---------------|
-| ruff | `.venv\Scripts\ruff.exe check python tests benchmarks` | `.venv/bin/ruff check python tests benchmarks` |
+| ruff | `.venv\Scripts\ruff.exe check python tests benchmarks scripts` | `.venv/bin/ruff check python tests benchmarks scripts` |
 | bandit | `.venv\Scripts\bandit.exe -c pyproject.toml -r python` | `.venv/bin/bandit -c pyproject.toml -r python` |
 | pyright | `.venv\Scripts\pyright.exe` | `.venv/bin/pyright` |
 | pytest | `.venv\Scripts\python.exe -m pytest tests/ -q` | `.venv/bin/python -m pytest tests/ -q` |

@@ -106,7 +106,7 @@ mypy-init-return = true
 "benchmarks/**" = ["S404", "S603", "S607", "S311", "T201"]
 
 [tool.pyright]
-include = ["python", "tests", "benchmarks"]
+include = ["python", "tests", "benchmarks", "scripts"]
 exclude = ["**/__pycache__", "**/.venv", "target"]
 venvPath = "."
 venv = ".venv"

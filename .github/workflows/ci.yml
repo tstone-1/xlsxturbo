@@ -240,7 +240,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run ruff
-        run: ruff check python tests benchmarks
+        run: ruff check python tests benchmarks scripts
 
       - name: Run bandit
         run: bandit -c pyproject.toml -r python
@@ -306,10 +306,34 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
-      # --skip-editable: xlsxturbo itself is the editable install under test and
-      # has no advisory record to look up.
+      # Audit an explicit requirements list rather than the live environment.
+      #
+      # `--strict` fails on any *skipped* dependency, and auditing the
+      # environment necessarily meets one: xlsxturbo itself is installed
+      # editable and has no advisory record to look up. `--skip-editable` does
+      # not help -- it turns the editable dist into a skip, which is exactly
+      # what `--strict` rejects. `pip freeze --exclude-editable` removes it
+      # before pip-audit ever sees it, so nothing is skipped and `--strict`
+      # stays meaningful over everything that remains.
+      #
+      # The line count is printed and asserted non-empty on purpose. An empty
+      # requirements file makes pip-audit report "No known vulnerabilities
+      # found" -- a pass that cannot fail, indistinguishable from a real one.
+      # That happened while developing this job, because `pip freeze` returns
+      # nothing in a uv-created venv (uv installs no pip into it).
+      - name: Collect dependencies to audit
+        run: |
+          pip freeze --exclude-editable > audit-requirements.txt
+          count=$(wc -l < audit-requirements.txt)
+          echo "auditing $count dependencies"
+          if [ "$count" -lt 1 ]; then
+            echo "refusing to run a vacuous audit over an empty dependency list" >&2
+            exit 1
+          fi
+          cat audit-requirements.txt
+
       - name: Run pip-audit
-        run: pip-audit --strict --skip-editable
+        run: pip-audit --strict -r audit-requirements.txt
 
   codeql:
     name: CodeQL (${{ matrix.language }})
