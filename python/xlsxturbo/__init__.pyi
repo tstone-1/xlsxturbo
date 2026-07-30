@@ -7,10 +7,13 @@ checker never reports an import as valid that would raise ``ImportError`` at
 runtime.
 
 The option ``TypedDict`` / ``Literal`` helpers (``SparklineOptions``,
-``ChartOptions``, ``ValidationType``, ...) are stub-only types with no runtime
-object. Import them from the ``xlsxturbo.xlsxturbo`` submodule inside a
-``TYPE_CHECKING`` block when you want to annotate option dicts; the full type
-surface lives in ``xlsxturbo.pyi``.
+``ChartOptions``, ``ValidationType``, ...) live in ``xlsxturbo.types``. They are
+real runtime objects, so no ``TYPE_CHECKING`` guard is needed::
+
+    from xlsxturbo.types import HeaderFormat
+
+They are deliberately *not* re-exported here, to keep the package's top level to
+what the compiled extension provides.
 """
 
 from .xlsxturbo import (

@@ -8,6 +8,10 @@ Every failure raised by this library is an :class:`XlsxTurboError`. Each
 subclass also inherits the builtin exception that the same failure raised
 before the hierarchy existed, so ``except ValueError`` and ``except TypeError``
 keep working unchanged -- see ``docs/errors.md``.
+
+The option shapes for annotating calls (``HeaderFormat``, ``ChartOptions``,
+``ValidationType``, ...) live in ``xlsxturbo.types``, which imports nothing
+beyond the standard library.
 """
 
 from .xlsxturbo import (

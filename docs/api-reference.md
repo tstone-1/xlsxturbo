@@ -57,6 +57,30 @@ value. Both come from the compiled extension rather than from package metadata, 
 makes them the right thing to report in a bug report — they describe the binary that
 actually ran.
 
+## Annotating options: `xlsxturbo.types`
+
+Every option that takes a dict has a `TypedDict`, and every option that takes one of a fixed
+set of strings has a `Literal` alias. They are real runtime objects in `xlsxturbo.types`, so
+no `TYPE_CHECKING` guard is needed:
+
+```python
+from xlsxturbo.types import ChartOptions, HeaderFormat
+
+header: HeaderFormat = {"bold": True, "bg_color": "#DDDDDD"}
+chart: ChartOptions = {"type": "column", "categories": "A2:A10", "values": "B2:B10"}
+
+xlsxturbo.df_to_xlsx(df, "out.xlsx", header_format=header, charts={"D2": chart})
+```
+
+The module imports nothing beyond the standard library, so importing it costs nothing and
+works before the extension is built. `SheetOptions` is the shape of a `dfs_to_xlsx`
+per-sheet dict, and `PathArg` is what the path parameters accept.
+
+Field annotations are unevaluated strings, which is what lets a field be written `bool | str`
+while the package still supports Python 3.9. The one consequence:
+`typing.get_type_hints()` on these classes needs Python 3.10 or newer. Static type checking
+works on every supported version.
+
 ## Exceptions
 
 Six classes, all exported from `xlsxturbo`:

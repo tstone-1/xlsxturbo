@@ -467,14 +467,34 @@ to the same new public surface.
 
 ### Runtime types (see D1)
 
-- [ ] Create `python/xlsxturbo/types.py` with the 22 option `TypedDict`s and the `Literal`
-      aliases, 3.9-safe
-- [ ] Reduce `xlsxturbo.pyi` to the four function signatures, importing shapes from
-      `xlsxturbo.types`
-- [ ] Update `__init__.pyi`'s module docstring — it currently instructs users to import the
-      helpers from `xlsxturbo.xlsxturbo` under `TYPE_CHECKING`, which this phase obsoletes
-- [ ] Update `AGENTS.md` touchpoint 6 to match
-- [ ] `CHANGELOG.md` entry superseding the note that these are stub-only types
+- [x] Create `python/xlsxturbo/types.py` with the option `TypedDict`s and the `Literal`
+      aliases, 3.9-safe. **20 shapes, not 22** — the estimate counted two names that were
+      never separate types. Moved with a script that asserts each definition appears byte for
+      byte in the destination and that the original file is fully accounted for, rather than
+      retyped.
+- [x] **The 3.9 claim is verified, not assumed.** `uv python install 3.9`, then import the
+      module on it: `PathArg = Union[...]` imports, `str | PathLike[str]` would not, and
+      `get_type_hints()` fails there exactly as documented while working on 3.10+. Worth the
+      three minutes — D1 reasoned this out correctly on paper, but the whole design rests on
+      it and paper is not an interpreter.
+- [x] Reduce `xlsxturbo.pyi` to the function signatures + exception classes, importing shapes
+      from `xlsxturbo.types` with the redundant-alias form so `from xlsxturbo.xlsxturbo import
+      HeaderFormat` still type-checks for code written before the move. 650 → 377 lines.
+- [x] Update `__init__.pyi`'s module docstring — it instructed users to import the helpers
+      from `xlsxturbo.xlsxturbo` under `TYPE_CHECKING`, which this phase obsoleted
+- [x] Update `AGENTS.md` touchpoint 6 to match — it is now the largest touchpoint, since a new
+      option must land in `types.py`, the stub's import block, the stub's `__all__`, both
+      function signatures and `SheetOptions`
+- [x] `CHANGELOG.md` entry superseding the note that these are stub-only types
+- [x] `tests/test_types_module.py` — 27 tests coupling the stub's re-export list to the runtime
+      module, since nothing in the type checker's world notices if those drift. All shown to
+      fail: 6 mutations, 6 caught. **Two of the six survived the first run, and both were the
+      tests' fault rather than the code's** — a sanity guard tight enough to fire on a single
+      dropped name, which made the module fail to import so the intended comparison never ran;
+      and `assert "from __future__ import annotations" in source`, which passed after the
+      statement was deleted because `types.py` *documents* that import in its own docstring.
+      The second is the "bookkeeping satisfies its own detector" trap, arriving through a
+      docstring. Both are fixed and commented in place.
 
 ### Exception hierarchy (see D2, D3, and **D6 for what actually shipped**)
 
