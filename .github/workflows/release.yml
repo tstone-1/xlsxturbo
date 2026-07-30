@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Third-party actions are pinned to commit SHAs; the trailing comment records
+# which release each SHA was. See the note at the top of ci.yml.
+
 permissions:
   contents: read
 
@@ -17,14 +20,14 @@ jobs:
       matrix:
         target: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
 
       - name: Build wheels
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
@@ -32,7 +35,7 @@ jobs:
           manylinux: 2_28
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wheels-linux-${{ matrix.target }}
           path: dist
@@ -44,21 +47,21 @@ jobs:
       matrix:
         target: [x64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
           architecture: ${{ matrix.target }}
 
       - name: Build wheels
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           args: --release --out dist
           sccache: 'true'
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wheels-windows-${{ matrix.target }}
           path: dist
@@ -70,21 +73,21 @@ jobs:
       matrix:
         target: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
 
       - name: Build wheels
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
           sccache: 'true'
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wheels-macos-${{ matrix.target }}
           path: dist
@@ -93,19 +96,61 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build sdist
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: sdist
           args: --out dist
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wheels-sdist
           path: dist
+
+  # Software bill of materials.
+  #
+  # The Rust SBOM is the meaningful one: the crates in Cargo.lock are what is
+  # statically linked into the shipped extension module. The Python side is
+  # deliberately thin -- the wheel declares no runtime dependencies -- so it is
+  # generated for completeness, not because it carries much.
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Generate Rust SBOM (CycloneDX)
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --all
+          mkdir -p sbom
+          # cargo-cyclonedx writes per-manifest files next to each Cargo.toml.
+          find . -name '*.cdx.json' -not -path './target/*' -exec cp {} sbom/ \;
+
+      - name: Generate Python SBOM (CycloneDX)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format JSON --outfile sbom/python-environment.cdx.json
+
+      - name: List SBOMs
+        run: ls -la sbom/
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sbom
+          path: sbom
 
   # Smoke-test the built wheels before publishing
   smoke-test:
@@ -122,14 +167,14 @@ jobs:
             wheel-artifact: wheels-macos-aarch64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
 
       - name: Download built wheel
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ matrix.wheel-artifact }}
           path: dist
@@ -162,10 +207,12 @@ jobs:
       name: pypi
       url: https://pypi.org/p/xlsxturbo
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write      # Required for trusted publishing
+      attestations: write  # Required for build provenance
+      contents: read
     steps:
       - name: Download all wheels
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: wheels-*
           path: dist
@@ -174,7 +221,64 @@ jobs:
       - name: List wheels
         run: ls -la dist/
 
+      # Attest before publishing: the attestation binds these exact bytes to
+      # this workflow run, so it must cover what is about to be uploaded.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: 'dist/*'
+
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: dist/
+
+  # Create the GitHub Release for this tag.
+  #
+  # Every tag before v0.18.0 had no corresponding Release, which left the
+  # changelog and the artifacts hard to find from the repo's own Releases page.
+  # Creating it here means that can no longer drift: a tag that builds and
+  # publishes also gets its Release, with the SBOMs attached.
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [release, sbom]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download all wheels
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: sbom
+          path: sbom
+
+      # Slicing lives in a script, not inline here, because the same logic backs
+      # the one-off backfill of the pre-0.18.0 tags -- and because it needed
+      # testing against all 37 existing tags before it could be trusted. The
+      # script exits non-zero on a missing section, so a tag whose CHANGELOG
+      # entry was forgotten fails the job instead of publishing empty notes.
+      - name: Extract release notes from CHANGELOG
+        run: |
+          bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+          echo "--- release notes for $GITHUB_REF_NAME ---"
+          cat release-notes.md
+
+      # gh is preinstalled on GitHub runners, so this needs no third-party action.
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            dist/* sbom/*

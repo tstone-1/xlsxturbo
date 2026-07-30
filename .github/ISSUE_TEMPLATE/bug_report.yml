@@ -1,0 +1,98 @@
+name: Bug report
+description: Something produces the wrong output, raises unexpectedly, or crashes
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Three things resolve most reports in one round instead of three: the platform,
+        the Python version, and a minimal input. The fields below ask for them.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+      placeholder: |
+        Expected the Total column to be formatted as currency; the cells are plain
+        numbers when opened in Excel.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: |
+        The smallest script that shows the problem. Please construct the DataFrame
+        inline rather than loading a file, so it can be run as-is.
+      render: python
+      placeholder: |
+        import pandas as pd, xlsxturbo
+
+        df = pd.DataFrame({"Total": [1.5, 2.5]})
+        xlsxturbo.df_to_xlsx(df, "out.xlsx", column_formats={"Total": {"num_format": "$#,##0.00"}})
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: xlsxturbo version
+      description: "`python -c \"import xlsxturbo; print(xlsxturbo.version())\"`"
+      placeholder: 0.18.0
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: "`python -VV`"
+      placeholder: 3.12.4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Windows
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: How was it installed
+      description: A PyPI wheel, or built from source with maturin?
+      placeholder: pip install xlsxturbo
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Full traceback
+      description: If it raised, paste the whole thing rather than the last line.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: viewer
+    attributes:
+      label: Which application opened the file
+      description: |
+        Only if the problem is with how the workbook looks or behaves when opened.
+        Excel, LibreOffice and Google Sheets disagree about a number of things, so
+        knowing which one you looked at matters.
+      placeholder: Excel 365 on Windows 11
+    validations:
+      required: false

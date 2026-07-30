@@ -32,4 +32,5 @@ Thumbs.db
 
 # Local-only agent artifacts — must NOT leak into this public repo
 docs/reviews/
+docs/strategic-recommendations-plan.md
 agent-memory-audit*.csv

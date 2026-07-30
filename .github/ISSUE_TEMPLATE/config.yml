@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/tstone-1/xlsxturbo/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.
+  - name: Question or usage help
+    url: https://github.com/tstone-1/xlsxturbo/discussions
+    about: For "how do I ...", a discussion is usually faster than an issue.

@@ -8,7 +8,23 @@ updates:
     open-pull-requests-limit: 5
 
   # GitHub Actions
+  #
+  # Actions in .github/workflows/ are pinned to commit SHAs. Dependabot
+  # understands SHA pins and bumps both the SHA and its trailing `# vX` comment,
+  # so pinning costs no update visibility.
   - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+
+  # Python dev and build toolchain (pyproject.toml).
+  #
+  # The shipped wheel has no runtime dependencies, so what this tracks is the
+  # `[project.optional-dependencies] dev` group plus the build backend. Note
+  # that uv.lock is tracked but is NOT updated by Dependabot -- run `uv lock`
+  # after merging one of these, as AGENTS.md requires when dev deps change.
+  - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"

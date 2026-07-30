@@ -1,0 +1,72 @@
+name: Feature request
+description: Ask for a capability xlsxturbo does not have
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        xlsxturbo's scope is deliberately narrow: a fast writer for DataFrames and CSV,
+        not a general workbook editor. The most useful thing you can put in this form is
+        the **actual task you are trying to finish** -- that is what decides whether a
+        feature belongs here, and it often turns out there is already a way.
+
+        Worth checking [ROADMAP.md](../../blob/main/ROADMAP.md) first: some requests are
+        already planned, and a couple (notably append mode) are deliberately declined
+        with reasons.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What are you trying to do
+      description: |
+        The real task, not the feature. "I export a monthly report that reviewers filter
+        by region, and they keep losing the header row when scrolling" says more than
+        "please add freeze panes".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to look like
+      description: A sketch of the API. It does not need to be right.
+      render: python
+      placeholder: |
+        xlsxturbo.df_to_xlsx(df, "out.xlsx", page_setup={"orientation": "landscape"})
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you are doing instead today
+      description: |
+        Including "nothing, I gave up" -- that is useful information. If you currently
+        post-process with openpyxl or XlsxWriter, say which calls.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does this need to work in constant-memory mode
+      description: |
+        Constant-memory mode streams rows and cannot revisit them, so features needing
+        random access are unavailable there. If you export millions of rows this matters.
+      options:
+        - "No -- normal mode is fine"
+        - "Yes -- I export in constant-memory mode"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: How other libraries do it
+      description: |
+        A link to the equivalent in XlsxWriter, openpyxl or rust_xlsxwriter, if there is
+        one. rust_xlsxwriter is what xlsxturbo builds on, so a feature it lacks is a much
+        larger job than one it already supports.
+    validations:
+      required: false

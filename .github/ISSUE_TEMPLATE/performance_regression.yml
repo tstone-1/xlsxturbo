@@ -1,0 +1,90 @@
+name: Performance regression
+description: A version got measurably slower, or uses more memory, than a previous one
+labels: [performance]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Wall-clock on a normal desktop drifts several percent over minutes from thermal
+        and load effects -- often more than the change being reported. So the ask here
+        is for **interleaved** measurements (A, B, A, B, ...) rather than one run of
+        each. Two back-to-back runs cannot distinguish a real regression from drift.
+
+  - type: input
+    id: slow-version
+    attributes:
+      label: Slower version
+      placeholder: 0.18.0
+    validations:
+      required: true
+
+  - type: input
+    id: fast-version
+    attributes:
+      label: Faster version it is being compared against
+      placeholder: 0.17.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: measurements
+    attributes:
+      label: Measurements
+      description: |
+        Interleaved runs, please -- alternate the two versions over several rounds and
+        report each round. Medians and spread are more useful than a single number.
+      render: text
+      placeholder: |
+        round 1: 0.17.2 = 1.92 s   0.18.0 = 2.41 s
+        round 2: 0.17.2 = 1.88 s   0.18.0 = 2.44 s
+        round 3: 0.17.2 = 1.95 s   0.18.0 = 2.38 s
+        round 4: 0.17.2 = 1.90 s   0.18.0 = 2.42 s
+        median:  0.17.2 = 1.91 s   0.18.0 = 2.42 s   (+27%)
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: What was measured
+      description: |
+        The script or command. If you used `benchmarks/benchmark.py`, say which flags.
+        Please note whether the build was a release build -- a debug build of the
+        extension is 20-50x slower and, worse, reorders what looks expensive.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: data-shape
+    attributes:
+      label: Data shape
+      description: Rows, columns, and dtypes. Numeric-only and text-heavy behave differently.
+      placeholder: 1,000,000 rows x 12 columns; 8 float64, 2 int64, 2 str
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options in use
+      description: Which parameters were passed, and whether `constant_memory` was on.
+      render: python
+    validations:
+      required: false
+
+  - type: input
+    id: machine
+    attributes:
+      label: Machine and OS
+      placeholder: Ryzen 7950X, Windows 11, Python 3.12.4
+    validations:
+      required: true
+
+  - type: input
+    id: memory
+    attributes:
+      label: Peak memory, if that is what regressed
+      placeholder: 1.2 GB -> 3.4 GB
+    validations:
+      required: false
