@@ -535,6 +535,36 @@ XlsxTurboError(Exception)
 `cargo test`, `maturin develop --release`, ruff, bandit, pyright, pytest. Then a deep diff
 review before Phase 3. **Release:** 0.19.0.
 
+### Phase 2 aftermath
+
+Both halves landed and the full gate set is green: `cargo fmt` 0, clippy 0, 80 Rust tests,
+**459 Python tests** (up from 381 — 51 in `test_errors.py`, 27 in `test_types_module.py`),
+ruff 0, bandit 0, pyright `0 errors, 0 warnings, 0 informations`, capability matrix current,
+action pins `checked=14 failed=0`, `mkdocs build --strict` clean. Twelve mutations run across
+the two new test modules, twelve caught.
+
+Still open, in order:
+
+- **The deep diff review** this phase's gate calls for, before Phase 3 builds on the new
+  public surface. Not yet done.
+- **Release 0.19.0.** Versions in `Cargo.toml` and `pyproject.toml` are still `0.18.0`; the
+  changelog heading is still `## [0.19.0] - Unreleased`.
+- Nothing is pushed yet.
+
+Three things worth knowing before Phase 3 starts, none of them obvious from the diff:
+
+- **The verification habit that paid off twice.** Building against a real 3.9 interpreter
+  (`uv python install 3.9`) and inspecting the built wheel each caught an assumption that
+  would otherwise have shipped. This is the same lesson as the Phase 1 CLI claim, which was
+  settled by unzipping the published artifact rather than by reading `Cargo.toml`. Cheap;
+  do it again for Phase 3's `options.py`.
+- **The `pytest.raises(ValueError|TypeError)` count is now a number to watch, not just a fact.**
+  It was 93 when the hierarchy landed, and every one of them is a pre-0.19 behaviour record.
+  Phase 3 lowers dataclasses to kwargs, so its errors flow through exactly these paths.
+- **`tests/test_errors.py` already encodes the anti-dead-API rule** (exported set == triggered
+  set). Phase 3's coverage guard should be built the same way: derive both sides, compare them,
+  and never hardcode the expected list in the test.
+
 ---
 
 ## Phase 3 — Structured options objects (0.20.0)
