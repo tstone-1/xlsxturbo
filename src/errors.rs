@@ -152,7 +152,10 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         &[base_ty.clone(), os_error, value_error],
         "A filesystem read or write failed.\n\n\
          Raised when the output workbook cannot be written (missing directory, \
-         permissions, no space) or when a CSV input cannot be opened. Also an \
+         permissions, no space) or when a CSV input cannot be opened. It also \
+         carries every workbook rule the underlying writer checks only while \
+         serialising -- a duplicate sheet name, a chart range naming a sheet that \
+         does not exist -- because those failures are reported by the save. Also an \
          `OSError`, which is what makes `except OSError` work, and a `ValueError`, \
          which is what keeps pre-0.19 `except ValueError` handlers working.\n\n\
          `errno` carries the OS error number when the failure had one, so \
@@ -168,9 +171,12 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         "WorkbookValidationError",
         &[configuration_ty],
         "The configuration is well-formed, but Excel does not permit it.\n\n\
-         Raised for workbook-level rules rather than option syntax: two sheets \
-         claiming the same table name, a sheet name Excel rejects. A subclass of \
-         `ConfigurationError`, and so also a `ValueError`.",
+         Its one raise site is the pre-check that rejects two sheets claiming the \
+         same table name -- Excel requires those to be unique across a workbook -- \
+         and the message names both sheets. Workbook rules the writer only detects \
+         while serialising, a duplicate sheet name among them, surface as \
+         `FileError` instead. A subclass of `ConfigurationError`, and so also a \
+         `ValueError`.",
     )?;
 
     // `get_or_init` rather than `set`: re-importing the extension must not invalidate a

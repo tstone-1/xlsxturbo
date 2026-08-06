@@ -42,7 +42,7 @@ SAMPLE_VALUES: dict[str, Any] = {
     "header_format": {"bold": True},
     "column_formats": {"Score": {"bold": True}},
     # Deliberately a colour scale rather than a data bar: a data bar and a
-    # sparkline on the same worksheet make rust_xlsxwriter 0.97.0 emit malformed
+    # sparkline on the same worksheet make rust_xlsxwriter 0.97.1 emit malformed
     # XML -- so xlsxturbo refuses that pair outright, which would make the
     # full-bundle check below fail for a reason having nothing to do with
     # ExportOptions. See TestDataBarSparklineGuard at the bottom of this module.
@@ -283,19 +283,23 @@ class TestDataBarSparklineGuard:
     """The one option combination the writer corrupts is refused, not written.
 
     A ``data_bar`` conditional format beside a sparkline makes rust_xlsxwriter
-    0.97.0 emit malformed worksheet XML, so xlsxturbo refuses the pair. The
+    0.97.1 emit malformed worksheet XML, so xlsxturbo refuses the pair. The
     upstream defect itself is pinned in ``tests/upstream_defect.rs``, which uses
     rust_xlsxwriter directly -- it has to, because the guard means no Python call
     can produce the corrupt file any more, and something still has to notice the
     day upstream fixes it.
     """
 
-    @pytest.mark.parametrize("spelling", ["data_bar", "databar"])
+    @pytest.mark.parametrize("spelling", ["data_bar", "databar", "DATA_BAR", "Databar", "Data_Bar"])
     def test_the_combination_is_refused(self, spelling: str, tmp_path: Path) -> None:
-        """Both accepted spellings of the type are caught.
+        """Every spelling the writer treats as a data bar is caught.
 
-        ``databar`` is an accepted alias, so a guard matching only ``data_bar``
-        would leave half the door open -- and the half nobody tests.
+        Two axes, and each has a half that is easy to leave open. ``databar`` is
+        an accepted alias, so a guard matching only ``data_bar`` would miss it;
+        and the dispatcher lowercases the type before matching, so ``DATA_BAR``
+        is a data bar to the writer as surely as ``data_bar`` is. A guard
+        comparing the raw string writes the corrupt workbook for the upper-case
+        ones -- accepted input, successful return, a file Excel calls damaged.
 
         Args:
             spelling: The conditional-format type name under test.
@@ -392,6 +396,24 @@ class TestDataBarSparklineGuard:
         out = tmp_path / "ok.xlsx"
         xlsxturbo.df_to_xlsx(_frame(), out, **kwargs)
         assert out.exists(), label
+
+    def test_an_upper_case_data_bar_alone_is_still_written(self, tmp_path: Path) -> None:
+        """Case-insensitivity is the guard's, not a narrowing of what is accepted.
+
+        The dispatcher has always lowercased the type, so ``DATA_BAR`` is a real
+        data bar everywhere else in the pipeline. Teaching the guard to see it by
+        making the dispatcher reject it instead would pass every refusal check
+        above and silently cost a working spelling, so this reads the rule back
+        out of the file rather than settling for the file existing.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+        """
+        out = tmp_path / "upper.xlsx"
+        xlsxturbo.df_to_xlsx(_frame(), out, conditional_formats={"Score": {"type": "DATA_BAR"}})
+        with zipfile.ZipFile(out) as zf:
+            xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
+        assert "DATABAR" in xml
 
     def test_the_guard_applies_per_sheet(self, tmp_path: Path) -> None:
         """A multi-sheet export is checked sheet by sheet, and names the sheet.

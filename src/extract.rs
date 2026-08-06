@@ -104,41 +104,54 @@ macro_rules! extract_scalar {
 /// dropped) — on the multi-sheet path this is a deliberate per-sheet "off
 /// switch" that shadows a non-empty global default via `SheetConfig::merge_with`,
 /// matching the existing `table_style` explicit-`None`-means-off precedent.
+///
+/// Missing-key handling follows `extract_scalar!`: only the `KeyError` that
+/// means "option not given" is swallowed, and every other lookup failure
+/// propagates.
 macro_rules! extract_dict_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
-        if let Ok(val) = $opts.get_item($key) {
-            if !val.is_none() {
-                let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
-                    crate::errors::configuration_type(format!(
-                        "sheet option '{}' must be a dict, got {}",
-                        $key,
-                        pytype_name(&val)
-                    ))
-                })?;
-                let extracted = $extractor(dict)?;
-                $config.$field = Some(extracted);
+        match $opts.get_item($key) {
+            Ok(val) => {
+                if !val.is_none() {
+                    let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
+                        crate::errors::configuration_type(format!(
+                            "sheet option '{}' must be a dict, got {}",
+                            $key,
+                            pytype_name(&val)
+                        ))
+                    })?;
+                    let extracted = $extractor(dict)?;
+                    $config.$field = Some(extracted);
+                }
             }
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>($opts.py()) => {}
+            Err(e) => return Err(e),
         }
     };
 }
 
 /// Helper: extract an optional list field, run an extractor, and set it.
 /// See `extract_dict_field!` — an explicitly-passed empty list is likewise
-/// kept as `Some(empty)` rather than dropped.
+/// kept as `Some(empty)` rather than dropped, and only a missing-key
+/// `KeyError` is swallowed.
 macro_rules! extract_list_field {
     ($opts:expr, $config:expr, $key:literal, $field:ident, $extractor:expr) => {
-        if let Ok(val) = $opts.get_item($key) {
-            if !val.is_none() {
-                let list = val.cast::<pyo3::types::PyList>().map_err(|_| {
-                    crate::errors::configuration_type(format!(
-                        "sheet option '{}' must be a list, got {}",
-                        $key,
-                        pytype_name(&val)
-                    ))
-                })?;
-                let extracted = $extractor(list)?;
-                $config.$field = Some(extracted);
+        match $opts.get_item($key) {
+            Ok(val) => {
+                if !val.is_none() {
+                    let list = val.cast::<pyo3::types::PyList>().map_err(|_| {
+                        crate::errors::configuration_type(format!(
+                            "sheet option '{}' must be a list, got {}",
+                            $key,
+                            pytype_name(&val)
+                        ))
+                    })?;
+                    let extracted = $extractor(list)?;
+                    $config.$field = Some(extracted);
+                }
             }
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>($opts.py()) => {}
+            Err(e) => return Err(e),
         }
     };
 }
@@ -239,17 +252,22 @@ pub(crate) fn extract_sheet_info<'py>(
         );
         extract_scalar!(opts, config, "table_name", table_name, "a string");
 
-        // table_style needs special handling: None means "explicitly no style"
-        if let Ok(val) = opts.get_item("table_style") {
-            if val.is_none() {
-                config.table_style = Some(None);
-            } else {
-                config.table_style = Some(Some(extract_typed!(
-                    val,
-                    "a string",
-                    "sheet option 'table_style'"
-                )));
+        // table_style needs special handling: None means "explicitly no style".
+        // Lookup failures are split the same way `extract_scalar!` splits them.
+        match opts.get_item("table_style") {
+            Ok(val) => {
+                if val.is_none() {
+                    config.table_style = Some(None);
+                } else {
+                    config.table_style = Some(Some(extract_typed!(
+                        val,
+                        "a string",
+                        "sheet option 'table_style'"
+                    )));
+                }
             }
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>(opts.py()) => {}
+            Err(e) => return Err(e),
         }
 
         // Extract complex dict fields
@@ -973,6 +991,42 @@ pub(crate) fn extract_sparklines(
     Ok(sparklines)
 }
 
+/// Look up an optional sub-value of a `cells` entry dict.
+///
+/// An explicitly-passed `None` reads as "not given", the same as an absent key.
+/// The `cells` dict form is the only place a caller writes these keys out by
+/// name, so a `None` produced by their own conditional expression must not be
+/// harder to pass than omitting the key.
+fn present_cell_field<'py>(
+    d: &Bound<'py, pyo3::types::PyDict>,
+    key: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    Ok(d.get_item(key)?.filter(|v| !v.is_none()))
+}
+
+/// Extract an optional string sub-value of a `cells` entry dict.
+///
+/// Classified rather than a bare `extract()?`: that propagates PyO3's own
+/// `TypeError`, which is outside the public hierarchy — the same escape
+/// `extract_typed!` closes for the top-level extractors.
+fn cell_string_field(
+    d: &Bound<'_, pyo3::types::PyDict>,
+    cell_ref: &str,
+    key: &str,
+) -> PyResult<Option<String>> {
+    match present_cell_field(d, key)? {
+        Some(v) => v.extract::<String>().map(Some).map_err(|_| {
+            crate::errors::configuration_type(format!(
+                "cells['{}']: '{}' must be a string, got {}",
+                cell_ref,
+                key,
+                pytype_name(&v)
+            ))
+        }),
+        None => Ok(None),
+    }
+}
+
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})
 pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Vec<CellWrite>> {
     let mut cells = Vec::new();
@@ -999,37 +1053,25 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                     cell_ref
                 ))
             })?;
-            let num_fmt: Option<String> = d
-                .get_item("num_format")?
-                .map(|v| v.extract::<String>())
-                .transpose()?;
-            let align_h: Option<String> = d
-                .get_item("align_horizontal")?
-                .map(|v| v.extract::<String>())
-                .transpose()?;
+            let num_fmt = cell_string_field(d, &cell_ref, "num_format")?;
+            let align_h = cell_string_field(d, &cell_ref, "align_horizontal")?;
             if let Some(ref ah) = align_h {
                 parse_horizontal_alignment(ah).map_err(crate::errors::configuration)?;
             }
-            let align_v: Option<String> = d
-                .get_item("align_vertical")?
-                .map(|v| v.extract::<String>())
-                .transpose()?;
+            let align_v = cell_string_field(d, &cell_ref, "align_vertical")?;
             if let Some(ref av) = align_v {
                 parse_vertical_alignment(av).map_err(crate::errors::configuration)?;
             }
-            let wrap: bool = d
-                .get_item("wrap_text")?
-                .map(|v| {
-                    v.extract::<bool>().map_err(|_| {
-                        crate::errors::configuration_type(format!(
-                            "cells['{}']: 'wrap_text' must be a bool, got {}",
-                            cell_ref,
-                            pytype_name(&v)
-                        ))
-                    })
-                })
-                .transpose()?
-                .unwrap_or(false);
+            let wrap: bool = match present_cell_field(d, "wrap_text")? {
+                Some(v) => v.extract::<bool>().map_err(|_| {
+                    crate::errors::configuration_type(format!(
+                        "cells['{}']: 'wrap_text' must be a bool, got {}",
+                        cell_ref,
+                        pytype_name(&v)
+                    ))
+                })?,
+                None => false,
+            };
             cells.push(CellWrite {
                 row,
                 col,

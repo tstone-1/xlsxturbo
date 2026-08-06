@@ -306,6 +306,26 @@ class TestTableName:
                 table_name="Shared Table",
             )
 
+    def test_duplicate_table_names_differing_only_by_non_ascii_case(self, tmp_xlsx: str) -> None:
+        """Fold table names with full Unicode case rules, not ASCII-only ones.
+
+        Sanitization keeps every alphanumeric codepoint, so both spellings reach
+        the workbook intact and Excel rejects the pair. An ASCII-only fold lets
+        them past the pre-check, and the conflict then arrives from the save as a
+        ``FileError`` that names neither sheet -- so the class and the two sheet
+        names are what this asserts.
+        """
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(xlsxturbo.WorkbookValidationError, match=r"Duplicate table name.*Sheet1.*Sheet2"):
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (df, "Sheet1", {"table_name": "TÄBLE"}),
+                    (df, "Sheet2", {"table_name": "täble"}),
+                ],
+                tmp_xlsx,
+                table_style="Medium2",
+            )
+
 
 class TestHeaderFormat:
     """Tests for header_format parameter."""

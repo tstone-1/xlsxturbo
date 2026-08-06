@@ -1,7 +1,7 @@
 //! Native Excel chart application helpers.
 
 use crate::parse::parse_cell_ref;
-use crate::types::{pydict_to_hashmap, ChartConfig, OptionMap};
+use crate::types::{pydict_to_hashmap_str, ChartConfig, OptionMap};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Chart, ChartDataTable, ChartLegendPosition, ChartType, Worksheet};
@@ -217,11 +217,10 @@ pub(crate) fn apply_charts(
                 let series_dict = item.cast::<pyo3::types::PyDict>().map_err(|_| {
                     format!("charts['{}']: series item {} must be a dict", cell_ref, idx)
                 })?;
-                let series_config = pydict_to_hashmap(
+                let series_config = pydict_to_hashmap_str(
                     series_dict,
                     &format!("charts['{}']: series item {}", cell_ref, idx),
-                )
-                .map_err(|e| e.to_string())?;
+                )?;
                 let series_view = OptionMap::new(
                     py,
                     &series_config,

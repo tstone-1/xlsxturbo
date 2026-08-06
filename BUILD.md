@@ -83,14 +83,18 @@ bash .github/scripts/check-action-pins.sh
 
 Steps 5-8 run tools from the project-local `.venv`, whose executables live in
 `Scripts/` on Windows and `bin/` on macOS/Linux. This repo is worked on from both, so
-take the column for the machine you are on — the same pair `AGENTS.md` documents:
+take the column for the machine you are on — the same venv-path pair `AGENTS.md`
+documents:
 
 | # | Gate | CI job | Windows | macOS / Linux |
 |---|------|--------|---------|---------------|
-| 5 | pytest | `python-test*` | `.venv\Scripts\python.exe -m pytest tests/ -q` | `.venv/bin/python -m pytest tests/ -q` |
+| 5 | pytest | `python-test*` | `.venv\Scripts\python.exe -m pytest tests/ -v` | `.venv/bin/python -m pytest tests/ -v` |
 | 6 | ruff — note `scripts` | `python-lint` | `.venv\Scripts\ruff.exe check python tests benchmarks scripts` | `.venv/bin/ruff check python tests benchmarks scripts` |
 | 7 | bandit | `python-lint` | `.venv\Scripts\bandit.exe -c pyproject.toml -r python` | `.venv/bin/bandit -c pyproject.toml -r python` |
 | 8 | pyright | `python-lint` | `.venv\Scripts\pyright.exe` | `.venv/bin/pyright` |
+
+Step 5 carries CI's `-v`, which is the flag the `python-test*` jobs run; the release
+smoke test runs the same suite with `-q`. The two differ in verbosity only.
 
 Steps 1-9 must succeed before pushing. Steps 10-11 rarely fail from a code change, but
 they are gates on `main`, so a release must not skip them.
@@ -155,6 +159,9 @@ Don't release with unreviewed dependency PRs piling up.
    - **CI / python-test, python-test-windows, python-test-macos (push)** - pytest passes against a maturin-built wheel on each OS
    - **CI / lint (push)** - Format and clippy pass
    - **CI / python-lint (push)** - ruff, bandit, and pyright pass
+   - **CI / cargo audit, pip-audit, CodeQL, Action pin comments (push)** - supply-chain gates
+   - **CI / Coverage (informational) (push)** - a failure here means the measurement broke,
+     not that coverage fell; it still has to be diagnosed before a release
 
 Do NOT proceed if CI is failing.
 
@@ -176,8 +183,14 @@ After pushing the tag:
    - **windows** (x64)
    - **macos** (x86_64, aarch64)
    - **sdist**
-   - **smoke-test** (ubuntu/windows/macos) - pytest against the built wheels
+   - **sbom** - CycloneDX SBOMs for the Rust and Python sides, attached to the release
+   - **smoke-test** - one leg per published wheel, each on a runner of that wheel's own
+     architecture (ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest,
+     macos-15-intel). Each asserts the downloaded wheel's platform tag before running
+     pytest against it, so a leg cannot silently test some other wheel twice.
    - **Publish to PyPI**
+   - **Create GitHub Release** - attaches the wheels and SBOMs, with notes sliced out of
+     `CHANGELOG.md`; it fails rather than publishing empty notes if the tag has no entry
 
 ### 8. Verify PyPI Publication
 
@@ -222,5 +235,5 @@ uv run maturin develop --release
 
 | Workflow | Trigger | Jobs |
 |----------|---------|------|
-| CI | Push/PR to main | `test` (cargo test), `python-test` / `python-test-windows` / `python-test-macos` (pytest against a maturin-built wheel per OS), `lint` (fmt + clippy), `python-lint` (ruff + bandit + pyright) |
-| Release | Push tag `v*` | Build wheels (linux/win/mac) + sdist + `smoke-test` (pytest against the built wheels) + PyPI publish |
+| CI | Push/PR to main | `test` (`cargo test --release` + build), `python-test` / `python-test-windows` / `python-test-macos` (pytest against a maturin-built wheel per OS), `lint` (fmt + clippy), `python-lint` (ruff + bandit + pyright), `coverage` (informational), `cargo-audit`, `pip-audit`, `codeql` (python, rust), `action-pins`, `dependency-review` (pull requests only) |
+| Release | Push tag `v*` | `linux` (x86_64, aarch64), `windows` (x64), `macos` (x86_64, aarch64), `sdist`, `sbom`, `smoke-test` (five legs, one per published wheel, each on a runner of that wheel's architecture), `release` (PyPI publish), `github-release` (tagged Release with wheels and SBOMs) |

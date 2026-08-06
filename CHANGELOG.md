@@ -5,9 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1] - 2026-08-06
 
 ### Fixed
+- **A `DATA_BAR` conditional format beside sparklines no longer writes a corrupt workbook.**
+  The guard that refuses the databar+sparkline pair (a known rust_xlsxwriter 0.97.x defect —
+  the writer emits unbalanced `<ext>` elements and Excel reports the file as damaged) matched
+  its type string case-sensitively, while the dispatcher that applies conditional formats
+  lowercases first. So `data_bar` was refused and `DATA_BAR` slipped past the guard, was
+  applied as a real data bar, and produced exactly the silently-corrupt file the guard exists
+  to prevent — accepted input, successful return, a workbook Excel calls damaged. The guard
+  now normalizes case the same way the dispatcher does, and the guard's test covers the case
+  axis as well as the spelling axis.
+- **The `cells` option's nested `num_format`, `align_horizontal`, and `align_vertical` values
+  are classified, and an explicit `None` reads as unset.** A wrong-typed value — say
+  `cells={"A1": {"value": 1, "num_format": 42}}` — raised the binding's own bare `TypeError`,
+  outside the documented exception hierarchy; it is now a `ConfigurationTypeError` naming the
+  cell, the key, and the offending type (still a `TypeError`, so existing handlers keep
+  working). Passing `None` for any of these keys, `wrap_text` included, previously raised the
+  same bare error; it now means "not given", matching every other optional value in the API.
+- **Apply-time errors for nested option dicts no longer carry a stray class-name prefix.**
+  A non-string key in a chart `series` item or a textbox `font` dict produced a message
+  beginning `ConfigurationTypeError: ...` on an exception that is not one — the class name of
+  an internal error surviving as message text. The message now reads like every other
+  configuration error. (The exception class itself is unchanged; aligning it with the
+  extract-time `ConfigurationTypeError` changes the builtin base an `except` clause sees,
+  which the stability policy reserves for 2.0.0.)
+- **The duplicate-table-name pre-check folds names with full Unicode case rules.** It
+  compared with an ASCII-only fold, so two table names differing only by non-ASCII case —
+  `TÄBLE` and `täble` — passed the pre-check and collided only during the save, as a
+  `FileError` naming neither sheet. The pre-check now uses the same case fold as the
+  underlying writer's own uniqueness check and reports both sheet names up front.
+- **`docs/errors.md` and the exception docstrings now describe save-time classification as it
+  is.** Workbook rules the writer only checks while serialising — a duplicate sheet name, a
+  chart range naming a sheet that does not exist — surface as `FileError`, and an image file
+  that cannot be read surfaces as `ConfigurationError`; the documentation claimed otherwise
+  in both directions. The docs and the `FileError`/`WorkbookValidationError` docstrings state
+  the actual behavior, with a worked example of each. (Reclassifying the failures themselves
+  is a builtin-base change and waits for 2.0.0.)
+- **`uv.lock` is current again, and a test now keeps it that way.** The 1.1.0 release bumped
+  the version and raised `requires-python` to `>=3.10` without re-running `uv lock`, so the
+  tracked lockfile went on recording `xlsxturbo 0.21.0` plus resolution legs for Python 3.9,
+  which the project no longer supports. Nothing read the lockfile in CI, so nothing noticed.
+  The lockfile is regenerated, and `tests/test_ci_config.py` asserts the locked version
+  matches `pyproject.toml` — that test fails the next release that skips the re-lock.
+- **Two stale in-source documents told the next reader the opposite of the design.** The
+  `ConvertError` rustdoc still described the `From<String>` default whose removal was the
+  point of the 0.21.0 redesign, and the module docstring pointed benchmark readers at README
+  tables that moved to the documentation site in 0.19.0. Both now match reality, as do
+  `BUILD.md`'s release-workflow job lists, which had drifted behind the five-leg smoke test.
+
 - **Every published wheel is now smoke-tested on a runner of its own architecture.** Two of
   the five — Linux `aarch64` and macOS `x86_64` — were built, published to PyPI, and never
   executed anywhere. Both are cross-compiled, and when the pipeline was written no hosted
@@ -42,6 +89,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and cannot take a fix shipped on 1.1).
 - Issue-template version placeholders suggested `0.18.0` and `0.17.2`, including a worked
   benchmark example comparing two pre-1.0 releases.
+
+### Changed
+- **`dfs_to_xlsx`'s docstring documents `conditional_formats` pattern matching.** Both
+  functions share the same implementation, which matches column names and wildcard patterns
+  alike; the multi-sheet docstring said "column names" only, under-documenting a working
+  feature.
+- **Format-key lists are composed, not restated.** The cell-scope key list restated all six
+  font-scope keys by hand; the scopes now compose, so a font-level key added once cannot
+  diverge the rich-text and cell scopes silently. User-visible key lists in unknown-key
+  errors are unchanged, including their order.
+- Rust dependencies refreshed within their declared ranges: rust_xlsxwriter 0.97.1 (the
+  databar+sparkline defect is verified still present there — the guard and its signal test
+  stay), pyo3 0.29.2, clap 4.6.6, and the transitive tail. Test floor for polars raised to
+  1.43.2 (Dependabot #31).
 
 ### Internal
 - `tests/test_options_types_match_the_stub.py` compares every `ExportOptions` field

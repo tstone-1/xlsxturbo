@@ -32,12 +32,11 @@ use std::fs::File;
 /// misspelled option, and `FileError` would be unraisable. Everything else the hierarchy
 /// distinguishes is already visible at the boundary.
 ///
-/// `From<String>` maps to [`ConvertError::Config`], so every existing `?` on a
-/// `Result<_, String>` in this module keeps compiling and only the four genuinely
-/// filesystem-facing calls name a variant. The cost of that convenience is that a
-/// filesystem call added later defaults to `Config` unless it is tagged; the tests in
-/// `tests/test_errors.py` pin the known paths, and this comment is the warning for the
-/// next one. See `docs/roadmap-1.0.md` decision D6.
+/// Every construction site names its variant. There is no `From<String>`, so a failure
+/// site added later does not compile until it chooses one, rather than defaulting to
+/// [`ConvertError::Config`] and blaming the caller's options for a filesystem problem.
+/// The comment below the `Error` impl records why that default was removed; see
+/// `docs/roadmap-1.0.md` decision D6.
 #[derive(Debug)]
 pub enum ConvertError {
     /// Traceable to an option, a value, or the data. Becomes `ConfigurationError`.

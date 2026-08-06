@@ -534,7 +534,7 @@ fn version() -> &'static str {
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
 ///                     Example: {"price_*": {"bg_color": "#D6EAF8", "num_format": "$#,##0.00"}}
-///     conditional_formats: Dict mapping column names to conditional format configs (default: None)
+///     conditional_formats: Dict mapping column names/patterns to conditional format configs (default: None)
 ///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
 ///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
@@ -709,7 +709,15 @@ fn dfs_to_xlsx<'py>(
             if row_count > 0 {
                 if let Some(name) = effective_table_name.as_deref() {
                     let sanitized = sanitize_table_name(name);
-                    let key = sanitized.to_ascii_lowercase();
+                    // `to_lowercase`, not `to_ascii_lowercase`: this fold has to
+                    // match the writer's own uniqueness check exactly, and
+                    // rust_xlsxwriter folds table names with `to_lowercase`. A
+                    // narrower fold under-reaches -- sanitization keeps every
+                    // alphanumeric codepoint, so 'TÄBLE' and 'täble' both reach the
+                    // workbook, pass this check, and collide during the save, where
+                    // the message names neither sheet. A wider one would refuse
+                    // names Excel accepts, which is the more expensive direction.
+                    let key = sanitized.to_lowercase();
                     if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
                         return Err(errors::workbook_validation(format!(
                             "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
@@ -757,8 +765,9 @@ fn dfs_to_xlsx<'py>(
 /// xlsxturbo - High-performance Excel writer
 ///
 /// A Rust-powered library for converting DataFrames and CSV files to Excel XLSX format.
-/// Substantially faster than pandas + openpyxl; see the README for machine-labeled
-/// benchmark tables (the durable, reproducible source for performance numbers).
+/// Substantially faster than pandas + openpyxl; the machine-labeled benchmark tables
+/// (the durable, reproducible source for performance numbers) are on the performance
+/// page: https://tstone-1.github.io/xlsxturbo/performance/
 ///
 /// Features:
 /// - Direct DataFrame support (pandas and polars)

@@ -1,7 +1,7 @@
 //! Image, checkbox, and textbox application helpers.
 
 use crate::parse::{parse_cell_ref, parse_color_enum, parse_column_format};
-use crate::types::{pydict_to_hashmap, CheckboxConfig, ImageConfig, OptionMap, TextboxConfig};
+use crate::types::{pydict_to_hashmap_str, CheckboxConfig, ImageConfig, OptionMap, TextboxConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Image, Shape, ShapeFont, ShapeFormat, ShapeLine, ShapeSolidFill, Worksheet};
@@ -145,9 +145,10 @@ pub(crate) fn apply_textboxes(
                     let font_dict = bound
                         .cast::<pyo3::types::PyDict>()
                         .map_err(|_| format!("textboxes['{}']: 'font' must be a dict", cell_ref))?;
-                    let font_map =
-                        pydict_to_hashmap(font_dict, &format!("textboxes['{}']: 'font'", cell_ref))
-                            .map_err(|e| e.to_string())?;
+                    let font_map = pydict_to_hashmap_str(
+                        font_dict,
+                        &format!("textboxes['{}']: 'font'", cell_ref),
+                    )?;
                     let font = build_shape_font(py, cell_ref, &font_map)?;
                     shape = shape.set_font(&font);
                 }

@@ -41,6 +41,7 @@ PANDAS2_REQUIREMENTS = REPO_ROOT / "requirements-test-pandas2.txt"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
+UV_LOCK = REPO_ROOT / "uv.lock"
 
 # Majors deliberately held back, mapped to the Python 3.x minor their next major
 # requires. The hold is legitimate only while this project supports something
@@ -247,6 +248,58 @@ class TestBothPandasMajorsAreExercised:
             f"requirements-test.txt now allows only pandas {floor_major}.x, so "
             f"{PANDAS2_REQUIREMENTS.name} and its CI leg are redundant -- remove both, and "
             f"this test with them"
+        )
+
+
+def _project_version() -> str:
+    """The version declared in pyproject.toml's `[project]` table."""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    section = re.split(r"^\[project\]$", text, maxsplit=1, flags=re.MULTILINE)
+    assert len(section) == 2, "pyproject.toml has no [project] table"
+    body = re.split(r"^\[", section[1], maxsplit=1, flags=re.MULTILINE)[0]
+    match = re.search(r'^version\s*=\s*"([^"]+)"', body, re.MULTILINE)
+    assert match, "could not read a version out of pyproject.toml's [project] table"
+    return match.group(1)
+
+
+def _locked_version(package: str) -> str:
+    """The version `uv.lock` records for `package`.
+
+    Read with a regex rather than `tomllib`, which arrived in 3.11 while this
+    project still supports 3.10, and rather than a third-party TOML parser,
+    which would have to be declared in requirements-test.txt for one field.
+    """
+    blocks = UV_LOCK.read_text(encoding="utf-8").split("[[package]]")
+    assert len(blocks) > 1, "uv.lock declares no packages"
+    for block in blocks[1:]:
+        if not re.search(rf'^name = "{re.escape(package)}"$', block, re.MULTILINE):
+            continue
+        match = re.search(r'^version = "([^"]+)"$', block, re.MULTILINE)
+        assert match, f"uv.lock's {package} entry records no version"
+        return match.group(1)
+    raise AssertionError(f"uv.lock has no [[package]] entry for {package}")
+
+
+class TestTheLockfileTracksTheProjectVersion:
+    """`uv.lock` pins this project itself, so a release has to re-lock.
+
+    AGENTS.md already says to run `uv lock` when the dev dependencies change,
+    and a version bump is such a change -- the lockfile records `xlsxturbo`'s
+    own version. The 1.1.0 release did not re-lock, so the tracked lockfile went
+    on resolving 0.21.0, and since the same commit raised `requires-python` to
+    `>=3.10` it also kept resolution legs for an interpreter this project no
+    longer supports. Nothing noticed: no job and no other test reads `uv.lock`.
+
+    A failure here means one thing -- a version was bumped without `uv lock`.
+    Run it and commit the result.
+    """
+
+    def test_the_locked_version_matches_pyproject(self) -> None:
+        """The `xlsxturbo` entry in uv.lock names the version being shipped."""
+        locked, declared = _locked_version("xlsxturbo"), _project_version()
+        assert locked == declared, (
+            f"uv.lock locks xlsxturbo {locked} while pyproject.toml declares {declared}. "
+            f"Run `uv lock` and commit the result."
         )
 
 

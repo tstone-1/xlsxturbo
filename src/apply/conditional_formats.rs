@@ -481,12 +481,12 @@ pub(crate) fn apply_conditional_formats(
 /// Reject the one option combination that rust_xlsxwriter cannot write correctly.
 ///
 /// A `data_bar` conditional format and a sparkline on the same worksheet make
-/// rust_xlsxwriter 0.97.0 emit **unbalanced `<ext>` elements** in the worksheet
+/// rust_xlsxwriter 0.97.1 emit **unbalanced `<ext>` elements** in the worksheet
 /// XML: three opened, two closed. The file is not well-formed, so Excel reports
 /// it as damaged and offers to repair it.
 ///
 /// Reproduced against rust_xlsxwriter alone, with no xlsxturbo code in the path,
-/// so the defect is upstream and cannot be fixed here. 0.97.0 is the latest
+/// so the defect is upstream and cannot be fixed here. 0.97.1 is the latest
 /// release; there is nothing to upgrade to.
 ///
 /// Refusing is the right response rather than a warning, because the alternative
@@ -496,9 +496,9 @@ pub(crate) fn apply_conditional_formats(
 ///
 /// **Narrow on purpose.** Only `data_bar` collides; the other four
 /// conditional-format types are unaffected, and each feature alone is fine.
-/// `TestKnownUpstreamDefect` in `tests/test_options.py` pins the upstream bug at
-/// the rust_xlsxwriter level, so the day it is fixed a test fails and this guard
-/// can be removed rather than outliving its reason.
+/// `tests/upstream_defect.rs` pins the upstream bug at the rust_xlsxwriter
+/// level, so the day it is fixed a test fails and this guard can be removed
+/// rather than outliving its reason.
 ///
 /// Raises `ConfigurationError`, not `WorkbookValidationError`, deliberately: the
 /// latter is documented as "well-formed configuration that *Excel* forbids", and
@@ -528,11 +528,18 @@ pub(crate) fn reject_databar_with_sparklines(
             let Ok(format_type) = raw.bind(py).extract::<String>() else {
                 continue;
             };
-            if matches!(format_type.as_str(), "data_bar" | "databar") {
+            // Lowercased and matched against exactly the arm
+            // `apply_single_conditional_format` dispatches data bars from: the
+            // guard has to refuse precisely what the dispatcher would apply, no
+            // more and no less. Matching the raw string would let 'DATA_BAR'
+            // through to the writer; normalising more aggressively (trimming,
+            // say) would refuse spellings the dispatcher rejects anyway, which
+            // costs a feature for a reason the user cannot see.
+            if matches!(format_type.to_lowercase().as_str(), "data_bar" | "databar") {
                 return Err(format!(
                     "sheet '{}': conditional_formats['{}'] is a data bar and this sheet \
                      also has sparklines. That combination makes the Excel writer emit a \
-                     corrupt workbook (a known defect in rust_xlsxwriter 0.97.0), so \
+                     corrupt workbook (a known defect in rust_xlsxwriter 0.97.1), so \
                      xlsxturbo refuses it instead of writing a file Excel reports as \
                      damaged. Workarounds: move the sparklines to another sheet, or use a \
                      '2_color_scale' or '3_color_scale' conditional format.",

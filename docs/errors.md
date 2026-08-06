@@ -24,11 +24,11 @@ The subclasses say what kind of failure it was:
 | Exception | Raised for | Also a |
 |-----------|------------|--------|
 | `OptionError` | Never raised itself — the parent of the two below, so `except OptionError` catches every problem with what you passed | — |
-| `ConfigurationError` | An option or argument **value** is invalid: an unrecognised key, an unparseable colour or cell reference, an out-of-range number, an invalid chart range | `OptionError`, `ValueError` |
+| `ConfigurationError` | An option or argument **value** is invalid: an unrecognised key, an unparseable colour or cell reference, an out-of-range number, an invalid chart range, an [image file that cannot be read](#save-time-validation-lands-in-fileerror) | `OptionError`, `ValueError` |
 | `ConfigurationTypeError` | An option or argument has the wrong **type**: a list where a dict is required, a non-string dictionary key, a `bytes` path | `OptionError`, `TypeError` |
 | `InputDataError` | The object passed as data is not a pandas or polars DataFrame, or its columns cannot be read | `ValueError` |
-| `FileError` | A filesystem read or write failed: a missing output directory, a permissions problem, a full disk, an unreadable CSV input | `OSError`, `ValueError` |
-| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it — two sheets claiming the same table name | `ConfigurationError`, so also `OptionError` and `ValueError` |
+| `FileError` | A filesystem read or write failed: a missing output directory, a permissions problem, a full disk, an unreadable CSV input — and the [workbook rules Excel's writer checks only during the save](#save-time-validation-lands-in-fileerror) | `OSError`, `ValueError` |
+| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it. Its one raise site is the pre-check for two sheets claiming the same table name | `ConfigurationError`, so also `OptionError` and `ValueError` |
 
 ### "Anything wrong with what I passed"
 
@@ -47,6 +47,10 @@ except xlsxturbo.FileError as exc:
 
 `OptionError` arrived in 0.21.0 by reparenting, not renaming, so every existing
 `except` clause means exactly what it did before.
+
+Two failures cross that split rather than following it — see [Save-time validation lands
+in `FileError`](#save-time-validation-lands-in-fileerror) before writing a handler that
+treats the two branches as "their mistake" and "ours".
 
 Messages carry the option and the specific key or cell reference that caused them, so
 they identify the offending entry rather than just the option family:
@@ -119,6 +123,38 @@ POSIX equivalent rather than the native code, so the comparison above means the 
 thing everywhere. Where no meaningful number is available it stays `None`, so compare
 against a specific constant rather than testing for truthiness.
 
+### Save-time validation lands in `FileError`
+
+Not every rule Excel imposes can be checked when the option is applied. The underlying
+writer defers several of them to the moment the workbook is serialised, and whatever
+fails there is reported by the save — so a mistake in what you passed can arrive as a
+`FileError`:
+
+```python
+xlsxturbo.dfs_to_xlsx([(df, "Data"), (df, "Data")], "out.xlsx")
+# FileError: Failed to save workbook to 'out.xlsx': Worksheet name 'data' has
+# already been used in this workbook.
+```
+
+A duplicate sheet name and a chart range naming a sheet the workbook does not contain
+are the two you are most likely to meet. Both keep the `Failed to save workbook to
+'<path>': ` prefix, and the writer's own sentence after it names the rule that was broken.
+
+The mirror case runs the other way: an image xlsxturbo cannot open is a
+`ConfigurationError`, not a `FileError`, because the path arrived as an option and the
+failure is reported by the layer that applies options.
+
+```python
+xlsxturbo.df_to_xlsx(df, "out.xlsx", images={"A1": "logo.png"})
+# ConfigurationError: Failed to load image 'logo.png': No such file or directory (os error 2)
+```
+
+Both messages name the sheet, the option or the path, and `except
+xlsxturbo.XlsxTurboError` catches either — which is what a top-level export handler
+wants. The distinction matters for a handler that branches on whose fault the failure
+was: a `FileError` is not on its own evidence that the disk was involved, and a
+`ConfigurationError` is not on its own evidence that it was not.
+
 ### What is not in the hierarchy
 
 Argument conversion performed by the Python/Rust binding before xlsxturbo sees the value
@@ -154,7 +190,7 @@ xlsxturbo.df_to_xlsx(
 ```
 
 The underlying Excel writer produces a corrupt workbook for that pair — Excel opens it
-and offers to repair it. The defect is upstream, in rust_xlsxwriter 0.97.0, and cannot be
+and offers to repair it. The defect is upstream, in rust_xlsxwriter 0.97.1, and cannot be
 fixed here, so xlsxturbo refuses rather than writing a file you cannot open. Failing at
 the call is the lesser harm: a corrupt workbook is typically discovered by whoever you
 sent it to.

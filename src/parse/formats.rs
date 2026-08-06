@@ -145,16 +145,19 @@ pub(crate) enum FormatScope {
 impl FormatScope {
     /// The keys this scope accepts, in the order they should be listed to a
     /// user whose typo just got rejected.
+    ///
+    /// Composed rather than listed per scope: the scopes nest, so a key
+    /// declared once cannot end up in one of them and not the other.
     fn valid_keys(self) -> Vec<&'static str> {
-        match self {
-            FormatScope::Font => FORMAT_KEYS_FONT.to_vec(),
-            FormatScope::Cell => FORMAT_KEYS_BASE.to_vec(),
-            FormatScope::Column => {
-                let mut keys = FORMAT_KEYS_BASE.to_vec();
-                keys.extend_from_slice(FORMAT_KEYS_COLUMN);
-                keys
-            }
+        let mut keys = FORMAT_KEYS_FONT.to_vec();
+        if self == FormatScope::Font {
+            return keys;
         }
+        keys.extend_from_slice(FORMAT_KEYS_CELL);
+        if self == FormatScope::Column {
+            keys.extend_from_slice(FORMAT_KEYS_COLUMN);
+        }
+        keys
     }
 }
 
@@ -169,14 +172,9 @@ const FORMAT_KEYS_FONT: &[&str] = &[
     "font_size",
 ];
 
-/// Keys accepted at `Cell` scope and above: the font keys plus cell geometry.
-const FORMAT_KEYS_BASE: &[&str] = &[
-    "bold",
-    "italic",
-    "underline",
-    "bg_color",
-    "font_color",
-    "font_size",
+/// Cell geometry — what `Cell` scope and above add to the font keys. The font
+/// keys are not restated here; [`FormatScope::valid_keys`] concatenates them.
+const FORMAT_KEYS_CELL: &[&str] = &[
     "border",
     "border_left",
     "border_right",

@@ -36,7 +36,13 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import REPO_ROOT, repo_checkout_available
+from tests.helpers import (
+    HAS_OPENPYXL,
+    REPO_ROOT,
+    active_ws,
+    load_workbook,
+    repo_checkout_available,
+)
 
 # The public names, and the builtin each one must remain an instance of. A class
 # appearing here with the wrong builtin is a breaking change for anyone whose
@@ -496,6 +502,156 @@ class TestNestedExtractionStaysInTheHierarchy:
         """
         stale = SIGNATURE_CONVERTED - set(inspect.signature(xlsxturbo.df_to_xlsx).parameters)
         assert not stale, f"SIGNATURE_CONVERTED names non-parameters: {sorted(stale)}"
+
+
+# One deliberately wrong value per optional sub-key of a ``cells`` entry dict,
+# with the Python type name the message has to name. The probe table above
+# reaches one layer less far: it drives a wrong nested *key* per extractor
+# family, and a `cells` entry's own option dict is a level below that.
+CELL_VALUE_PROBES: dict[str, tuple[Any, str]] = {
+    "num_format": (42, "int"),
+    "align_horizontal": (42, "int"),
+    "align_vertical": (["top"], "list"),
+    "wrap_text": ("yes", "str"),
+}
+
+
+class TestCellsDictValuesStayInTheHierarchy:
+    """The ``cells`` dict form classifies its own sub-values, and takes ``None``.
+
+    ``cells={"A1": {"value": 1, "num_format": 42}}`` raised PyO3's own
+    ``TypeError`` -- outside the hierarchy, which ``docs/errors.md`` promises
+    covers every failure the library raises -- and ``num_format=None`` raised
+    that same error rather than reading as "not given". These keys are the ones
+    a caller writes out by name, so a ``None`` from their own conditional
+    expression has to be as passable as omitting the key.
+    """
+
+    @pytest.mark.parametrize("key", sorted(CELL_VALUE_PROBES))
+    def test_a_wrong_typed_sub_value_is_classified(
+        self, key: str, tmp_path: Path
+    ) -> None:
+        """The failure is a ``ConfigurationTypeError`` naming cell, key and type.
+
+        Args:
+            key: The sub-key under test, used to look up its probe.
+            tmp_path: pytest's per-test temporary directory.
+        """
+        bad, type_name = CELL_VALUE_PROBES[key]
+        cells: dict[str, Any] = {"C1": {"value": 1, key: bad}}
+        with pytest.raises(xlsxturbo.ConfigurationTypeError) as caught:
+            xlsxturbo.df_to_xlsx(_frame(), tmp_path / "out.xlsx", cells=cells)
+        message = str(caught.value)
+        for expected in ("cells['C1']", key, type_name):
+            assert expected in message, (
+                f"message does not name {expected!r}: {message!r}"
+            )
+
+    @pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required to read the workbook back")
+    @pytest.mark.parametrize("key", sorted(CELL_VALUE_PROBES))
+    def test_an_explicit_none_reads_as_unset(self, key: str, tmp_path: Path) -> None:
+        """A ``None`` sub-value writes the cell as if the key were absent.
+
+        The control for the test above: classifying the type failure is only
+        half of it, and the half a caller hits far more often is passing the key
+        with nothing in it.
+
+        Args:
+            key: The sub-key under test.
+            tmp_path: pytest's per-test temporary directory.
+        """
+        out = tmp_path / "out.xlsx"
+        cells: dict[str, Any] = {"C1": {"value": "x", key: None}}
+        xlsxturbo.df_to_xlsx(_frame(), out, cells=cells)
+        wb = load_workbook(out)
+        cell = active_ws(wb)["C1"]
+        assert cell.value == "x"
+        assert cell.number_format == "General"
+        assert cell.alignment.horizontal is None
+        assert cell.alignment.vertical is None
+        assert not cell.alignment.wrapText
+        wb.close()
+
+
+# A chart series item whose option dict has a non-string key. The mistake is the
+# same one `NESTED_TYPE_PROBES["charts"]` makes at the chart level, but this one
+# is only reachable at write time, when the series list stored unparsed at
+# extract time is finally read.
+BAD_SERIES_KEY: dict[str, Any] = {
+    "charts": {"D2": {"type": "column", "series": [{1: "x"}]}}
+}
+
+# A textbox font dict with the same non-string key. The other option whose
+# nested dict is first read at write time, through the same seam.
+BAD_TEXTBOX_FONT_KEY: dict[str, Any] = {
+    "textboxes": {"D1": {"text": "note", "font": {1: "y"}}}
+}
+
+# One entry per apply-time re-parse site: the kwargs that reach it, and the
+# fragments its message must carry.
+APPLY_TIME_NESTED_DICT_CASES = [
+    pytest.param(BAD_SERIES_KEY, ("charts['D2']", "series item 0", "int"), id="chart-series"),
+    pytest.param(BAD_TEXTBOX_FONT_KEY, ("textboxes['D1']", "'font'", "int"), id="textbox-font"),
+]
+
+
+class TestApplyTimeNestedDictsReportFaithfully:
+    """A nested dict re-read at write time reports its own failure, not a class name.
+
+    The apply layer's error currency is ``str`` and the boundary turns that into
+    a ``ConfigurationError``. A ``PyErr`` flattened into that channel with
+    ``to_string()`` renders as ``"<class>: <message>"``, so the caller reads
+    ``ConfigurationTypeError:`` at the head of an exception that is not one --
+    the demoted class name surviving as message text.
+    """
+
+    @pytest.mark.parametrize(("kwargs", "anchors"), APPLY_TIME_NESTED_DICT_CASES)
+    def test_the_message_carries_no_class_name_prefix(
+        self, kwargs: dict[str, Any], anchors: tuple[str, ...], tmp_path: Path
+    ) -> None:
+        """No class name heads the message, which still names anchor and type.
+
+        Args:
+            kwargs: the option that reaches an apply-time nested-dict re-parse.
+            anchors: fragments the message must carry.
+            tmp_path: pytest's per-test temporary directory.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError) as caught:
+            xlsxturbo.df_to_xlsx(_frame(), tmp_path / "out.xlsx", **kwargs)
+        message = str(caught.value)
+        assert not re.match(r"^\w+Error: ", message), (
+            f"message is prefixed with an exception class name: {message!r}"
+        )
+        for expected in anchors:
+            assert expected in message, (
+                f"message does not name {expected!r}: {message!r}"
+            )
+
+    @pytest.mark.parametrize(("kwargs", "anchors"), APPLY_TIME_NESTED_DICT_CASES)
+    def test_the_class_is_the_one_the_stability_promise_pins(
+        self, kwargs: dict[str, Any], anchors: tuple[str, ...], tmp_path: Path
+    ) -> None:
+        """An apply-time nested-key failure is a ``ConfigurationError`` today.
+
+        The same mistake at extract time is a ``ConfigurationTypeError``, so the
+        value/type split reads differently depending on which layer catches it.
+        Correcting that changes the builtin base an existing ``except`` clause
+        sees, which ``docs/stability.md`` makes a major-version event -- this
+        pins the current class so that change is a deliberate red test rather
+        than silent drift.
+
+        Args:
+            kwargs: the option that reaches an apply-time nested-dict re-parse.
+            anchors: fragments the message must carry (unused here; keeps the
+                two tests on one parameter table).
+            tmp_path: pytest's per-test temporary directory.
+        """
+        with pytest.raises(xlsxturbo.ConfigurationError) as caught:
+            xlsxturbo.df_to_xlsx(_frame(), tmp_path / "out.xlsx", **kwargs)
+        assert not isinstance(caught.value, TypeError), (
+            "an `except TypeError` handler now catches this failure, which is a "
+            "change of builtin base -- see docs/stability.md"
+        )
 
 
 @pytest.mark.skipif(

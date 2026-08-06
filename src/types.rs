@@ -323,9 +323,7 @@ impl<'py, 'm> OptionMap<'py, 'm> {
                 pytype_name(bound)
             )
         })?;
-        pydict_to_hashmap(inner, &format!("{}: '{}'", self.context, key))
-            .map(Some)
-            .map_err(|e| e.to_string())
+        pydict_to_hashmap_str(inner, &format!("{}: '{}'", self.context, key)).map(Some)
     }
 
     /// Reject any key not in `allowed`, using this view's context and no
@@ -410,17 +408,38 @@ pub(crate) fn pydict_to_hashmap(
     dict: &Bound<'_, pyo3::types::PyDict>,
     context: &str,
 ) -> PyResult<HashMap<String, Py<PyAny>>> {
+    // Classified rather than a bare `extract()?`: a non-string key here was the
+    // single most reachable way to escape the public exception hierarchy before
+    // 0.19.1.
+    pydict_to_hashmap_str(dict, context).map_err(crate::errors::configuration_type)
+}
+
+/// `String`-currency form of [`pydict_to_hashmap`], for the apply layer.
+///
+/// Apply-time code re-reads nested option dicts and returns `Result<_, String>`,
+/// so it cannot take the `PyResult` form: flattening that `PyErr` with
+/// `to_string()` renders it as `"<class>: <message>"` and the class name ends up
+/// embedded in the message text the boundary then re-raises. The message itself
+/// lives here once, so both currencies word it identically.
+///
+/// The two forms do not reach Python as the same class: a `String` from the
+/// apply layer is a `ConfigurationError`, not the `ConfigurationTypeError` the
+/// `PyResult` form raises for the same mistake at extract time. Changing that
+/// changes the builtin base an existing `except` clause sees, which
+/// `docs/stability.md` makes a 2.0.0 event, so the classes stay as they are
+/// until then.
+pub(crate) fn pydict_to_hashmap_str(
+    dict: &Bound<'_, pyo3::types::PyDict>,
+    context: &str,
+) -> Result<HashMap<String, Py<PyAny>>, String> {
     let mut map = HashMap::new();
     for (k, v) in dict.iter() {
-        // Classified rather than a bare `extract()?`: a non-string key here was
-        // the single most reachable way to escape the public exception
-        // hierarchy before 0.19.1.
         let key: String = k.extract().map_err(|_| {
-            crate::errors::configuration_type(format!(
+            format!(
                 "{}: option dict keys must be strings, got {}",
                 context,
                 pytype_name(&k)
-            ))
+            )
         })?;
         map.insert(key, v.unbind());
     }
