@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.2] - Unreleased
+## [Unreleased]
 
 ### Changed
 - `rust_xlsxwriter` 0.97.1 → 0.98.0, and eleven transitive crates refreshed within their
@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points share one config and must move together; Dependabot files one PR per path, so
   each of its three PRs failed with `Loaded a configuration file for version '4.37.6', but
   running version '4.37.4'` and none could pass alone.
+- Unreleased work now accumulates under `## [Unreleased]` in this file, and gains its
+  version number and date only at release time. The previous convention wrote the version
+  in early (`## [1.1.2] - Unreleased`), which `release-notes.sh` matches — it tests
+  `## [<version>]` as a prefix and ignores the rest of the line — so a tag pushed before
+  the date was filled in would have published a GitHub Release whose notes say Unreleased,
+  with no job failing. `## [Unreleased]` matches no tag and fails the release job instead.
+  `BUILD.md` step 2 and `tests/test_ci_config.py::TestChangelogHeadings` now say so.
 
 ### Unchanged, and measured rather than assumed
 - The databar-beside-sparkline guard stays. `tests/upstream_defect.rs` was run against

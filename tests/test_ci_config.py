@@ -391,3 +391,77 @@ class TestDeferredMajorUpgradesExpireWithTheirReason:
             f"HELD_BACK_MAJORS holds back {sorted(stale)}, which requirements-test.txt "
             f"no longer declares"
         )
+
+
+CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+
+# `## [1.2.3] - 2026-08-15`, `## [Unreleased]`, or the legacy unbracketed
+# `## 0.10.0 - 2026-01-16` that 0.2.0, 0.5.0 and 0.10.0 still use.
+_VERSION_HEADING = re.compile(r"^## \[(?P<version>\d[^\]]*)\](?P<rest>.*)$")
+
+
+def _version_headings() -> list[tuple[str, str]]:
+    """Every bracketed version heading in CHANGELOG.md, as (version, rest-of-line)."""
+    return [
+        (match.group("version"), match.group("rest"))
+        for line in CHANGELOG.read_text(encoding="utf-8").splitlines()
+        if (match := _VERSION_HEADING.match(line))
+    ]
+
+
+class TestChangelogHeadings:
+    """A version heading must carry a date, because the release script matches a prefix.
+
+    `.github/scripts/release-notes.sh` selects a section with
+    `index($0, "## [<version>]") == 1` -- a prefix test that ignores the rest of
+    the line. So `## [1.1.2] - Unreleased` is matched by tag `v1.1.2` exactly as
+    a dated heading would be, and the release job publishes a GitHub Release
+    whose notes came from a heading saying Unreleased. Nothing fails.
+
+    Measured both ways against this repo's own CHANGELOG: the `- Unreleased`
+    form exits 0 and prints the section; `## [Unreleased]`, which carries no
+    version, exits 1 with "no CHANGELOG section found" and fails the release job
+    before anything is published. Unreleased work therefore accumulates under
+    `## [Unreleased]` and gets its number and date at release time (BUILD.md
+    step 2). This test is that rule written as code, because the unsafe form is
+    the one a habit from other repos produces.
+    """
+
+    def test_the_file_has_version_headings_to_check(self) -> None:
+        """The emptiness control.
+
+        `_VERSION_HEADING` matching nothing would make every assertion below
+        pass over an empty list, which reads exactly like a clean result.
+        """
+        headings = _version_headings()
+        assert len(headings) > 30, (
+            f"only {len(headings)} bracketed version headings found in CHANGELOG.md; "
+            f"the heading pattern has stopped matching and the checks below are inert"
+        )
+
+    def test_no_version_heading_is_marked_unreleased(self) -> None:
+        """The failure this class exists for."""
+        marked = [
+            version
+            for version, rest in _version_headings()
+            if "unreleased" in rest.lower()
+        ]
+        assert not marked, (
+            f"CHANGELOG.md has version heading(s) {marked} marked Unreleased. "
+            f"release-notes.sh matches '## [<version>]' as a prefix, so tagging that "
+            f"version publishes a release whose notes say Unreleased, and no job fails. "
+            f"Use '## [Unreleased]' with no version until release time; BUILD.md step 2 "
+            f"is where it gains its number and date."
+        )
+
+    def test_every_version_heading_carries_a_date(self) -> None:
+        """A heading with a version but no date is half-renamed, which is the same bug."""
+        undated = [
+            version
+            for version, rest in _version_headings()
+            if not re.match(r"^ - \d{4}-\d{2}-\d{2}$", rest)
+        ]
+        assert not undated, (
+            f"CHANGELOG.md version heading(s) {undated} lack a ' - YYYY-MM-DD' date. "
+            f"A released version is dated; unreleased work belongs under '## [Unreleased]'."
+        )

@@ -118,10 +118,19 @@ Follow SemVer:
 
 ### 2. Update CHANGELOG.md
 
-Add entry for new version with:
-- Date
-- Summary of changes
-- Breaking changes (if any)
+Work in progress accumulates under a single `## [Unreleased]` heading. Releasing means
+renaming that heading to `## [X.Y.Z] - YYYY-MM-DD`, so the entry gains:
+
+- The version number
+- The date
+- Any remaining summary of changes and breaking changes
+
+**Do not write the version into the heading before release** — `## [X.Y.Z] - Unreleased`
+is matched by `.github/scripts/release-notes.sh`, because it matches `## [<version>]` as a
+prefix and ignores the rest of the line. A tag pushed against that heading publishes a
+GitHub Release whose notes say Unreleased, with nothing failing. `## [Unreleased]` matches
+no tag, so forgetting this step fails the release job instead. `tests/test_ci_config.py`
+enforces it.
 
 ### 3. Commit Version Bump
 
