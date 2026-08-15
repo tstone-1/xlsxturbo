@@ -13,6 +13,11 @@
 //! reasons: it is the evidence that the defect is upstream rather than ours, and
 //! it is the only place the fix can be noticed.
 //!
+//! Reported upstream as jmcnamara/rust_xlsxwriter#185 on 2026-08-15, with this
+//! same reproducer. Until then the defect had been worked around for two
+//! releases without ever being filed, which is how a workaround becomes
+//! permanent by nobody's decision.
+//!
 //! The assertions are deliberately the wrong way round: they assert the bug is
 //! *still present*. When it goes away this fails, which is the signal to delete
 //! the guard, this file, and the note in `docs/errors.md`. A workaround nobody

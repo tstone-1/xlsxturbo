@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rust_xlsxwriter 0.98.0 and the unbalanced `<ext>` output is still there, so the
   combination is still refused. The comments that said 0.97.1 was the latest release with
   nothing to upgrade to now name 0.98.0.
+- The defect is now filed upstream as
+  [rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185), with the
+  reproducer that pins it here. It had been worked around for two releases without being
+  reported, which is how a workaround outlives its reason.
 
 ## [1.1.1] - 2026-08-06
 

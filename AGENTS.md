@@ -83,7 +83,13 @@ sparkline on one worksheet, because rust_xlsxwriter emits unbalanced `<ext>` ele
 for that pair and Excel reports the workbook as damaged. Found in 0.97.1; re-measured
 against 0.98.0 when that release came out, which still has it — so a version bump is not
 on its own a reason to revisit the guard, and `tests/upstream_defect.rs` is what answers
-the question. Found by the full-bundle test in
+the question.
+
+**Reported upstream as jmcnamara/rust_xlsxwriter#185** (2026-08-15). Check that issue
+before doing any work here: if it is closed, the next `rust_xlsxwriter` release is worth
+measuring, and a green `tests/upstream_defect.rs` after the bump means the guard and this
+whole section come out. It went two releases unreported while being worked around — the
+failure mode is that nobody files it, not that nobody notices it. Found by the full-bundle test in
 `tests/test_options.py`, which writes all 24 options at once — a combination nothing else
 exercised.
 

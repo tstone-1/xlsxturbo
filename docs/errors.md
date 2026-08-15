@@ -191,8 +191,9 @@ xlsxturbo.df_to_xlsx(
 
 The underlying Excel writer produces a corrupt workbook for that pair — Excel opens it
 and offers to repair it. The defect is upstream, in rust_xlsxwriter — present in 0.97.1 and still present in
-0.98.0 — and cannot be fixed here, so xlsxturbo refuses rather than writing a file you
-cannot open. Failing at
+0.98.0, reported as
+[rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185) — and
+cannot be fixed here, so xlsxturbo refuses rather than writing a file you cannot open. Failing at
 the call is the lesser harm: a corrupt workbook is typically discovered by whoever you
 sent it to.
 
