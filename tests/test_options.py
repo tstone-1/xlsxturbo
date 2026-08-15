@@ -42,7 +42,7 @@ SAMPLE_VALUES: dict[str, Any] = {
     "header_format": {"bold": True},
     "column_formats": {"Score": {"bold": True}},
     # Deliberately a colour scale rather than a data bar: a data bar and a
-    # sparkline on the same worksheet make rust_xlsxwriter 0.97.1 emit malformed
+    # sparkline on the same worksheet make rust_xlsxwriter emit malformed
     # XML -- so xlsxturbo refuses that pair outright, which would make the
     # full-bundle check below fail for a reason having nothing to do with
     # ExportOptions. See TestDataBarSparklineGuard at the bottom of this module.
@@ -283,7 +283,7 @@ class TestDataBarSparklineGuard:
     """The one option combination the writer corrupts is refused, not written.
 
     A ``data_bar`` conditional format beside a sparkline makes rust_xlsxwriter
-    0.97.1 emit malformed worksheet XML, so xlsxturbo refuses the pair. The
+    emit malformed worksheet XML, so xlsxturbo refuses the pair. The
     upstream defect itself is pinned in ``tests/upstream_defect.rs``, which uses
     rust_xlsxwriter directly -- it has to, because the guard means no Python call
     can produce the corrupt file any more, and something still has to notice the

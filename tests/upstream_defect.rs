@@ -1,9 +1,10 @@
 //! Pins a rust_xlsxwriter defect that xlsxturbo works around.
 //!
 //! A `data_bar` conditional format and a sparkline on the same worksheet make
-//! rust_xlsxwriter 0.97.1 emit unbalanced `<ext>` elements in the worksheet XML:
-//! three opened, two closed. The result is not well-formed, so Excel reports the
-//! workbook as damaged.
+//! rust_xlsxwriter emit unbalanced `<ext>` elements in the worksheet XML: three
+//! opened, two closed. The result is not well-formed, so Excel reports the
+//! workbook as damaged. Found in 0.97.1 and re-measured against 0.98.0, which
+//! still has it.
 //!
 //! `apply::reject_databar_with_sparklines` refuses that combination, which means
 //! the corrupt file is no longer reachable through xlsxturbo's own API -- and

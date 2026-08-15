@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - Unreleased
+
+### Changed
+- `rust_xlsxwriter` 0.97.1 → 0.98.0, and eleven transitive crates refreshed within their
+  declared ranges (cc, find-msvc-tools, futures-core/task/util, js-sys, portable-atomic,
+  and the four wasm-bindgen crates). No API change.
+- CI pins `github/codeql-action` at v4.37.6. Its `init`, `autobuild` and `analyze` entry
+  points share one config and must move together; Dependabot files one PR per path, so
+  each of its three PRs failed with `Loaded a configuration file for version '4.37.6', but
+  running version '4.37.4'` and none could pass alone.
+
+### Unchanged, and measured rather than assumed
+- The databar-beside-sparkline guard stays. `tests/upstream_defect.rs` was run against
+  rust_xlsxwriter 0.98.0 and the unbalanced `<ext>` output is still there, so the
+  combination is still refused. The comments that said 0.97.1 was the latest release with
+  nothing to upgrade to now name 0.98.0.
+
 ## [1.1.1] - 2026-08-06
 
 ### Fixed

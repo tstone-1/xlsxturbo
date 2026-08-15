@@ -481,13 +481,13 @@ pub(crate) fn apply_conditional_formats(
 /// Reject the one option combination that rust_xlsxwriter cannot write correctly.
 ///
 /// A `data_bar` conditional format and a sparkline on the same worksheet make
-/// rust_xlsxwriter 0.97.1 emit **unbalanced `<ext>` elements** in the worksheet
-/// XML: three opened, two closed. The file is not well-formed, so Excel reports
-/// it as damaged and offers to repair it.
+/// rust_xlsxwriter emit **unbalanced `<ext>` elements** in the worksheet XML:
+/// three opened, two closed. The file is not well-formed, so Excel reports it as
+/// damaged and offers to repair it.
 ///
 /// Reproduced against rust_xlsxwriter alone, with no xlsxturbo code in the path,
-/// so the defect is upstream and cannot be fixed here. 0.97.1 is the latest
-/// release; there is nothing to upgrade to.
+/// so the defect is upstream and cannot be fixed here. Present in 0.97.1 and
+/// still present in 0.98.0, the latest release; there is nothing to upgrade to.
 ///
 /// Refusing is the right response rather than a warning, because the alternative
 /// is writing a file the user cannot open and will not discover is broken until
@@ -539,7 +539,8 @@ pub(crate) fn reject_databar_with_sparklines(
                 return Err(format!(
                     "sheet '{}': conditional_formats['{}'] is a data bar and this sheet \
                      also has sparklines. That combination makes the Excel writer emit a \
-                     corrupt workbook (a known defect in rust_xlsxwriter 0.97.1), so \
+                     corrupt workbook (a known defect in rust_xlsxwriter, unfixed as \
+                     of 0.98.0), so \
                      xlsxturbo refuses it instead of writing a file Excel reports as \
                      damaged. Workarounds: move the sparklines to another sheet, or use a \
                      '2_color_scale' or '3_color_scale' conditional format.",

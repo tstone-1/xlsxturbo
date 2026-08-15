@@ -79,8 +79,11 @@ Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py 
 ## The one upstream defect worked around in this codebase
 
 `apply::reject_databar_with_sparklines` refuses a `data_bar` conditional format beside a
-sparkline on one worksheet, because rust_xlsxwriter 0.97.1 emits unbalanced `<ext>` elements
-for that pair and Excel reports the workbook as damaged. Found by the full-bundle test in
+sparkline on one worksheet, because rust_xlsxwriter emits unbalanced `<ext>` elements
+for that pair and Excel reports the workbook as damaged. Found in 0.97.1; re-measured
+against 0.98.0 when that release came out, which still has it — so a version bump is not
+on its own a reason to revisit the guard, and `tests/upstream_defect.rs` is what answers
+the question. Found by the full-bundle test in
 `tests/test_options.py`, which writes all 24 options at once — a combination nothing else
 exercised.
 
