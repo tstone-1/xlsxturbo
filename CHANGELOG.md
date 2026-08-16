@@ -5,10 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.2] - 2026-08-16
+
+### Added
+- **`THIRD-PARTY-LICENSES.md`, shipped in the wheel.** The wheel contains compiled code
+  from 92 Rust crates under MIT, Apache-2.0, Unicode-3.0 and Zlib, and every one of those
+  licenses requires the copyright notice to travel with the binary; `LICENSE` covers only
+  xlsxturbo's own code, so until now the wheel carried none of them. maturin already wrote
+  a CycloneDX SBOM into it, but an SBOM records *which* license applies and not the notice
+  text those licenses ask for. Generated from the dependency tree by
+  `python scripts/gen_third_party_licenses.py --write` (cargo-about, config in `about.toml`,
+  template in `scripts/`), and delivered by PEP 639 `license-files`, which puts it and
+  `LICENSE` in `<dist>.dist-info/licenses/`.
+- `tests/test_third_party_licenses.py` compares the notice against `cargo metadata` in both
+  directions, so a new dependency cannot ship without its notice and a hand-edited file is
+  caught. It also pins `requires = ["maturin>=1.9"]` together with the `license-files`
+  declaration: PEP 639 landed in maturin 1.9.0, and an older backend ignores the key and
+  builds a wheel carrying neither notice with nothing going red.
+
+### Removed
+- **The `data_bar`-beside-sparkline refusal is gone — upstream fixed the defect.**
+  `rust_xlsxwriter` 0.98.1 balances the `<ext>` elements it emits for that pair, so the two
+  features can now be used together on one worksheet and the workbook opens. Filing the
+  report is what ended it: [rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185)
+  was opened on 2026-08-15 and released as 0.98.1 the next morning, after the workaround had
+  been carried across two releases unreported. Removed with it: `reject_databar_with_sparklines`
+  and its call in `convert.rs`, `tests/upstream_defect.rs` (which failed on the version bump
+  exactly as it was written to), the `zip` dev-dependency it needed, and the "One combination
+  is refused outright" section of `docs/errors.md`. `TestDataBarBesideSparklines` in
+  `tests/test_options.py` replaces the guard's tests and asserts the opposite — that the pair
+  writes well-formed worksheet XML; pinned back to 0.98.0 it fails with a `ParseError`, which
+  is what shows it is measuring the fix rather than passing by default.
 
 ### Changed
-- `rust_xlsxwriter` 0.97.1 → 0.98.0, and eleven transitive crates refreshed within their
+- The build backend floor moves from `maturin>=1.4` to `maturin>=1.9`, for the PEP 639
+  `license-files` support that ships the notice above. Source builds only; installing a
+  published wheel is unaffected.
+- `rust_xlsxwriter` 0.97.1 → 0.98.1, and eleven transitive crates refreshed within their
   declared ranges (cc, find-msvc-tools, futures-core/task/util, js-sys, portable-atomic,
   and the four wasm-bindgen crates). No API change.
 - CI pins `github/codeql-action` at v4.37.6. Its `init`, `autobuild` and `analyze` entry
@@ -22,16 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the date was filled in would have published a GitHub Release whose notes say Unreleased,
   with no job failing. `## [Unreleased]` matches no tag and fails the release job instead.
   `BUILD.md` step 2 and `tests/test_ci_config.py::TestChangelogHeadings` now say so.
-
-### Unchanged, and measured rather than assumed
-- The databar-beside-sparkline guard stays. `tests/upstream_defect.rs` was run against
-  rust_xlsxwriter 0.98.0 and the unbalanced `<ext>` output is still there, so the
-  combination is still refused. The comments that said 0.97.1 was the latest release with
-  nothing to upgrade to now name 0.98.0.
-- The defect is now filed upstream as
-  [rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185), with the
-  reproducer that pins it here. It had been worked around for two releases without being
-  reported, which is how a workaround outlives its reason.
 
 ## [1.1.1] - 2026-08-06
 

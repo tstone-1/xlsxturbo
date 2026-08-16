@@ -1,0 +1,39 @@
+# cargo-about configuration -- generates THIRD-PARTY-LICENSES.md.
+#
+# Why this exists: the published wheel contains compiled Rust code from every
+# crate below, and their licenses (MIT, Apache-2.0, Zlib, ...) all require their
+# copyright notice to travel with a binary distribution. xlsxturbo's own LICENSE
+# covers xlsxturbo's own code and nothing else. maturin already writes a
+# CycloneDX SBOM into the wheel, but an SBOM records which license applies -- it
+# does not carry the notice text those licenses ask for.
+#
+# Regenerate with: python scripts/gen_third_party_licenses.py --write
+# `tests/test_third_party_licenses.py` fails when the committed file falls behind
+# Cargo.lock, in both directions.
+
+# Every license present in the dependency tree, in preference order: a crate
+# offering "MIT OR Apache-2.0" is recorded as MIT. The three at the end are not
+# taste -- they are the only license each of those crates offers, so the choice
+# is to accept them or drop the crate:
+#   Apache-2.0 WITH LLVM-exception  target-lexicon
+#   Unicode-3.0                     unicode-ident (AND, not OR -- both apply)
+#   Zlib                            zlib-rs
+# A new dependency under an unlisted license fails this step rather than being
+# quietly omitted from the notice, which is the point of enumerating them.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+# Dev-dependencies (proptest and its tree) compile only into the test binaries,
+# never into the wheel or the CLI, so their notices do not belong in a file about
+# what we distribute. Build-dependencies stay: they are over-inclusion, and
+# over-inclusion is the safe direction for a license notice.
+ignore-dev-dependencies = true

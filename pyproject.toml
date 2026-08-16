@@ -1,13 +1,22 @@
 [build-system]
-requires = ["maturin>=1.4,<2.0"]
+# >=1.9 for PEP 639: `license-files` below is what puts LICENSE and
+# THIRD-PARTY-LICENSES.md into the wheel's `.dist-info/licenses/`. maturin
+# gained it in 1.9.0; an older one ignores the key and builds a wheel that
+# silently ships neither notice, which is the failure this floor prevents.
+requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "1.1.1"
+version = "1.1.2"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
+# Both land in the wheel's `.dist-info/licenses/`. THIRD-PARTY-LICENSES.md is
+# not decoration: the wheel contains compiled code from ~95 Rust crates whose
+# licenses require their copyright notice to travel with the binary, and LICENSE
+# covers only xlsxturbo's own code. Generated -- see the file's header.
+license-files = ["LICENSE", "THIRD-PARTY-LICENSES.md"]
 requires-python = ">=3.10"
 keywords = ["excel", "xlsx", "csv", "converter", "performance", "rust"]
 classifiers = [

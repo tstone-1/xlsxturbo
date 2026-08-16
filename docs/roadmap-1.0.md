@@ -909,6 +909,15 @@ Two consequences worth carrying forward:
   their own mistake. Mutating the condition to refuse *any* conditional format beside sparklines
   is caught by `test_the_guard_is_narrow`, which pins the adjacent cases that must keep working.
 
+**Closed 2026-08-16 — the defect was fixed upstream and the guard is gone.** Reported as
+[rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185) on 2026-08-15,
+acknowledged in two hours, released as 0.98.1 the next morning. `tests/upstream_defect.rs`
+went red on the version bump — the one thing it existed to do — and the guard, that test and
+the `zip` dev-dependency came out with it. The reproducer had been sitting in this repo for
+two releases before anyone filed it, and filing it cost less than one of those releases'
+worth of carrying the workaround. The standing rule that came out of it is in `AGENTS.md`:
+when rust_xlsxwriter is what is wrong, report it.
+
 **Accept the cost explicitly.** Adding a permanent eighth touchpoint per feature is a real
 tax, paid for discoverability and typability. It is worth paying, but it is not free, and the
 guard above is what keeps it from becoming a correctness problem as well as a cost.

@@ -174,33 +174,6 @@ inventing one from the text would be guesswork. `InputDataError` covers the case
 matters — the object is not a supported DataFrame at all — which is checked before any
 work starts.
 
-## One combination is refused outright
-
-A `data_bar` conditional format and a sparkline on the **same worksheet** raise
-`ConfigurationError`:
-
-```python
-xlsxturbo.df_to_xlsx(
-    df, "out.xlsx",
-    conditional_formats={"Score": {"type": "data_bar"}},
-    sparklines={"D2": {"range": "Sheet1!A2:C2"}},
-)
-# ConfigurationError: sheet 'Sheet1': conditional_formats['Score'] is a data bar
-# and this sheet also has sparklines. ...
-```
-
-The underlying Excel writer produces a corrupt workbook for that pair — Excel opens it
-and offers to repair it. The defect is upstream, in rust_xlsxwriter — present in 0.97.1 and still present in
-0.98.0, reported as
-[rust_xlsxwriter#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185) — and
-cannot be fixed here, so xlsxturbo refuses rather than writing a file you cannot open. Failing at
-the call is the lesser harm: a corrupt workbook is typically discovered by whoever you
-sent it to.
-
-Put the sparklines on a different sheet, or use `2_color_scale` / `3_color_scale`. The
-restriction is narrow — every other conditional-format type works beside sparklines, and
-each feature alone is unaffected.
-
 ## Nothing is half-written
 
 Validation of a given option happens as that option is applied, and the workbook is only

@@ -14,6 +14,10 @@ reference benchmarks, with the Excel features those exports usually need — tab
 conditional formatting, charts, data validation, images — available as focused keyword
 arguments rather than a workbook object model.
 
+The `.xlsx` files themselves are written by
+**[rust_xlsxwriter](https://github.com/jmcnamara/rust_xlsxwriter)** — see
+[Built on rust_xlsxwriter](#built-on-rust_xlsxwriter) below.
+
 **[Full documentation](https://tstone-1.github.io/xlsxturbo/)** ·
 [Capability matrix](https://tstone-1.github.io/xlsxturbo/capability-matrix/) ·
 [Changelog](CHANGELOG.md)
@@ -118,6 +122,31 @@ supported Python and platform matrices.
 - Advanced Excel features are exposed through focused parameters rather than a full
   workbook object model. That is a deliberate scope boundary, not a gap to be filled.
 
+## Built on rust_xlsxwriter
+
+Every byte of the `.xlsx` files xlsxturbo produces is written by
+[**rust_xlsxwriter**](https://github.com/jmcnamara/rust_xlsxwriter), John McNamara's Rust
+Excel writer (MIT licensed). It is the one substantial dependency, and it is not an
+implementation detail you can ignore:
+
+- **What xlsxturbo can do is bounded by what rust_xlsxwriter can do.** The features on the
+  [capability matrix](https://tstone-1.github.io/xlsxturbo/capability-matrix/) are the ones
+  it exposes; xlsxturbo's job is type detection, the DataFrame and CSV pipeline, option
+  validation, and a Python API — not the XLSX format itself.
+- **Bugs in the generated file are usually upstream.** When one is, it is reported to
+  rust_xlsxwriter rather than papered over here — most recently
+  [#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185), filed 2026-08-15 and
+  fixed in 0.98.1 the next morning. A file Excel refuses to open is still worth
+  [reporting to us](CONTRIBUTING.md); we will trace it and take it upstream.
+- **The `xlsxwriter` in the benchmark table is a different project** — that is
+  [XlsxWriter](https://github.com/jmcnamara/XlsxWriter), the pure-Python library by the same
+  author, and one of the things xlsxturbo is measured against.
+
+If you write Excel files from Rust, use rust_xlsxwriter directly; xlsxturbo exists to put
+it behind a Python DataFrame API. rust_xlsxwriter's notice, and those of the 91 other
+crates compiled into the wheel, are in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
 ## Contributing
 
 Setup takes about five minutes and is described in [CONTRIBUTING.md](CONTRIBUTING.md),
@@ -126,4 +155,10 @@ the process in [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+The wheel contains compiled code from the Rust crates listed above, so their notices
+travel with it: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md), also installed as
+`xlsxturbo-<version>.dist-info/licenses/THIRD-PARTY-LICENSES.md`. It is generated from the
+dependency tree by `python scripts/gen_third_party_licenses.py --write`; do not edit it by
+hand.

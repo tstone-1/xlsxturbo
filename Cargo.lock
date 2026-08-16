@@ -642,9 +642,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rust_xlsxwriter"
-version = "0.98.0"
+version = "0.98.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a8265065e1520bdd68a1783d8c18c532387e766f13443fb1ac457320a3e3518"
+checksum = "e291f3208e0ed430e5c49d240adbf2935a94bbbf5fed945bbf096cf024585355"
 dependencies = [
  "tempfile",
  "zip",
@@ -914,7 +914,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xlsxturbo"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "clap",
@@ -925,7 +925,6 @@ dependencies = [
  "rayon",
  "rust_xlsxwriter",
  "tempfile",
- "zip",
 ]
 
 [[package]]

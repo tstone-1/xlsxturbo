@@ -4,7 +4,7 @@ use crate::apply::{
     apply_cells, apply_charts, apply_checkboxes, apply_column_widths,
     apply_column_widths_with_autofit_cap, apply_comments, apply_conditional_formats,
     apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_rich_text,
-    apply_sparklines, apply_textboxes, apply_validations, reject_databar_with_sparklines,
+    apply_sparklines, apply_textboxes, apply_validations,
 };
 use crate::errors::FileFailure;
 use crate::parse::{
@@ -623,16 +623,6 @@ fn apply_worksheet_features(
         }
         return Ok(col_count);
     }
-
-    // Refuse the one combination the writer corrupts, before writing anything.
-    // Placed ahead of every apply_* call so the failure is a refusal rather than
-    // a half-built worksheet -- see `reject_databar_with_sparklines`.
-    reject_databar_with_sparklines(
-        py,
-        opts.conditional_formats,
-        opts.sparklines.is_some_and(|s| !s.is_empty()),
-        sheet_name,
-    )?;
 
     // Add Excel Table if requested (requires header + at least one data row)
     if let Some(style_name) = config.table_style {

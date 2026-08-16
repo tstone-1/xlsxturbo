@@ -76,34 +76,90 @@ unaffected: they return `Result<_, String>` and the boundary classifies for them
 
 Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py --write`. `docs/capability-matrix.md` is GENERATED from the Rust sources and must never be hand-edited; `tests/test_capability_matrix.py` fails if the committed page is stale. The generator parses `SHEET_OPTION_NAMES`, `define_options!`, `CONSTANT_MEMORY_SAFE_OPTIONS`, `warn_constant_memory_skips` and the three `#[pyo3(signature)]` blocks, so touching any of those changes the page. Each parser raises rather than returning an empty list, because a structural audit that matches nothing reads exactly like a clean result — and each parsed parameter must be a Python identifier, which is what caught a regex that spanned from the file's first pyo3 attribute through to the requested function and produced "parameters" like `) -> PyResult<(u32`.
 
-## The one upstream defect worked around in this codebase
+## Upstream defects belong upstream — file them
 
-`apply::reject_databar_with_sparklines` refuses a `data_bar` conditional format beside a
-sparkline on one worksheet, because rust_xlsxwriter emits unbalanced `<ext>` elements
-for that pair and Excel reports the workbook as damaged. Found in 0.97.1; re-measured
-against 0.98.0 when that release came out, which still has it — so a version bump is not
-on its own a reason to revisit the guard, and `tests/upstream_defect.rs` is what answers
-the question.
+**When rust_xlsxwriter is what is wrong, report it to jmcnamara/rust_xlsxwriter.** Not
+instead of the local workaround, but alongside it: work around the defect so users are not
+holding a corrupt file, then file the report so the workaround has an end. This is the
+standing rule for this repository, and it was learned the expensive way.
 
-**Reported upstream as jmcnamara/rust_xlsxwriter#185** (2026-08-15). Check that issue
-before doing any work here: if it is closed, the next `rust_xlsxwriter` release is worth
-measuring, and a green `tests/upstream_defect.rs` after the bump means the guard and this
-whole section come out. It went two releases unreported while being worked around — the
-failure mode is that nobody files it, not that nobody notices it. Found by the full-bundle test in
-`tests/test_options.py`, which writes all 24 options at once — a combination nothing else
-exercised.
+The case that established it: a `data_bar` conditional format beside a sparkline on one
+worksheet made rust_xlsxwriter emit unbalanced `<ext>` elements, and Excel reported the
+workbook as damaged. xlsxturbo refused the combination from 1.0.0 and **carried that guard
+across two upstream releases without anyone filing an issue.** When it was finally reported
+as [#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185) on 2026-08-15, jmcnamara
+acknowledged it within two hours, fixed it the same evening and released 0.98.1 the next
+morning. The whole cost of the workaround was the cost of not asking. He also said outright
+in that thread: report anything else you hit here so it gets fixed.
 
-Two things worth knowing before touching it:
+What makes a report land, from the one that worked:
 
-- **The guard makes the bug unreachable from Python, so no Python test can notice it being
-  fixed.** `tests/upstream_defect.rs` uses rust_xlsxwriter directly and asserts the defect is
-  *still present*; when upstream fixes it that test fails, which is the signal to delete the
-  guard, the Rust test, and the note in `docs/errors.md`. It has a control alongside it so a
-  worse regression cannot be misread as the known defect.
-- **Over-reach is the expensive failure here, not under-reach.** A guard refusing a
-  combination that is actually fine costs a feature silently, since users read the error as
-  their own mistake. `TestDataBarSparklineGuard::test_the_guard_is_narrow` pins the adjacent
-  cases that must keep working, and it is what catches a widened condition.
+- **A reproducer that needs no Excel.** Counting `<ext>` opens against closes in the
+  generated XML shows the defect in a `println!`, so the maintainer can see it without
+  opening a workbook or trusting your description of what Excel said.
+- **Controls in the same program.** Each feature alone was printed beside the broken pair.
+  That is what establishes the defect is in the combination rather than in either feature,
+  and it is the difference between a report and a complaint.
+- **Say what you measured and stop there.** The report proposed the sibling-`<ext>`
+  structure as what it took the intent to be, and said the maintainer would know better.
+  Do not assert a cause in his code you have not read.
+
+**Pin the defect in a test that fails when it is fixed**, if the workaround makes it
+unreachable from Python. That was `tests/upstream_defect.rs` — driving rust_xlsxwriter
+directly, asserting the bug was *still present*, with a control so a worse regression could
+not be misread as the known one. It went red on the 0.98.1 bump exactly as designed, which
+is what triggered the guard's removal in 1.1.2. Delete such a file with the workaround; its
+whole job is to be the thing that notices.
+
+**The second workaround is filed and open:**
+[#186](https://github.com/jmcnamara/rust_xlsxwriter/issues/186) (2026-08-16) —
+`Workbook::define_name` panics on a name whose local part is empty (`""` or `"Sheet1!"`),
+at `defined_name.name.chars().next().unwrap()`, `workbook.rs:1578` in 0.98.1.
+`apply_defined_names` in `src/workbook.rs` rejects those before they reach the crate, which
+is why xlsxturbo never sees the panic. When it is fixed, that guard is a candidate for
+removal — but check first whether the crate's error message is as good as the guard's,
+since the guard is what names the offending value to the caller.
+
+An independent review of that draft before filing caught three over-claims and asked for
+two controls, and every one of them was right: **the controls decide whether a report is
+about the thing you say it is about.** `"Sheet1!1abc"` (invalid but non-empty local part →
+proper error) is what turns "empty names panic" from an assertion into a measurement, and
+`"!MyName"` separates an empty local part from an empty sheet qualifier. The cut claims were
+"the one input that falls through to a panic" (never measured to be the only one) and a
+statement about pyo3 panic handling made from memory rather than from a test. Review the
+draft against the packet of what you actually ran, not against what you believe.
+
+## The bundled license notice
+
+`THIRD-PARTY-LICENSES.md` is generated — `python scripts/gen_third_party_licenses.py --write`
+(cargo-about, config `about.toml`, template `scripts/third-party-licenses.hbs`). Never edit
+it by hand; `tests/test_third_party_licenses.py` compares it against `cargo metadata` in
+both directions and will say so.
+
+Why it exists at all: the wheel is a binary containing compiled code from 92 crates, and
+MIT, Apache-2.0, Zlib and Unicode-3.0 all require the copyright notice to be distributed
+with a binary. `LICENSE` covers xlsxturbo's own code and nothing else. **maturin's
+CycloneDX SBOM is not a substitute** — it records which license applies to each crate,
+which is not the notice the license asks for.
+
+Four things that cost time to find:
+
+- **`cargo install cargo-about` installs nothing and exits 0.** Its binary is behind a
+  feature: `cargo install cargo-about --features cli`. Without it you get a warning, a
+  clean exit, and no `cargo-about` on PATH.
+- **PEP 639 `license-files` is what puts the notice in the wheel**, at
+  `.dist-info/licenses/`. maturin gained it in **1.9.0**, so `[build-system] requires` says
+  `maturin>=1.9`. An older backend ignores the key and builds a wheel with neither notice
+  and no error. The two are asserted together in the test for that reason. `[tool.maturin]
+  include` also works but drops the file at the *site-packages root*, which is worse.
+- **cargo-about lists the root crate and has no flag to exclude it**, so the generator drops
+  that section structurally and refuses if it is missing, duplicated, or shared with a real
+  dependency.
+- **`serde_core → serde_derive` is declared under `target = "cfg(any())"`** — false for
+  every target, the idiom for "declared but never compiled". cargo-about omits it correctly;
+  the test has to skip that edge or it reports a missing notice for a crate we do not ship.
+  Every other `cfg(...)` edge is kept, so a Windows-only crate is still covered in a
+  macOS-built wheel's notice.
 
 ## The Exception Hierarchy (0.19.0+)
 

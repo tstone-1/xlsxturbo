@@ -11,6 +11,15 @@ Excel features those exports usually need -- tables, conditional formatting, cha
 data validation, images -- through focused keyword arguments rather than a workbook
 object model.
 
+The `.xlsx` files themselves are written by
+[**rust_xlsxwriter**](https://github.com/jmcnamara/rust_xlsxwriter), John McNamara's
+MIT-licensed Rust Excel writer. It is the one substantial dependency, and what it
+supports is what the [capability matrix](capability-matrix.md) can offer -- xlsxturbo's
+own job is type detection, the DataFrame and CSV pipeline, option validation and the
+Python API. A defect in a generated file is usually upstream, and gets
+[reported there](https://github.com/jmcnamara/rust_xlsxwriter/issues) rather than worked
+around here.
+
 ## Install
 
 ```bash

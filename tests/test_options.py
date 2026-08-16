@@ -15,6 +15,7 @@ import zipfile
 from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 import pandas as pd
 import pytest
@@ -41,12 +42,11 @@ SAMPLE_VALUES: dict[str, Any] = {
     "table_name": "T1",
     "header_format": {"bold": True},
     "column_formats": {"Score": {"bold": True}},
-    # Deliberately a colour scale rather than a data bar: a data bar and a
-    # sparkline on the same worksheet make rust_xlsxwriter emit malformed
-    # XML -- so xlsxturbo refuses that pair outright, which would make the
-    # full-bundle check below fail for a reason having nothing to do with
-    # ExportOptions. See TestDataBarSparklineGuard at the bottom of this module.
-    "conditional_formats": {"Score": {"type": "2_color_scale"}},
+    # A data bar deliberately, because the bundle below also sets `sparklines`:
+    # that pair made rust_xlsxwriter emit malformed XML until 0.98.1, and it was
+    # the full-bundle check here that found it. Keeping the two together is what
+    # would notice a regression.
+    "conditional_formats": {"Score": {"type": "data_bar"}},
     "cells": {"E1": "note"},
     "formula_columns": {"Double": "=B{row}*2"},
     "merged_ranges": [("F1:G1", "Merged")],
@@ -279,158 +279,92 @@ class TestBundleSemantics:
         assert "ExportOptions" in xlsxturbo.__all__
 
 
-class TestDataBarSparklineGuard:
-    """The one option combination the writer corrupts is refused, not written.
+class TestDataBarBesideSparklines:
+    """The pair that once produced a corrupt workbook is written correctly.
 
-    A ``data_bar`` conditional format beside a sparkline makes rust_xlsxwriter
-    emit malformed worksheet XML, so xlsxturbo refuses the pair. The
-    upstream defect itself is pinned in ``tests/upstream_defect.rs``, which uses
-    rust_xlsxwriter directly -- it has to, because the guard means no Python call
-    can produce the corrupt file any more, and something still has to notice the
-    day upstream fixes it.
+    A ``data_bar`` conditional format beside a sparkline made rust_xlsxwriter
+    emit unbalanced ``<ext>`` elements -- three opened, two closed -- so Excel
+    reported the workbook as damaged. xlsxturbo refused the combination from
+    1.0.0 until the upstream fix in rust_xlsxwriter 0.98.1
+    (`jmcnamara/rust_xlsxwriter#185 <https://github.com/jmcnamara/rust_xlsxwriter/issues/185>`_).
+
+    The refusal is gone, so what has to be checked now is the output rather than
+    the error. Parsing the worksheet XML is the point: the archive wrote fine
+    while it was broken, and ``openpyxl`` is not what the failure reached -- Excel
+    was. A parser is the cheapest thing that fails on exactly what failed before.
     """
 
-    @pytest.mark.parametrize("spelling", ["data_bar", "databar", "DATA_BAR", "Databar", "Data_Bar"])
-    def test_the_combination_is_refused(self, spelling: str, tmp_path: Path) -> None:
-        """Every spelling the writer treats as a data bar is caught.
-
-        Two axes, and each has a half that is easy to leave open. ``databar`` is
-        an accepted alias, so a guard matching only ``data_bar`` would miss it;
-        and the dispatcher lowercases the type before matching, so ``DATA_BAR``
-        is a data bar to the writer as surely as ``data_bar`` is. A guard
-        comparing the raw string writes the corrupt workbook for the upper-case
-        ones -- accepted input, successful return, a file Excel calls damaged.
+    def _sheet_xml(self, path: Path) -> bytes:
+        """Return ``xl/worksheets/sheet1.xml`` from a written workbook.
 
         Args:
-            spelling: The conditional-format type name under test.
-            tmp_path: pytest's per-test temporary directory.
+            path: The workbook to read.
+
+        Returns:
+            The raw worksheet XML.
         """
-        with pytest.raises(xlsxturbo.ConfigurationError, match="sparklines"):
-            xlsxturbo.df_to_xlsx(
-                _frame(),
-                tmp_path / "out.xlsx",
-                conditional_formats={"Score": {"type": spelling}},
-                sparklines=SPARKLINE_SAMPLE,
-            )
+        with zipfile.ZipFile(path) as zf:
+            return zf.read("xl/worksheets/sheet1.xml")
 
-    def test_nothing_is_written_when_refused(self, tmp_path: Path) -> None:
-        """The refusal leaves no file behind.
-
-        The guard runs before any feature is applied precisely so the caller does
-        not get a half-built workbook, which would be worse than the corrupt one
-        it replaces.
+    def test_the_pair_produces_well_formed_xml(self, tmp_path: Path) -> None:
+        """Both features on one sheet, and the result parses.
 
         Args:
             tmp_path: pytest's per-test temporary directory.
         """
-        out = tmp_path / "out.xlsx"
-        with pytest.raises(xlsxturbo.ConfigurationError):
-            xlsxturbo.df_to_xlsx(
-                _frame(),
-                out,
-                conditional_formats={"Score": {"type": "data_bar"}},
-                sparklines=SPARKLINE_SAMPLE,
-            )
-        assert not out.exists()
+        out = tmp_path / "pair.xlsx"
+        xlsxturbo.df_to_xlsx(
+            _frame(),
+            out,
+            conditional_formats={"Score": {"type": "data_bar"}},
+            sparklines=SPARKLINE_SAMPLE,
+        )
+        xml = self._sheet_xml(out)
+        ElementTree.fromstring(xml)  # noqa: S314 - our own output, not untrusted input
+        assert xml.count(b"<ext ") == xml.count(b"</ext>"), (
+            f"unbalanced <ext>: {xml.count(b'<ext ')} opened, {xml.count(b'</ext>')} closed"
+        )
 
-    def test_the_message_names_the_sheet_and_the_column(self, tmp_path: Path) -> None:
-        """The error says where the problem is and what to do instead.
+    def test_both_features_actually_reached_the_sheet(self, tmp_path: Path) -> None:
+        """The control for the check above.
 
-        Args:
-            tmp_path: pytest's per-test temporary directory.
-        """
-        with pytest.raises(xlsxturbo.ConfigurationError) as caught:
-            xlsxturbo.df_to_xlsx(
-                _frame(),
-                tmp_path / "out.xlsx",
-                conditional_formats={"Score": {"type": "data_bar"}},
-                sparklines=SPARKLINE_SAMPLE,
-            )
-        message = str(caught.value)
-        assert "Score" in message
-        assert "Sheet1" in message
-        assert "2_color_scale" in message, "the message should offer a workaround"
-
-    @pytest.mark.parametrize(
-        ("label", "kwargs"),
-        [
-            ("data bar alone", {"conditional_formats": {"Score": {"type": "data_bar"}}}),
-            ("sparklines alone", {"sparklines": SPARKLINE_SAMPLE}),
-            (
-                "colour scale beside sparklines",
-                {
-                    "conditional_formats": {"Score": {"type": "2_color_scale"}},
-                    "sparklines": SPARKLINE_SAMPLE,
-                },
-            ),
-            (
-                "icon set beside sparklines",
-                {
-                    "conditional_formats": {
-                        "Score": {"type": "icon_set", "icon_type": "3_arrows"}
-                    },
-                    "sparklines": SPARKLINE_SAMPLE,
-                },
-            ),
-            (
-                "data bar with an empty sparklines dict",
-                {
-                    "conditional_formats": {"Score": {"type": "data_bar"}},
-                    "sparklines": {},
-                },
-            ),
-        ],
-    )
-    def test_the_guard_is_narrow(self, label: str, kwargs: dict[str, Any], tmp_path: Path) -> None:
-        """Everything adjacent to the bad pair still works.
-
-        The expensive failure mode for a guard like this is over-reach: refusing
-        a combination that is fine costs users a feature and nobody notices,
-        because the only symptom is an error they assume is their fault.
-
-        Args:
-            label: Human-readable name of the combination, for the failure message.
-            kwargs: The option combination that must still be accepted.
-            tmp_path: pytest's per-test temporary directory.
-        """
-        out = tmp_path / "ok.xlsx"
-        xlsxturbo.df_to_xlsx(_frame(), out, **kwargs)
-        assert out.exists(), label
-
-    def test_an_upper_case_data_bar_alone_is_still_written(self, tmp_path: Path) -> None:
-        """Case-insensitivity is the guard's, not a narrowing of what is accepted.
-
-        The dispatcher has always lowercased the type, so ``DATA_BAR`` is a real
-        data bar everywhere else in the pipeline. Teaching the guard to see it by
-        making the dispatcher reject it instead would pass every refusal check
-        above and silently cost a working spelling, so this reads the rule back
-        out of the file rather than settling for the file existing.
+        A workbook with neither feature applied parses perfectly, so the
+        well-formedness assertion would pass if a future change silently dropped
+        one of them. This reads both back out of the XML.
 
         Args:
             tmp_path: pytest's per-test temporary directory.
         """
-        out = tmp_path / "upper.xlsx"
-        xlsxturbo.df_to_xlsx(_frame(), out, conditional_formats={"Score": {"type": "DATA_BAR"}})
+        out = tmp_path / "pair.xlsx"
+        xlsxturbo.df_to_xlsx(
+            _frame(),
+            out,
+            conditional_formats={"Score": {"type": "data_bar"}},
+            sparklines=SPARKLINE_SAMPLE,
+        )
+        xml = self._sheet_xml(out)
+        assert b"dataBar" in xml
+        assert b"sparkline" in xml
+
+    def test_the_pair_survives_a_multi_sheet_export(self, tmp_path: Path) -> None:
+        """Per-sheet options carry the combination too.
+
+        The two features can arrive from different places -- a workbook-wide
+        default and a per-sheet override -- which is where the old guard had to
+        look, and is still where a merge mistake would show.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+        """
+        out = tmp_path / "multi.xlsx"
+        xlsxturbo.dfs_to_xlsx(
+            [
+                (_frame(), "A", {}),
+                (_frame(), "B", SheetOptions(sparklines=SPARKLINE_SAMPLE)),
+            ],
+            out,
+            conditional_formats={"Score": {"type": "data_bar"}},
+        )
         with zipfile.ZipFile(out) as zf:
-            xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8").upper()
-        assert "DATABAR" in xml
-
-    def test_the_guard_applies_per_sheet(self, tmp_path: Path) -> None:
-        """A multi-sheet export is checked sheet by sheet, and names the sheet.
-
-        The two features could arrive from different places -- a workbook-wide
-        default and a per-sheet override -- so checking the merged options of each
-        sheet is the only correct place to look.
-
-        Args:
-            tmp_path: pytest's per-test temporary directory.
-        """
-        with pytest.raises(xlsxturbo.ConfigurationError, match="sheet 'B'"):
-            xlsxturbo.dfs_to_xlsx(
-                [
-                    (_frame(), "A", {}),
-                    (_frame(), "B", SheetOptions(sparklines=SPARKLINE_SAMPLE)),
-                ],
-                tmp_path / "multi.xlsx",
-                conditional_formats={"Score": {"type": "data_bar"}},
-            )
+            for member in ("xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"):
+                ElementTree.fromstring(zf.read(member))  # noqa: S314 - our own output
