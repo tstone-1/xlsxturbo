@@ -278,25 +278,54 @@ class TestDefinedNames:
         assert "Settings" in names
         wb.close()
 
-    def test_empty_local_defined_name_raises_df_to_xlsx(self, tmp_xlsx: str) -> None:
-        """Empty local defined names raise ValueError instead of panicking."""
+    # An empty name used to abort the process: rust_xlsxwriter's define_name
+    # called `chars().next().unwrap()` on the local part, so "" and "Sheet1!"
+    # panicked instead of returning an error, and xlsxturbo screened for them
+    # before the call. Fixed upstream in 0.98.2 (jmcnamara/rust_xlsxwriter#186);
+    # the screen is gone and the crate's own ParameterError is what surfaces.
+    # Pinned back to 0.98.1 these two fail: a Rust panic reaches Python as
+    # pyo3_runtime.PanicException, which is not a ValueError.
+    @pytest.mark.parametrize("name", ["", "Sheet1!"])
+    def test_empty_defined_name_raises_df_to_xlsx(
+        self, tmp_xlsx: str, name: str
+    ) -> None:
+        """An empty name and an empty local part both raise, neither panics."""
         df = pd.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="name must not be empty"):
+        with pytest.raises(ValueError, match="cannot be empty in Excel"):
             xlsxturbo.df_to_xlsx(
                 df,
                 tmp_xlsx,
-                defined_names={"Sheet1!": "=Sheet1!$A$1:$A$2"},
+                defined_names={name: "=Sheet1!$A$1:$A$2"},
             )
 
-    def test_empty_local_defined_name_raises_dfs_to_xlsx(self, tmp_xlsx: str) -> None:
-        """Empty local defined names raise ValueError in multi-sheet mode."""
+    def test_empty_defined_name_raises_dfs_to_xlsx(self, tmp_xlsx: str) -> None:
+        """The same failure reaches the caller in multi-sheet mode."""
         df = pd.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="name must not be empty"):
+        with pytest.raises(ValueError, match="cannot be empty in Excel"):
             xlsxturbo.dfs_to_xlsx(
                 [(df, "Sheet1")],
                 tmp_xlsx,
                 defined_names={"Sheet1!": "=Sheet1!$A$1:$A$2"},
             )
+
+    def test_empty_defined_name_error_names_the_offending_key(
+        self, tmp_xlsx: str
+    ) -> None:
+        """The message still identifies which `defined_names` key failed.
+
+        The crate reports the *local* part, so its own message says `Name ''`
+        for both `""` and `"Sheet1!"`. The wrapper in `apply_defined_names` is
+        what puts the caller's own key back in front of it — without that, a
+        dict of several names would not say which one was rejected.
+        """
+        df = pd.DataFrame({"a": [1]})
+        with pytest.raises(ValueError, match="cannot be empty in Excel") as excinfo:
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                defined_names={"Sheet1!": "=Sheet1!$A$1:$A$2"},
+            )
+        assert "Sheet1!" in str(excinfo.value)
 
 
 class TestDefinedNamesVerification:

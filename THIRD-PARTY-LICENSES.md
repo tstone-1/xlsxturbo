@@ -12,7 +12,7 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 | License | Crates |
 | --- | ---: |
-| MIT License | 90 |
+| MIT License | 92 |
 | Apache License 2.0 | 3 |
 | Unicode License v3 | 1 |
 | zlib License | 1 |
@@ -1085,10 +1085,10 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [getrandom 0.4.3](https://github.com/rust-random/getrandom)
+- [getrandom 0.3.4](https://github.com/rust-random/getrandom)
 
 ```text
-Copyright (c) 2018-2026 The rust-random Project Developers
+Copyright (c) 2018-2025 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -1373,8 +1373,8 @@ SOFTWARE.
 Applies to:
 
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
-- [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.98.1](https://github.com/jmcnamara/rust_xlsxwriter)
+- [r-efi 5.3.0](https://github.com/r-efi/r-efi)
+- [rust_xlsxwriter 0.98.2](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1490,6 +1490,8 @@ Applies to:
 - [syn 3.0.3](https://github.com/dtolnay/syn)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
+- [wasip2 1.0.4+wasi-0.2.12](https://github.com/bytecodealliance/wasi-rs)
+- [wit-bindgen 0.57.1](https://github.com/bytecodealliance/wit-bindgen)
 
 ```text
 Permission is hereby granted, free of charge, to any

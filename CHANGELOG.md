@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **`rust_xlsxwriter` 0.98.1 -> 0.98.2**, and the dependency floor moves with it: the
+  requirement is now `0.98.2`, not `0.98`, because the empty-name screen removed below only
+  holds if the fix is present.
+
+### Removed
+- **The empty-`defined_names` screen is gone — upstream fixed the panic.** Until 0.98.1
+  `Workbook::define_name` called `chars().next().unwrap()` on the local part of the name, so
+  `""` and `"Sheet1!"` aborted the process instead of returning an error, and
+  `apply_defined_names` rejected them before the call. 0.98.2 returns
+  `ParameterError("Name '' cannot be empty in Excel")` instead
+  ([rust_xlsxwriter#186](https://github.com/jmcnamara/rust_xlsxwriter/issues/186), filed
+  2026-08-16 and released the next day). Both inputs still raise `ConfigurationError`, and the
+  message still names the `defined_names` key that was rejected — the crate reports only the
+  local part, so `"Sheet1!"` and `""` produce the same `Name ''` text from it, and the key
+  comes from xlsxturbo's own wrapper. The two tests that covered the screen are replaced by
+  three that cover the crate's behaviour, including one for that key; pinned back to 0.98.1
+  they fail, because a Rust panic reaches Python as `pyo3_runtime.PanicException` rather than
+  a `ValueError`.
+
 ## [1.1.2] - 2026-08-16
 
 ### Added

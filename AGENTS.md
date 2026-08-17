@@ -111,14 +111,23 @@ not be misread as the known one. It went red on the 0.98.1 bump exactly as desig
 is what triggered the guard's removal in 1.1.2. Delete such a file with the workaround; its
 whole job is to be the thing that notices.
 
-**The second workaround is filed and open:**
+**The second workaround is also gone, one day after it was filed:**
 [#186](https://github.com/jmcnamara/rust_xlsxwriter/issues/186) (2026-08-16) —
-`Workbook::define_name` panics on a name whose local part is empty (`""` or `"Sheet1!"`),
-at `defined_name.name.chars().next().unwrap()`, `workbook.rs:1578` in 0.98.1.
-`apply_defined_names` in `src/workbook.rs` rejects those before they reach the crate, which
-is why xlsxturbo never sees the panic. When it is fixed, that guard is a candidate for
-removal — but check first whether the crate's error message is as good as the guard's,
-since the guard is what names the offending value to the caller.
+`Workbook::define_name` panicked on a name whose local part is empty (`""` or `"Sheet1!"`),
+at `defined_name.name.chars().next().unwrap()`, `workbook.rs:1578` in 0.98.1 — was fixed in
+0.98.2 (2026-08-17), which now returns
+`ParameterError("Name '' cannot be empty in Excel")`. The screen in `apply_defined_names`
+is gone, and `Cargo.toml` carries `0.98.2` as a floor rather than `0.98`, because the
+guard's absence is what makes the floor load-bearing.
+
+That check — whether the crate's message is as good as the guard's — is worth keeping as
+the removal criterion, and here the answer had two halves. The crate reports the **local**
+part, so it says `Name ''` for both `""` and `"Sheet1!"` and cannot identify which
+`defined_names` key a caller got wrong. What saves it is the `map_err` already wrapping the
+call, which puts the caller's own key back in front:
+`Failed to define name 'Sheet1!': Parameter error: 'Name '' cannot be empty in Excel'.`
+`test_empty_defined_name_error_names_the_offending_key` pins that half specifically, because
+it comes from xlsxturbo and not from the crate.
 
 An independent review of that draft before filing caught three over-claims and asked for
 two controls, and every one of them was right: **the controls decide whether a report is
