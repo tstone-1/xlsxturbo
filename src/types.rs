@@ -277,19 +277,52 @@ impl<'py, 'm> OptionMap<'py, 'm> {
         self.field(key, "a bool")
     }
 
+    /// [`Self::field`] for a numeric field, with Python `bool` refused.
+    ///
+    /// `bool` is a subclass of `int` in Python, so `True` extracts as `1`/`1.0`
+    /// and a width, offset or index given as `True` was silently taken as one
+    /// unit — a wrong number rather than a rejected option. Only the numeric
+    /// accessors screen it; [`Self::bool`] is untouched, so genuine flags
+    /// (`bold`, `wrap_text`, `checked`) are unaffected.
+    ///
+    /// The message is the same shape [`extract_field`] produces, because
+    /// `pytype_name` of `True` is `"bool"` — this branch exists to stop the
+    /// extraction succeeding, not to word the failure differently.
+    fn numeric_field<T>(&self, key: &str, type_desc: &str) -> Result<Option<T>, String>
+    where
+        T: for<'a> FromPyObject<'a, 'py>,
+    {
+        if let Some(obj) = self.map.get(key) {
+            let bound = obj.bind(self.py);
+            if bound.is_instance_of::<pyo3::types::PyBool>() {
+                return Err(format!(
+                    "{}: '{}' must be {}, got {}",
+                    self.context,
+                    key,
+                    type_desc,
+                    pytype_name(bound)
+                ));
+            }
+        }
+        self.field(key, type_desc)
+    }
+
     /// Extract an optional f64 (number) field. Missing or `None` yields `Ok(None)`.
+    /// A Python `bool` is refused (see [`Self::numeric_field`]).
     pub(crate) fn f64(&self, key: &str) -> Result<Option<f64>, String> {
-        self.field(key, "a number")
+        self.numeric_field(key, "a number")
     }
 
     /// Extract an optional i64 (integer) field. Missing or `None` yields `Ok(None)`.
+    /// A Python `bool` is refused (see [`Self::numeric_field`]).
     pub(crate) fn i64(&self, key: &str) -> Result<Option<i64>, String> {
-        self.field(key, "an integer")
+        self.numeric_field(key, "an integer")
     }
 
     /// Extract an optional u32 (non-negative integer) field.
+    /// A Python `bool` is refused (see [`Self::numeric_field`]).
     pub(crate) fn u32(&self, key: &str) -> Result<Option<u32>, String> {
-        self.field(key, "a non-negative integer")
+        self.numeric_field(key, "a non-negative integer")
     }
 
     /// Extract a required string field: missing/`None` is an error naming the key.

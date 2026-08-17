@@ -173,6 +173,74 @@ class TestWorkflowsUseTheSharedRequirements:
             )
 
 
+def _build_backend_maturin_floor() -> tuple[int, int]:
+    """The maturin floor `pyproject.toml`'s `[build-system]` requires."""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(r'^requires = \["maturin>=(\d+)\.(\d+)', text, re.MULTILINE)
+    assert match, "pyproject.toml declares no maturin build requirement"
+    return int(match.group(1)), int(match.group(2))
+
+
+def _workflow_maturin_floors() -> list[tuple[str, int, tuple[int, int]]]:
+    """Every `maturin>=X.Y` spec a workflow installs, as (file, line, floor)."""
+    found: list[tuple[str, int, tuple[int, int]]] = []
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        for number, line in enumerate(workflow.read_text(encoding="utf-8").splitlines(), 1):
+            for match in re.finditer(r"maturin>=(\d+)\.(\d+)", line):
+                found.append(
+                    (workflow.name, number, (int(match.group(1)), int(match.group(2))))
+                )
+    return found
+
+
+class TestWorkflowMaturinFloorsMatchTheBuildBackend:
+    """A CI job that installs an older maturin than `pyproject.toml` requires.
+
+    `[build-system] requires = ["maturin>=1.9,<2.0"]` is load-bearing: PEP 639
+    `license-files` is what puts `THIRD-PARTY-LICENSES.md` into the wheel, and
+    maturin gained it in 1.9.0. An older backend ignores the key and builds a
+    wheel with no notice and no error (see `tests/test_third_party_licenses.py`,
+    which pins the pyproject floor itself).
+
+    The four `pip install "maturin>=..."` lines in `ci.yml` sat at `>=1.4` while
+    pyproject said `>=1.9`, so every CI job was free to resolve a backend that
+    could not honour the declaration the release depends on. Nothing compared
+    the two numbers, because they live in different files and neither is wrong
+    on its own.
+    """
+
+    def test_the_scan_finds_the_specs_it_audits(self) -> None:
+        """Control: a sweep matching nothing reads exactly like a clean result.
+
+        Every assertion below is a loop over what this scan returns, so an
+        empty scan -- a renamed workflow, a reworded install line, a regex that
+        stopped matching -- would pass them all while auditing nothing.
+        """
+        floors = _workflow_maturin_floors()
+        assert floors, (
+            "no 'maturin>=X.Y' spec was found in any workflow, so the floor comparison "
+            "below is vacuous; the scan, not the workflows, is what to fix"
+        )
+        assert any(name == "ci.yml" for name, _, _ in floors), (
+            "ci.yml declares no pinned maturin floor, but it is the workflow that "
+            f"builds the extension for every test job; found only {sorted({n for n, _, _ in floors})}"
+        )
+
+    def test_no_workflow_installs_an_older_maturin_than_the_backend_needs(self) -> None:
+        """Every workflow floor is at least the `[build-system]` floor."""
+        backend_floor = _build_backend_maturin_floor()
+        stale = [
+            f"{name}:{number} installs maturin>={floor[0]}.{floor[1]}"
+            for name, number, floor in _workflow_maturin_floors()
+            if floor < backend_floor
+        ]
+        assert not stale, (
+            f"pyproject.toml's build backend requires maturin>="
+            f"{backend_floor[0]}.{backend_floor[1]}, which is what carries the PEP 639 "
+            f"license files into the wheel, but these lines allow an older one: {stale}"
+        )
+
+
 class TestBothPandasMajorsAreExercised:
     """A declared range is only supported at the end that CI actually runs.
 

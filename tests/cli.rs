@@ -125,6 +125,120 @@ fn parallel_flag_exits_zero_and_produces_file() {
     let _ = fs::remove_file(&xlsx);
 }
 
+/// A CSV that `flexible(true)` genuinely refuses, plus the 1-based row it fails on.
+///
+/// Picking the input is the whole difficulty: the reader is deliberately
+/// permissive, so ragged rows are *accepted* (`flexible(true)`) and an unclosed
+/// quote is read to EOF rather than rejected. Invalid UTF-8 is what actually
+/// fails, because `records()` yields `StringRecord`. The bad byte sits on the
+/// third line, so a 1-based report must say 3 and the old 0-based one said 2.
+fn write_malformed_csv(path: &PathBuf) -> usize {
+    let mut bytes: Vec<u8> = b"a,b\n1,2\nx,".to_vec();
+    bytes.push(0xFF); // not valid UTF-8 in any position
+    bytes.extend_from_slice(b"y\n");
+    fs::write(path, bytes).unwrap();
+    3
+}
+
+/// Run the CLI over `csv`, returning its stderr.
+fn run_cli_expecting_failure(csv: &PathBuf, xlsx: &PathBuf, parallel: bool) -> String {
+    let mut command = Command::new(bin());
+    command.arg(csv).arg(xlsx);
+    if parallel {
+        command.arg("--parallel");
+    }
+    let output = command.output().expect("failed to run xlsxturbo binary");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "malformed CSV should exit 1 ({}), stderr was: {:?}",
+        if parallel { "parallel" } else { "sequential" },
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// Both CSV pipelines must name the same row, and count it from 1.
+///
+/// This is the guard the duplication never had. The row number used to be
+/// formatted at two sites from two different expressions -- `row_count` in the
+/// sequential loop, `row_count + chunk.len()` in the chunked one -- which agreed
+/// only by arithmetic coincidence: nothing failed if the chunked path's
+/// bookkeeping changed, and a user comparing the two would have been told a
+/// different row for the same file. Both now go through one helper, and this
+/// test is what notices if they stop.
+///
+/// It asserts the *value*, not just agreement: two paths reporting the same
+/// wrong number agree perfectly.
+#[test]
+fn both_csv_paths_report_the_same_one_based_row_for_a_parse_error() {
+    let csv = temp_path("badrow", "csv");
+    let seq_xlsx = temp_path("badrow_seq", "xlsx");
+    let par_xlsx = temp_path("badrow_par", "xlsx");
+    let bad_line = write_malformed_csv(&csv);
+
+    let sequential = run_cli_expecting_failure(&csv, &seq_xlsx, false);
+    let parallel = run_cli_expecting_failure(&csv, &par_xlsx, true);
+
+    let expected = format!("CSV parse error at row {}:", bad_line);
+    assert!(
+        sequential.contains(&expected),
+        "sequential path should report row {}, stderr was: {:?}",
+        bad_line,
+        sequential
+    );
+    assert!(
+        parallel.contains(&expected),
+        "parallel path should report row {}, stderr was: {:?}",
+        bad_line,
+        parallel
+    );
+    // The 0-based report this replaced. Named explicitly so a silent slide back
+    // to it fails here rather than only in a user's confusion.
+    let zero_based = format!("CSV parse error at row {}:", bad_line - 1);
+    assert!(
+        !sequential.contains(&zero_based) && !parallel.contains(&zero_based),
+        "row numbers must be 1-based; sequential: {:?}, parallel: {:?}",
+        sequential,
+        parallel
+    );
+    assert_eq!(
+        sequential, parallel,
+        "the two CSV pipelines must report the identical error for the identical file"
+    );
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&seq_xlsx);
+    let _ = fs::remove_file(&par_xlsx);
+}
+
+/// Control for the test above: the same fixture *without* the bad byte converts.
+///
+/// Without this, a CLI that failed on every input -- a broken binary, a path
+/// mistake, an argument the parser rejects -- would satisfy every assertion up
+/// there, since they only ever check that a failure happened and what it said.
+#[test]
+fn the_malformed_csv_fixture_is_valid_once_the_bad_byte_is_removed() {
+    let csv = temp_path("badrow_control", "csv");
+    let xlsx = temp_path("badrow_control", "xlsx");
+    fs::write(&csv, "a,b\n1,2\nx,y\n").unwrap();
+
+    let output = Command::new(bin())
+        .arg(&csv)
+        .arg(&xlsx)
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    assert!(
+        output.status.success(),
+        "the fixture must fail only on the invalid byte, but the clean version failed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&xlsx);
+}
+
 #[test]
 fn sheet_name_flag_is_respected() {
     let csv = temp_path("sheetname", "csv");

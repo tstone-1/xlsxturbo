@@ -47,4 +47,34 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
     table_style="Medium2",
     table_name="2024 Sales Data!"  # Becomes "_2024_Sales_Data_"
 )
+
+# A name that would collide with a cell address gets the same prefix
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    table_style="Medium2",
+    table_name="Q1"  # Becomes "_Q1"
+)
 ```
+
+### Name sanitization rules
+
+The name you pass is adjusted to something Excel accepts. In order:
+
+| Input | Result | Rule |
+|-------|--------|------|
+| `"Sales Q1!"` | `"Sales_Q1_"` | Anything that is not a letter, digit or `_` becomes `_` |
+| `"2024Sales"` | `"_2024Sales"` | A leading digit gains a `_` prefix |
+| `"Q1"`, `"A1"`, `"XFD1048576"` | `"_Q1"`, `"_A1"`, `"_XFD1048576"` | Excel reserves names that address a cell |
+| `"R"`, `"C"`, `"R1C1"` | `"_R"`, `"_C"`, `"_R1C1"` | Excel reserves the R1C1 forms and the selection shortcuts `R`/`C` |
+| a name over 255 characters | first 255 characters | Excel's length limit |
+
+The cell-reference rule is bounded by the actual grid, which ends at
+`XFD1048576`. `"AAAA1"` and `"A1048577"` address no cell, so Excel takes them as
+ordinary names and they pass through unchanged. A zero-padded row counts by the
+row it parses to: `"A01"` is treated as a reference (Excel offers to repair a
+workbook with a table of that name, exactly as for `"Q1"`), while `"A0"` — row
+zero — addresses nothing and passes through.
+
+Workbook-level `defined_names` are **not** sanitized — a reference-shaped key
+there raises `ConfigurationError` instead, because silently renaming a defined
+name would leave the formulas that use it pointing at a name the workbook no
+longer defines.

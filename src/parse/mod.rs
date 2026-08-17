@@ -7,7 +7,7 @@ mod patterns;
 mod tables;
 mod values;
 
-pub(crate) use cell_refs::{parse_cell_range, parse_cell_ref};
+pub(crate) use cell_refs::{looks_like_cell_reference, parse_cell_range, parse_cell_ref};
 pub(crate) use colors::{parse_color, parse_color_enum};
 pub(crate) use formats::{
     build_column_formats, parse_column_format, parse_header_format, parse_horizontal_alignment,

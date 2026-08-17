@@ -58,6 +58,8 @@ xlsxturbo.df_to_xlsx(df, "charts.xlsx",
 **Notes:**
 - Charts are native Excel chart objects, not static images
 - Value/category ranges must include a sheet name (e.g. `'Sheet1!$B$2:$B$10'`); a bare range like `'$B$2:$B$10'` raises `ValueError`
+- `series` carries the ranges and names for every series it holds, so combining it with a chart-level `data_range`, `values_range`, `values`, `name` or `series_name` raises `ValueError` — put those inside the series list
+- `categories_range`/`categories` is the exception: at chart level it is the shared fallback for series items that specify none of their own, as in the example above
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 

@@ -77,6 +77,84 @@ impl std::error::Error for ConvertError {}
 // the `Internal` fallback variant the review proposed: a fallback that still
 // exists is still a default, and a default is what caused this.
 
+/// Open a CSV file with the reader settings both conversion paths depend on.
+///
+/// `has_headers(false)` makes the first line data like any other (the header
+/// row is written to the sheet, not consumed) and `flexible(true)` accepts
+/// ragged rows, since a worksheet has no fixed width to violate. Buffering is
+/// `csv::ReaderBuilder`'s own.
+fn open_csv_reader(input_path: &str) -> Result<csv::Reader<File>, ConvertError> {
+    let file = File::open(input_path)
+        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
+    Ok(ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .buffer_capacity(1024 * 1024)
+        .from_reader(file))
+}
+
+/// Run one CSV-to-XLSX conversion, calling `write_rows` for the part that
+/// differs between the sequential and parallel pipelines.
+///
+/// Those two entry points differ only in how they get records from the reader
+/// onto the worksheet; everything around that — opening the input, naming the
+/// worksheet, the cell formats, saving — was written out twice, with nothing
+/// coupling the copies. It lives here once instead, which is also what fixes
+/// the [`ConvertError`] tagging in one place: `File` for the filesystem at both
+/// ends, `Config` for anything traceable to the input.
+///
+/// `write_rows` returns the `(rows, columns)` it wrote.
+fn convert_csv(
+    input_path: &str,
+    output_path: &str,
+    sheet_name: &str,
+    write_rows: impl FnOnce(
+        &mut Worksheet,
+        &mut csv::Reader<File>,
+        &Format,
+        &Format,
+    ) -> Result<(u32, u16), ConvertError>,
+) -> Result<(u32, u16), ConvertError> {
+    let mut csv_reader = open_csv_reader(input_path)?;
+
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| ConvertError::Config(format!("Failed to set sheet name: {}", e)))?;
+
+    // Formats for dates and datetimes.
+    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
+    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
+
+    let counts = write_rows(worksheet, &mut csv_reader, &date_format, &datetime_format)?;
+
+    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
+
+    Ok(counts)
+}
+
+/// Unwrap one `records()` item and validate the record's width.
+///
+/// Both CSV paths call this, so the parse-error message is written once — and
+/// so is the fact that its row number is **1-based**. Both paths used to report
+/// a 0-based index, from two different expressions (`row_count` here,
+/// `row_count + chunk.len()` there) that happened to agree and were coupled by
+/// nothing. 1-based means "row 3" is the third record, the line a text editor
+/// shows, and the worksheet row it would have become — Excel counts from 1 too.
+fn checked_csv_record(
+    result: Result<csv::StringRecord, csv::Error>,
+    row_number: usize,
+) -> Result<(csv::StringRecord, u16), ConvertError> {
+    let record = result.map_err(|e| {
+        ConvertError::Config(format!("CSV parse error at row {}: {}", row_number, e))
+    })?;
+    let num_cols = u16::try_from(record.len()).map_err(|_| {
+        ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
+    })?;
+    Ok((record, num_cols))
+}
+
 /// Convert a CSV file to XLSX format with automatic type detection.
 ///
 /// # Arguments
@@ -94,71 +172,53 @@ pub fn convert_csv_to_xlsx(
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), ConvertError> {
-    // Open CSV file (csv::ReaderBuilder handles buffering internally)
-    let file = File::open(input_path)
-        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
-    let mut csv_reader = ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .buffer_capacity(1024 * 1024)
-        .from_reader(file);
+    convert_csv(
+        input_path,
+        output_path,
+        sheet_name,
+        |worksheet, csv_reader, date_format, datetime_format| {
+            let mut row_count: u32 = 0;
+            let mut col_count: u16 = 0;
 
-    // Create workbook and worksheet
-    let mut workbook = rust_xlsxwriter::Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| ConvertError::Config(format!("Failed to set sheet name: {}", e)))?;
+            // Each record is parsed and written straight through, with no
+            // intermediate owned copy of the row — that is the whole difference
+            // from the chunked path below, and the reason this one is not
+            // expressed as a chunk of size one.
+            for (index, result) in csv_reader.records().enumerate() {
+                let (record, num_cols) = checked_csv_record(result, index + 1)?;
+                if num_cols > col_count {
+                    col_count = num_cols;
+                }
 
-    // Create formats for dates and datetimes
-    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
-    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
+                for (col_idx, value) in record.iter().enumerate() {
+                    let cell_value = parse_value(value, date_order);
+                    let col = u16::try_from(col_idx).map_err(|_| {
+                        ConvertError::Config(format!("Column index {} exceeds u16 limit", col_idx))
+                    })?;
+                    write_cell(
+                        worksheet,
+                        row_count,
+                        col,
+                        cell_value,
+                        date_format,
+                        datetime_format,
+                    )
+                    .map_err(|e| {
+                        ConvertError::Config(format!(
+                            "Write error at ({}, {}): {}",
+                            row_count, col_idx, e
+                        ))
+                    })?;
+                }
 
-    let mut row_count: u32 = 0;
-    let mut col_count: u16 = 0;
+                row_count = row_count.checked_add(1).ok_or_else(|| {
+                    ConvertError::Config("Row count exceeds u32 limit".to_string())
+                })?;
+            }
 
-    // Process records
-    for result in csv_reader.records() {
-        let record = result.map_err(|e| {
-            ConvertError::Config(format!("CSV parse error at row {}: {}", row_count, e))
-        })?;
-        let num_cols = u16::try_from(record.len()).map_err(|_| {
-            ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
-        })?;
-        if num_cols > col_count {
-            col_count = num_cols;
-        }
-
-        for (col_idx, value) in record.iter().enumerate() {
-            let cell_value = parse_value(value, date_order);
-            let col = u16::try_from(col_idx).map_err(|_| {
-                ConvertError::Config(format!("Column index {} exceeds u16 limit", col_idx))
-            })?;
-            write_cell(
-                worksheet,
-                row_count,
-                col,
-                cell_value,
-                &date_format,
-                &datetime_format,
-            )
-            .map_err(|e| {
-                ConvertError::Config(format!(
-                    "Write error at ({}, {}): {}",
-                    row_count, col_idx, e
-                ))
-            })?;
-        }
-
-        row_count = row_count
-            .checked_add(1)
-            .ok_or_else(|| ConvertError::Config("Row count exceeds u32 limit".to_string()))?;
-    }
-
-    // Save workbook
-    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
-
-    Ok((row_count, col_count))
+            Ok((row_count, col_count))
+        },
+    )
 }
 
 /// Rows per chunk for parallel CSV processing. Picked so a parsed chunk's
@@ -177,68 +237,50 @@ pub fn convert_csv_to_xlsx_parallel(
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), ConvertError> {
-    let file = File::open(input_path)
-        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
-    let mut csv_reader = ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .buffer_capacity(1024 * 1024)
-        .from_reader(file);
+    convert_csv(
+        input_path,
+        output_path,
+        sheet_name,
+        |worksheet, csv_reader, date_format, datetime_format| {
+            let mut row_count: u32 = 0;
+            let mut col_count: u16 = 0;
+            let mut chunk: Vec<Vec<String>> = Vec::with_capacity(PARALLEL_CHUNK_ROWS);
 
-    let mut workbook = rust_xlsxwriter::Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| ConvertError::Config(format!("Failed to set sheet name: {}", e)))?;
+            for (index, result) in csv_reader.records().enumerate() {
+                let (record, num_cols) = checked_csv_record(result, index + 1)?;
+                if num_cols > col_count {
+                    col_count = num_cols;
+                }
+                chunk.push(record.iter().map(|s| s.to_string()).collect());
 
-    let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
-    let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
+                if chunk.len() >= PARALLEL_CHUNK_ROWS {
+                    flush_parallel_chunk(
+                        worksheet,
+                        &mut chunk,
+                        &mut row_count,
+                        date_order,
+                        date_format,
+                        datetime_format,
+                    )
+                    .map_err(ConvertError::Config)?;
+                }
+            }
 
-    let mut row_count: u32 = 0;
-    let mut col_count: u16 = 0;
-    let mut chunk: Vec<Vec<String>> = Vec::with_capacity(PARALLEL_CHUNK_ROWS);
+            if !chunk.is_empty() {
+                flush_parallel_chunk(
+                    worksheet,
+                    &mut chunk,
+                    &mut row_count,
+                    date_order,
+                    date_format,
+                    datetime_format,
+                )
+                .map_err(ConvertError::Config)?;
+            }
 
-    for result in csv_reader.records() {
-        let absolute_row = row_count as usize + chunk.len();
-        let record = result.map_err(|e| {
-            ConvertError::Config(format!("CSV parse error at row {}: {}", absolute_row, e))
-        })?;
-        let num_cols = u16::try_from(record.len()).map_err(|_| {
-            ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
-        })?;
-        if num_cols > col_count {
-            col_count = num_cols;
-        }
-        chunk.push(record.iter().map(|s| s.to_string()).collect());
-
-        if chunk.len() >= PARALLEL_CHUNK_ROWS {
-            flush_parallel_chunk(
-                worksheet,
-                &mut chunk,
-                &mut row_count,
-                date_order,
-                &date_format,
-                &datetime_format,
-            )
-            .map_err(ConvertError::Config)?;
-        }
-    }
-
-    if !chunk.is_empty() {
-        flush_parallel_chunk(
-            worksheet,
-            &mut chunk,
-            &mut row_count,
-            date_order,
-            &date_format,
-            &datetime_format,
-        )
-        .map_err(ConvertError::Config)?;
-    }
-
-    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
-
-    Ok((row_count, col_count))
+            Ok((row_count, col_count))
+        },
+    )
 }
 
 /// Parse the chunk in parallel, write it sequentially, clear it, and advance `row_count`.

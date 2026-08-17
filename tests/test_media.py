@@ -549,6 +549,74 @@ class TestCharts:
         with pytest.raises(ValueError, match="must include a sheet name"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
 
+    @pytest.mark.parametrize(
+        "key", ["data_range", "values_range", "values", "name", "series_name"]
+    )
+    def test_chart_level_series_key_beside_series_raises(self, key: str, tmp_xlsx: str) -> None:
+        """A chart-level range or series name beside `series` is rejected, not dropped.
+
+        The series branch reads its ranges and names from the series items only,
+        so each of these keys used to be accepted, ignored, and never mentioned
+        again -- a chart quietly missing the series the caller asked for. The
+        rest of this library rejects contradictory input loudly; this is that.
+        """
+        df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6], "C": [7, 8, 9]})
+        charts: dict[str, ChartOptions] = {
+            "D2": {
+                "type": "column",
+                key: "Sheet1!$C$2:$C$4",  # type: ignore[misc]
+                "series": [{"values_range": "Sheet1!$B$2:$B$4"}],
+            }
+        }
+        with pytest.raises(ValueError, match=f"'{key}' cannot be combined with 'series'"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
+
+    def test_chart_level_series_keys_are_all_named_at_once(self, tmp_xlsx: str) -> None:
+        """Two offending keys are both reported, so fixing one does not reveal the next."""
+        df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6], "C": [7, 8, 9]})
+        charts: dict[str, ChartOptions] = {
+            "D2": {
+                "type": "column",
+                "data_range": "Sheet1!$C$2:$C$4",
+                "name": "Ignored",
+                "series": [{"values_range": "Sheet1!$B$2:$B$4"}],
+            }
+        }
+        with pytest.raises(ValueError, match="cannot be combined with 'series'") as excinfo:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
+        message = str(excinfo.value)
+        assert "'data_range'" in message
+        assert "'name'" in message
+
+    def test_chart_level_non_series_keys_still_work_with_series(self, tmp_xlsx: str) -> None:
+        """Control: the rejection is scoped to series-level keys and nothing else.
+
+        A guard written one key too wide would break the documented chart-level
+        `categories_range` fallback and every chart-level option that is not a
+        series concept -- and the parametrized test above cannot see that,
+        because every input it feeds is meant to be rejected. This is the input
+        that must still be accepted.
+        """
+        df = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6]})
+        charts: dict[str, ChartOptions] = {
+            "D2": {
+                "type": "column",
+                "series": [{"values_range": "Sheet1!$B$2:$B$4"}],
+                "categories_range": "Sheet1!$A$2:$A$4",
+                "title": "Kept",
+                "x_axis_name": "X",
+                "style": 12,
+            }
+        }
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
+        # The chart-level categories are the documented fallback for a series
+        # item that specifies none, so they must reach the XML.
+        assert "Sheet1!$A$2:$A$4" in chart_xml
+        assert "Kept" in chart_xml
+        assert '<c:style val="12"/>' in chart_xml
+
 
 class TestSparklines:
     """Tests for native Excel sparklines (mini in-cell charts)."""

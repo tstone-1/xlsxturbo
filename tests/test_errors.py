@@ -587,11 +587,56 @@ BAD_TEXTBOX_FONT_KEY: dict[str, Any] = {
     "textboxes": {"D1": {"text": "note", "font": {1: "y"}}}
 }
 
+# The four dispatch keys the apply layer reads before it knows which feature
+# family it is building. Each was hand-extracted with `.extract()` and its
+# `PyErr` formatted into the message, so a non-string `type` reported
+# ``conditional_formats['a']: invalid 'type': TypeError: 'int' object is not an
+# instance of 'str'`` -- the same defect as the two above, at four more sites,
+# and invisible to the head-anchored guard this class used to carry.
+BAD_CF_TYPE: dict[str, Any] = {"conditional_formats": {"a": {"type": 3}}}
+BAD_CF_CRITERIA: dict[str, Any] = {
+    "conditional_formats": {
+        "a": {"type": "cell", "criteria": 3, "value": 1, "format": {"bold": True}}
+    }
+}
+BAD_VALIDATION_TYPE: dict[str, Any] = {"validations": {"a": {"type": 3}}}
+# `values` is the one dispatch field extracted as a list rather than a scalar,
+# so no `OptionMap` accessor covers it and its message is hand-written. A plain
+# int is the non-Sequence case; the list-of-ints case is probed separately
+# below, because only that one exercises the per-item branch.
+BAD_VALIDATION_VALUES: dict[str, Any] = {
+    "validations": {"a": {"type": "list", "values": 3}}
+}
+BAD_VALIDATION_VALUES_ITEM: dict[str, Any] = {
+    "validations": {"a": {"type": "list", "values": [1, 2]}}
+}
+
 # One entry per apply-time re-parse site: the kwargs that reach it, and the
 # fragments its message must carry.
 APPLY_TIME_NESTED_DICT_CASES = [
     pytest.param(BAD_SERIES_KEY, ("charts['D2']", "series item 0", "int"), id="chart-series"),
     pytest.param(BAD_TEXTBOX_FONT_KEY, ("textboxes['D1']", "'font'", "int"), id="textbox-font"),
+    pytest.param(
+        BAD_CF_TYPE, ("conditional_formats['a']", "'type'", "int"), id="cf-type"
+    ),
+    pytest.param(
+        BAD_CF_CRITERIA,
+        ("conditional_formats['a']", "'criteria'", "int"),
+        id="cf-criteria",
+    ),
+    pytest.param(
+        BAD_VALIDATION_TYPE, ("validations['a']", "'type'", "int"), id="validation-type"
+    ),
+    pytest.param(
+        BAD_VALIDATION_VALUES,
+        ("validations['a']", "'values'", "int"),
+        id="validation-values",
+    ),
+    pytest.param(
+        BAD_VALIDATION_VALUES_ITEM,
+        ("validations['a']", "'values'", "item 0", "int"),
+        id="validation-values-item",
+    ),
 ]
 
 
@@ -603,13 +648,23 @@ class TestApplyTimeNestedDictsReportFaithfully:
     ``to_string()`` renders as ``"<class>: <message>"``, so the caller reads
     ``ConfigurationTypeError:`` at the head of an exception that is not one --
     the demoted class name surviving as message text.
+
+    **The class-name check is not anchored, and that is the point.** It was an
+    ``re.match`` pinned to the head of the message until the four dispatch-key
+    probes above were added, and those four could never have failed it: a
+    flattened ``PyErr`` at those sites lands *mid-string*, after the locator
+    (``conditional_formats['a']: invalid 'type': TypeError: ...``), so the guard
+    was structurally incapable of seeing the very defect it was written for
+    wherever the site prefixes its own context first -- which every apply-layer
+    site does. ``re.search`` over the whole message is what makes the two
+    original cases and these four the same check.
     """
 
     @pytest.mark.parametrize(("kwargs", "anchors"), APPLY_TIME_NESTED_DICT_CASES)
     def test_the_message_carries_no_class_name_prefix(
         self, kwargs: dict[str, Any], anchors: tuple[str, ...], tmp_path: Path
     ) -> None:
-        """No class name heads the message, which still names anchor and type.
+        """No class name appears anywhere in the message, which names anchor and type.
 
         Args:
             kwargs: the option that reaches an apply-time nested-dict re-parse.
@@ -619,8 +674,10 @@ class TestApplyTimeNestedDictsReportFaithfully:
         with pytest.raises(xlsxturbo.XlsxTurboError) as caught:
             xlsxturbo.df_to_xlsx(_frame(), tmp_path / "out.xlsx", **kwargs)
         message = str(caught.value)
-        assert not re.match(r"^\w+Error: ", message), (
-            f"message is prefixed with an exception class name: {message!r}"
+        embedded = re.search(r"\w+Error: ", message)
+        assert not embedded, (
+            f"message carries an exception class name at offset "
+            f"{embedded.start() if embedded else -1}: {message!r}"
         )
         for expected in anchors:
             assert expected in message, (
@@ -703,3 +760,122 @@ class TestConvertErrorHasNoDefaultCategory:
                 f"{variant} is constructed {source.count(variant)} time(s) in "
                 "convert.rs; a category nothing produces is not a category"
             )
+
+
+# The ways a `PyErr` gets built from scratch in Rust. Every one of them bypasses
+# the hierarchy in `src/errors.rs` and raises a bare pyo3 builtin instead, which
+# is exactly the outcome `docs/stability.md` pins against.
+#
+# Deliberately NOT a ban on `pyo3::exceptions::` as such: `src/extract.rs` names
+# `PyKeyError` four times inside `is_instance_of::<...>`, which *inspects* an
+# exception rather than constructing one and must stay legal. Banning the path
+# would report those four as violations, and a guard that cries wolf on correct
+# code gets widened until it sees nothing.
+PYERR_CONSTRUCTIONS: dict[str, str] = {
+    "Py*Error::new_err(...)": r"\bnew_err\s*\(",
+    "PyErr::new(...)": r"\bPyErr::new\b",
+    "PyErr::from_type(...)": r"\bPyErr::from_type\s*\(",
+    "create_exception!(...)": r"\bcreate_exception\s*!",
+}
+
+# The one file allowed to construct exceptions, and so the only one exempt.
+ERRORS_MODULE = Path("src") / "errors.rs"
+
+
+@pytest.mark.skipif(
+    not repo_checkout_available(),
+    reason="reads src/**/*.rs, which a wheel install does not carry",
+)
+class TestOnlyErrorsModuleConstructsExceptions:
+    """No file under ``src/`` but ``errors.rs`` builds a ``PyErr`` from scratch.
+
+    ``AGENTS.md`` states the rule -- never ``pyo3::exceptions::Py*Error::new_err``
+    in ``src/``, raise through ``crate::errors::*`` -- and until this class was
+    written it was enforced by nothing at all. The tree happened to be clean, so
+    the rule and reality agreed by luck rather than by construction, which is
+    indistinguishable from a guard that works right up until the day someone
+    reaches for the convenient call.
+
+    It matters because a bare ``PyValueError::new_err`` produces an exception
+    outside the published hierarchy: ``except xlsxturbo.OptionError`` misses it,
+    ``except XlsxTurboError`` misses it, and nothing in the suite notices,
+    because it still satisfies every ``pytest.raises(ValueError)`` assertion in
+    the compatibility record.
+
+    **What it forbids** is the *construction* forms listed in
+    ``PYERR_CONSTRUCTIONS`` -- ``new_err(``, ``PyErr::new``, ``PyErr::from_type(``
+    and ``create_exception!`` -- anywhere under ``src/`` except ``src/errors.rs``.
+    It does not forbid *mentioning* ``pyo3::exceptions::``; ``src/extract.rs``
+    legitimately inspects a ``PyKeyError`` with ``is_instance_of``.
+
+    **What turns it red**: adding
+    ``return Err(pyo3::exceptions::PyValueError::new_err("x"));`` -- or any of
+    the other three forms -- to any ``src/*.rs`` file other than ``errors.rs``.
+    Verified by planting exactly that line in ``src/apply/validations.rs``.
+
+    The scan is comment-blind by design: it reads raw text, so writing one of
+    these forms inside a ``//`` comment also fails. That is the safe direction --
+    a loud false red beats a stripping bug that quietly blinds the scan -- and
+    the failure message says so.
+    """
+
+    def _rust_sources(self) -> list[Path]:
+        """Return every ``.rs`` file under ``src/``, sorted."""
+        return sorted((REPO_ROOT / "src").rglob("*.rs"))
+
+    def test_the_scan_has_something_to_scan(self) -> None:
+        """The control: a broken glob must read as red, not as a clean tree.
+
+        An empty file list makes the violation test below pass vacuously and
+        for ever. So the file count is asserted non-empty, ``src/errors.rs`` is
+        asserted to be among the files found, and that file is asserted to
+        contain a construction -- if the one site that is *supposed* to build a
+        ``PyErr`` no longer matches any pattern in ``PYERR_CONSTRUCTIONS``, the
+        patterns have gone stale and the scan is looking for code that no longer
+        exists in this form.
+        """
+        sources = self._rust_sources()
+        assert len(sources) >= 10, (
+            f"only {len(sources)} Rust source(s) found under {REPO_ROOT / 'src'}; "
+            "the glob is broken and the violation scan would pass vacuously"
+        )
+        relative = {path.relative_to(REPO_ROOT) for path in sources}
+        assert ERRORS_MODULE in relative, (
+            f"{ERRORS_MODULE} is not among the scanned files: {sorted(relative)}"
+        )
+
+        errors_source = (REPO_ROOT / ERRORS_MODULE).read_text(encoding="utf-8")
+        matched = [
+            name
+            for name, pattern in PYERR_CONSTRUCTIONS.items()
+            if re.search(pattern, errors_source)
+        ]
+        assert matched, (
+            f"none of {sorted(PYERR_CONSTRUCTIONS)} appears in {ERRORS_MODULE}, "
+            "the one file that is supposed to construct exceptions. The patterns "
+            "no longer describe how this crate raises, so the scan below is "
+            "searching for nothing."
+        )
+
+    def test_no_source_but_errors_rs_constructs_a_pyerr(self) -> None:
+        """Every other ``src/**/*.rs`` file is free of the construction forms."""
+        offenders: list[str] = []
+        for path in self._rust_sources():
+            relative = path.relative_to(REPO_ROOT)
+            if relative == ERRORS_MODULE:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for name, pattern in PYERR_CONSTRUCTIONS.items():
+                for found in re.finditer(pattern, source):
+                    line = source.count("\n", 0, found.start()) + 1
+                    offenders.append(f"{relative}:{line}: {name}")
+
+        assert not offenders, (
+            "a PyErr is constructed outside src/errors.rs:\n  "
+            + "\n  ".join(offenders)
+            + "\n\nRaise through crate::errors::{configuration, configuration_type, "
+            "input_data, file, workbook_validation} instead -- a bare pyo3 builtin "
+            "is outside the published hierarchy, so `except xlsxturbo.OptionError` "
+            "will not catch it. (This scan reads raw text, so a mention inside a "
+            "comment fails too; reword the comment.)"
+        )

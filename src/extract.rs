@@ -373,11 +373,24 @@ fn validate_column_widths_index(i: i64, label: &str) -> PyResult<()> {
 /// index and passes through the same range validation — it is not merely
 /// forwarded verbatim, since the backend only recognizes numeric-string keys
 /// and `"_all"`.
+///
+/// A Python `bool` key is refused before the integer branch: `bool` subclasses
+/// `int`, so `{True: 20}` used to extract as column index 1 and silently size
+/// column B.
 pub(crate) fn extract_column_widths(
     py_dict: &Bound<'_, pyo3::types::PyDict>,
 ) -> PyResult<HashMap<String, f64>> {
     let mut widths: HashMap<String, f64> = HashMap::new();
     for (k, v) in py_dict.iter() {
+        if k.is_instance_of::<pyo3::types::PyBool>() {
+            return Err(crate::errors::configuration_type(format!(
+                "column_widths['{}']: must be an integer column index or the string '_all', got {}",
+                k.str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|_| "?".into()),
+                pytype_name(&k)
+            )));
+        }
         let key_str = if let Ok(i) = k.extract::<i64>() {
             validate_column_widths_index(i, &i.to_string())?;
             i.to_string()
@@ -761,9 +774,16 @@ pub(crate) fn extract_rich_text(
             )));
         }
 
-        if !segments.is_empty() {
-            rich_text.insert(cell_str, segments);
+        // An empty list used to be dropped here, so `{'A1': []}` produced a
+        // workbook with nothing at A1 and no indication why. Refuse it, as
+        // `charts[...]['series']` does for the same shape.
+        if segments.is_empty() {
+            return Err(crate::errors::configuration(format!(
+                "rich_text['{}']: must not be empty, expected at least one segment",
+                cell_str
+            )));
         }
+        rich_text.insert(cell_str, segments);
     }
 
     Ok(rich_text)

@@ -175,6 +175,22 @@ pub(crate) fn apply_charts(
         "series_name",
     ];
 
+    // Chart-level keys that only ever describe a single series. With `series`
+    // present each item carries its own, and the chart-level copy was read by
+    // nothing -- silently, which is the one thing this file does nowhere else.
+    //
+    // `categories_range`/`categories` are deliberately absent: those *are* read
+    // at chart level alongside `series`, as the documented fallback for items
+    // that do not carry their own. So is everything that is not a series
+    // concept (title, axes, size, style, legend).
+    const CHART_LEVEL_SERIES_KEYS: &[&str] = &[
+        "data_range",
+        "values_range",
+        "values",
+        "name",
+        "series_name",
+    ];
+
     for (cell_ref, config) in charts {
         let (row, col) = parse_cell_ref(cell_ref)?;
         let view = OptionMap::new(py, config, format!("charts['{}']", cell_ref));
@@ -189,6 +205,26 @@ pub(crate) fn apply_charts(
             .get("series")
             .is_some_and(|series_obj| !series_obj.bind(py).is_none())
         {
+            // Reject the contradiction before parsing anything: a chart-level
+            // range or name beside `series` states one thing and gets another.
+            let conflicting: Vec<String> = CHART_LEVEL_SERIES_KEYS
+                .iter()
+                .filter(|key| {
+                    config
+                        .get(**key)
+                        .is_some_and(|value| !value.bind(py).is_none())
+                })
+                .map(|key| format!("'{}'", key))
+                .collect();
+            if !conflicting.is_empty() {
+                return Err(format!(
+                    "charts['{}']: {} cannot be combined with 'series'; a series-level \
+                     range or name belongs inside the series list",
+                    cell_ref,
+                    conflicting.join(", ")
+                ));
+            }
+
             let series_obj = config.get("series").expect("checked above");
             let series_list = series_obj
                 .bind(py)

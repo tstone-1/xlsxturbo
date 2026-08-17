@@ -74,24 +74,60 @@ fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str, default: i32) -> Re
     ))
 }
 
+/// Describe why a `values` entry is not a list of strings.
+///
+/// Hand-written because `values` is the one field here that extracts into a
+/// `Vec<String>` rather than a scalar, so no [`OptionMap`] accessor covers it.
+/// It must still name the key and the offending Python type itself: letting the
+/// `PyErr` from a failed `extract()` render into the message embeds a demoted
+/// exception class name (`TypeError: 'int' object is not an instance of
+/// 'Sequence'`) in the text of a `ConfigurationError`, which reads as the wrong
+/// class having been raised.
+///
+/// When the value is an iterable, the first item that is not a string is named
+/// by index — a list of ints is a far commoner mistake than a non-list, and
+/// "got list" would say nothing about it. Strings are excluded from that walk:
+/// a `str` is iterable and every character extracts, so it would report no bad
+/// item and pay for the walk anyway.
+fn values_type_error(bound: &Bound<'_, PyAny>, context: &str) -> String {
+    if !bound.is_instance_of::<pyo3::types::PyString>() {
+        if let Ok(items) = bound.try_iter() {
+            for (index, item) in items.enumerate() {
+                let Ok(item) = item else { break };
+                if item.extract::<String>().is_err() {
+                    return format!(
+                        "{}: 'values' must be a list of strings, but item {} is {}",
+                        context,
+                        index,
+                        pytype_name(&item)
+                    );
+                }
+            }
+        }
+    }
+    format!(
+        "{}: 'values' must be a list of strings, got {}",
+        context,
+        pytype_name(bound)
+    )
+}
+
 /// Build the `DataValidation` for a single validation config: rejects unknown
 /// keys, dispatches by `type` to the type-specific rule, and layers on the
 /// optional input/error message. Called once per `(col_pattern, config)`
 /// pair — not once per matched column — since the built value is identical
 /// for every column the pattern matches.
 fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataValidation, String> {
-    let val_type: String = view
-        .get("type")
-        .ok_or_else(|| format!("validations['{}']: missing 'type' key", col_pattern))?
-        .bind(view.py())
-        .extract()
-        .map_err(|e| format!("validations['{}']: invalid 'type': {}", col_pattern, e))?;
+    // Through the `OptionMap` accessor, not a hand-rolled `extract()`: a raw
+    // `PyErr` flattened into this layer's `String` channel carries its own class
+    // name into the message of whatever the boundary raises.
+    let val_type: String = view.required_string("type")?;
 
     let validation = match val_type.to_lowercase().as_str() {
         "list" => {
             view.reject_unknown(&keys_with(&["values"]))?;
             // List validation: dropdown with values
-            let values: Vec<String> = view
+            let values_entry = view
                 .get("values")
                 .ok_or_else(|| {
                     format!(
@@ -99,9 +135,10 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
                         col_pattern
                     )
                 })?
-                .bind(view.py())
+                .bind(view.py());
+            let values: Vec<String> = values_entry
                 .extract()
-                .map_err(|e| format!("validations['{}']: invalid 'values': {}", col_pattern, e))?;
+                .map_err(|_| values_type_error(values_entry, view.context()))?;
 
             // Check Excel's 255 character limit for list validation.
             // Count characters, not bytes — Excel's limit is on characters.

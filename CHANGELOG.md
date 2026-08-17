@@ -5,12 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-08-17
 
 ### Changed
 - **`rust_xlsxwriter` 0.98.1 -> 0.98.2**, and the dependency floor moves with it: the
   requirement is now `0.98.2`, not `0.98`, because the empty-name screen removed below only
   holds if the fix is present.
+- **A `table_name` that collides with a cell reference is now sanitized like every other
+  invalid name.** Excel forbids table names that address a cell, and rust_xlsxwriter 0.98.2
+  does not check the rule (`Table::set_name` stores verbatim), so `table_name="Q1"` reached
+  the saved workbook. `sanitize_table_name` now prefixes `_` — `Q1` becomes `_Q1` — for
+  A1-style references inside the grid (case-insensitive, up to `XFD1048576`), the R1C1
+  forms (`RC`, `R1C1`, with grid-bounded indices), and the selection shortcuts `R`/`C`,
+  which Excel reserves separately. Names *beyond* the grid
+  (`AAAA1`, `A1048577`) address no cell, so Excel accepts them and they pass through
+  unchanged; the check runs on the already-sanitized string, so `1Q1 -> _1Q1` is not
+  prefixed twice. A zero-padded row counts by the row it parses to — measured against
+  Excel 16.112, which offers to repair a workbook whose table is named `A01` exactly as
+  for `Q1`, so `A01` is prefixed while `A0` (row zero, addressing nothing) passes
+  through. Rules table added to `docs/tables.md`. The missing validation is reported
+  upstream as
+  [rust_xlsxwriter#189](https://github.com/jmcnamara/rust_xlsxwriter/issues/189); the
+  sanitize contract here stays either way, since it is `table_name`'s own behaviour and
+  not a workaround.
+- **A `defined_names` key that is a cell reference now raises `ConfigurationError`** instead
+  of reaching the file — rejected rather than renamed, because a silently renamed defined
+  name breaks every formula that references it. Sheet-qualified keys (`Sheet1!Q1`) are
+  judged on their local part, matching what `define_name` itself validates. The A1/R1C1
+  shape detector is written once, in `src/parse/cell_refs.rs`, and shared with the table
+  sanitizer.
+- **A Python `bool` is now rejected where a number is expected.** `column_widths={True: 20}`
+  silently set column B's width and `textboxes={..., "width": True}` made a 1-unit box,
+  because `bool` is an `int` subclass and pyo3's integer extraction accepts it — the trap
+  the data plane already ordered its branches around (`write.rs`). Rejection covers
+  `column_widths` keys (`ConfigurationTypeError`) and every `OptionMap` numeric field —
+  chart/textbox/image sizes and offsets, `font_size`, sparkline weights, validation bounds
+  (`ConfigurationError`, matching how those fields already classify a wrong-typed string).
+  Genuine boolean options (`bold`, `wrap_text`, ...) are untouched.
+- **`rich_text` with an empty segment list now raises `ConfigurationError` naming the cell**
+  instead of being silently dropped — the same posture as an empty chart `series`, which has
+  always errored.
+- **A chart-level `data_range`, `values_range`, `values`, `name` or `series_name` beside
+  `series` now raises `ConfigurationError`** naming every conflicting key at once, instead
+  of being silently ignored while the `series` list won. `categories_range`/`categories`
+  beside `series` is deliberately unaffected: the series branch reads it as the documented
+  shared fallback for series items that carry none of their own.
+- **CSV parse errors report a 1-based row number on both conversion paths.** Both the
+  sequential and the parallel converter said `row 0` for the first record; they now agree
+  with the `line N` that csv's own error text embeds. Exception classes unchanged
+  everywhere above; all of these reject previously-accepted nonsense input and stay inside
+  the hierarchy, so pre-0.19 `except ValueError`/`except TypeError` code keeps working.
+
+### Fixed
+- **Four apply-time type errors no longer embed a raw `TypeError:` inside their message.**
+  `conditional_formats` `'type'`/`'criteria'` and `validations` `'type'`/`'values'` read
+  `invalid 'type': TypeError: 'int' object is not an instance of 'str'` — a flattened
+  `PyErr` rendered mid-string, the same defect class 1.1.1 fixed for chart series and
+  textbox fonts, one layer down. They now go through the `OptionMap` accessors and read
+  `'type' must be a string, got int`; a `values` list with a non-string item names the
+  offending index (`item 0 is int`), and an explicit `None` for these keys now means unset.
+  The guard in `tests/test_errors.py` that should have caught this matched `^\w+Error: `
+  anchored to the message head — structurally blind to a class name at offset 42 — and now
+  searches the whole message, with the four sites added to its probe matrix.
+
+### Added
+- **A source scan pins the "raise only through `crate::errors`" rule.** Zero violations
+  existed, and zero tests would have noticed one: a `new_err` added to `lib.rs` would
+  escape the hierarchy silently. `tests/test_errors.py` now scans `src/**/*.rs` for PyErr
+  constructions (`new_err(`, `PyErr::new`, `PyErr::from_type(`, `create_exception!`)
+  outside `src/errors.rs`, with controls asserting the scan found the sources and that the
+  one allowed site actually matches — so a broken glob reads as red, not clean. Mentions
+  (`is_instance_of::<PyKeyError>`) stay legal; the scan forbids constructions.
+- **The two CSV pipelines now share one skeleton, and a test couples what remains apart.**
+  Reader construction, workbook setup, formats, record validation and save were a ~50-line
+  near-verbatim copy between the sequential and parallel converters — the one duplication
+  with no guard. The shared parts are now written once; the row loops stay separate because
+  routing the sequential path through the chunk machinery would add a per-row allocation to
+  the hot path the parallel benchmark measures (stated at the site). A CLI test asserts
+  both paths report the identical 1-based row for the same malformed file.
+- **CI installs `maturin>=1.9,<2.0`, matching the build backend's floor.** Four workflow
+  lines still said `>=1.4` while `pyproject.toml` pins 1.9 for the PEP 639 license-files
+  behaviour; pip's newest-wins resolution masked the contradiction. A guard in
+  `tests/test_ci_config.py` now compares every workflow maturin spec against the
+  `[build-system]` floor, with a fail-on-zero-matches control — proven necessary: with the
+  specs unpinned the floor assertion passed vacuously and only the control went red.
 
 ### Removed
 - **The empty-`defined_names` screen is gone — upstream fixed the panic.** Until 0.98.1

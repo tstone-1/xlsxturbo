@@ -327,6 +327,133 @@ class TestTableName:
             )
 
 
+class TestTableNameCellReferenceCollision:
+    """A table name Excel would read as a cell address gets an underscore.
+
+    ``rust_xlsxwriter`` 0.98.2 stores the name verbatim, so before this these
+    workbooks reached Excel with a name it refuses. Sanitizing rather than
+    raising follows the contract ``table_name`` has always had: invalid
+    characters and a leading digit are already fixed up silently.
+    """
+
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("Q1", "_Q1"),
+            ("A1", "_A1"),
+            ("abc123", "_abc123"),
+            ("XFD1048576", "_XFD1048576"),  # the last cell of the grid
+            ("A01", "_A01"),  # zero-padded row: Excel repairs it like "Q1" (measured)
+            ("R", "_R"),
+            ("C", "_C"),
+            ("R1C1", "_R1C1"),
+        ],
+    )
+    def test_reference_shaped_name_is_prefixed(
+        self, given: str, expected: str, tmp_xlsx: str
+    ) -> None:
+        """The table is written, under the prefixed name."""
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2", table_name=given)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert list(ws.tables.keys()) == [expected]
+        wb.close()
+
+    @pytest.mark.parametrize("name", ["Sales", "Q1_Sales", "Table1x"])
+    def test_ordinary_names_pass_through(self, name: str, tmp_xlsx: str) -> None:
+        """A name that is not a reference passes through untouched.
+
+        The control: without it the parametrization above is satisfied by a
+        function that prefixes everything.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2", table_name=name)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert list(ws.tables.keys()) == [name]
+        wb.close()
+
+    @pytest.mark.parametrize("name", ["AAAA1", "A1048577", "A0"])
+    def test_shapes_beyond_the_grid_stay_legal_names(
+        self, name: str, tmp_xlsx: str
+    ) -> None:
+        """Letters-then-digits is not enough — the cell has to exist.
+
+        The grid ends at XFD1048576, so ``AAAA1`` (four column letters) and
+        ``A1048577`` (one row too far) address nothing and Excel accepts them as
+        ordinary names. Prefixing them would refuse input Excel takes, which is
+        why the check is bounded by the grid rather than by a regex.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2", table_name=name)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert list(ws.tables.keys()) == [name]
+        wb.close()
+
+
+class TestBoolRejectedWhereANumberIsExpected:
+    """Python ``bool`` subclasses ``int``, so ``True`` used to extract as 1.
+
+    A width, index or size given as ``True`` was silently taken as one unit —
+    a wrong number rather than a rejected option.
+    """
+
+    def test_bool_column_widths_key_raises(self, tmp_xlsx: str) -> None:
+        """``{True: 20}`` used to size column B."""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        # Built dynamically, so it cannot be a valid key type at check time.
+        widths: Any = {True: 20}
+        with pytest.raises(xlsxturbo.ConfigurationTypeError, match="got bool") as excinfo:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths=widths)
+        assert isinstance(excinfo.value, TypeError)
+        assert "column_widths" in str(excinfo.value)
+
+    def test_integer_column_widths_key_still_works(self, tmp_xlsx: str) -> None:
+        """The control: an ordinary integer key is untouched."""
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={1: 30})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws.column_dimensions["B"].width > 25
+        wb.close()
+
+    def test_bool_numeric_option_value_raises(self, tmp_xlsx: str) -> None:
+        """A size given as ``True`` names its own key.
+
+        ``font_size`` goes through the shared ``OptionMap`` numeric accessor, so
+        this covers every option that reads a number through it (chart width,
+        textbox height, sparkline weight, ...).
+        """
+        df = pd.DataFrame({"A": [1]})
+        fmt: Any = {"font_size": True}
+        with pytest.raises(xlsxturbo.ConfigurationError, match="got bool") as excinfo:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format=fmt)
+        assert isinstance(excinfo.value, ValueError)
+        assert "font_size" in str(excinfo.value)
+
+    def test_real_number_option_value_still_works(self, tmp_xlsx: str) -> None:
+        """The control: a genuine number is accepted."""
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format={"font_size": 14})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A1"].font.size == 14
+        wb.close()
+
+    def test_genuine_bool_options_are_unaffected(self, tmp_xlsx: str) -> None:
+        """The control that bounds the change: flags still take ``True``."""
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.df_to_xlsx(
+            df, tmp_xlsx, header_format={"bold": True, "italic": True, "wrap_text": True}
+        )
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A1"].font.bold is True
+        wb.close()
+
+
 class TestHeaderFormat:
     """Tests for header_format parameter."""
 
@@ -436,6 +563,26 @@ class TestRichText:
         segment_format: Any = {key: value}
         with pytest.raises(ValueError, match=f"unknown option '{key}'"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={"D1": [("text", segment_format)]})
+
+    def test_empty_segment_list_raises(self, tmp_xlsx: str) -> None:
+        """An empty list was dropped, leaving the cell blank with no reason given.
+
+        ``charts[...]['series']`` refuses the same shape; this makes rich text
+        agree with it. The message names the cell because a dict of several
+        entries would otherwise not say which one was empty.
+        """
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(xlsxturbo.ConfigurationError, match="must not be empty") as excinfo:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={"D1": []})
+        assert isinstance(excinfo.value, ValueError)
+        assert "D1" in str(excinfo.value)
+
+    def test_single_segment_list_still_works(self, tmp_xlsx: str) -> None:
+        """The control: one segment is a valid list."""
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={"D1": [("solo", {"bold": True})]})
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            assert "solo" in zf.read("xl/sharedStrings.xml").decode("utf-8")
 
     def test_rich_text_accepts_every_font_key(self, tmp_xlsx: str) -> None:
         """The font-level keys the stub documents all remain accepted."""

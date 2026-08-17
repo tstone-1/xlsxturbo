@@ -328,6 +328,93 @@ class TestDefinedNames:
         assert "Sheet1!" in str(excinfo.value)
 
 
+class TestDefinedNameCellReferenceCollision:
+    """A defined name Excel would read as a cell address is refused.
+
+    Table names are sanitized instead, and the difference is deliberate: a
+    defined name is what the user's own formulas say, so renaming ``Q1`` to
+    ``_Q1`` behind their back would leave every ``=SUM(Q1)`` pointing at a name
+    the workbook no longer defines. ``rust_xlsxwriter`` 0.98.2 validates the
+    first character and the character set but not this.
+    """
+
+    @pytest.mark.parametrize("name", ["Q1", "A1", "A01", "XFD1048576", "R", "c", "R1C1"])
+    def test_reference_shaped_name_raises(self, name: str, tmp_xlsx: str) -> None:
+        """The error names the offending key and the rule."""
+        df = pd.DataFrame({"a": [1]})
+        with pytest.raises(
+            xlsxturbo.ConfigurationError, match="is a cell reference"
+        ) as excinfo:
+            xlsxturbo.df_to_xlsx(
+                df, tmp_xlsx, defined_names={name: "=Sheet1!$A$1:$A$2"}
+            )
+        assert isinstance(excinfo.value, ValueError)
+        assert f"defined_names['{name}']" in str(excinfo.value)
+
+    def test_sheet_qualified_name_is_judged_on_its_local_part(
+        self, tmp_xlsx: str
+    ) -> None:
+        """``Sheet1!Q1`` is rejected, and the message names both halves.
+
+        ``define_name`` applies its own rules to the part after the ``!``, so a
+        check that looked at the whole string would let this through.
+        """
+        df = pd.DataFrame({"a": [1]})
+        with pytest.raises(
+            xlsxturbo.ConfigurationError, match="is a cell reference"
+        ) as excinfo:
+            xlsxturbo.df_to_xlsx(
+                df, tmp_xlsx, defined_names={"Sheet1!Q1": "=Sheet1!$A$1:$A$2"}
+            )
+        assert isinstance(excinfo.value, ValueError)
+        assert "defined_names['Sheet1!Q1']" in str(excinfo.value)
+        assert "'Q1' is a cell reference" in str(excinfo.value)
+
+    @pytest.mark.parametrize("name", ["MyRange", "Q1_Sales", "R1C1D"])
+    def test_ordinary_names_still_work(self, name: str, tmp_xlsx: str) -> None:
+        """An ordinary name is still accepted.
+
+        The control: without it the rejections above are satisfied by a check
+        that refuses everything.
+        """
+        df = pd.DataFrame({"a": [1]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, defined_names={name: "=Sheet1!$A$1:$A$2"})
+        wb = load_workbook(tmp_xlsx)
+        assert name in {dn.name for dn in wb.defined_names.values()}
+        wb.close()
+
+    def test_a_sheet_qualified_ordinary_name_still_works(self, tmp_xlsx: str) -> None:
+        """A sheet-scoped name with a fine local part is still accepted.
+
+        The qualified control: the local-part check must not over-reach into
+        names that merely carry a sheet prefix.
+        """
+        df = pd.DataFrame({"a": [1]})
+        xlsxturbo.df_to_xlsx(
+            df, tmp_xlsx, defined_names={"Sheet1!Totals": "=Sheet1!$A$1:$A$2"}
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert "Totals" in {
+            dn.name for ws in wb.worksheets for dn in ws.defined_names.values()
+        } | {dn.name for dn in wb.defined_names.values()}
+        wb.close()
+
+    @pytest.mark.parametrize("name", ["AAAA1", "A1048577"])
+    def test_shapes_beyond_the_grid_stay_legal_names(
+        self, name: str, tmp_xlsx: str
+    ) -> None:
+        """Letters-then-digits is not enough — the cell has to exist.
+
+        The grid ends at XFD1048576, so these address nothing and Excel accepts
+        them; refusing them would reject input Excel takes.
+        """
+        df = pd.DataFrame({"a": [1]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, defined_names={name: "=Sheet1!$A$1:$A$2"})
+        wb = load_workbook(tmp_xlsx)
+        assert name in {dn.name for dn in wb.defined_names.values()}
+        wb.close()
+
+
 class TestDefinedNamesVerification:
     """Tests for defined_names with content verification."""
 

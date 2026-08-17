@@ -185,22 +185,17 @@ fn apply_cell_conditional(
     data_start_row: u32,
     data_end_row: u32,
 ) -> Result<(), String> {
-    let criteria: String = view
-        .get("criteria")
-        .ok_or_else(|| {
-            format!(
-                "conditional_formats['{}']: 'cell' type requires 'criteria' key",
-                col_pattern
-            )
-        })?
-        .bind(view.py())
-        .extract()
-        .map_err(|e| {
-            format!(
-                "conditional_formats['{}']: invalid 'criteria': {}",
-                col_pattern, e
-            )
-        })?;
+    // `string()` rather than a hand-rolled `extract()`: a raw `PyErr` flattened
+    // into this layer's `String` channel renders as "<class>: <message>", so the
+    // caller reads a `TypeError:` prefix inside a `ConfigurationError`. The
+    // missing-key wording stays bespoke -- it names the format type that
+    // requires the key, which the generic "missing 'criteria' key" would drop.
+    let criteria: String = view.string("criteria")?.ok_or_else(|| {
+        format!(
+            "conditional_formats['{}']: 'cell' type requires 'criteria' key",
+            col_pattern
+        )
+    })?;
 
     let fmt = parse_cf_format(view)?;
     let criteria_lower = criteria.to_lowercase();
@@ -367,17 +362,11 @@ fn apply_single_conditional_format(
         format!("conditional_formats['{}']", col_pattern),
     );
 
-    let format_type: String = view
-        .get("type")
-        .ok_or_else(|| format!("conditional_formats['{}']: missing 'type' key", col_pattern))?
-        .bind(py)
-        .extract()
-        .map_err(|e| {
-            format!(
-                "conditional_formats['{}']: invalid 'type': {}",
-                col_pattern, e
-            )
-        })?;
+    // Through the `OptionMap` accessor, not a hand-rolled `extract()`: a raw
+    // `PyErr` flattened into this layer's `String` channel carries its own class
+    // name into the message of whatever the boundary raises. `required_string`
+    // produces the same missing-key wording this site used before.
+    let format_type: String = view.required_string("type")?;
 
     match format_type.to_lowercase().as_str() {
         "2_color_scale" | "2colorscale" | "two_color_scale" => {

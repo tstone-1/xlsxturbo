@@ -1,6 +1,7 @@
 //! Shared workbook-level helpers.
 
 use crate::errors::{errno, FileFailure};
+use crate::parse::looks_like_cell_reference;
 use rust_xlsxwriter::{Workbook, XlsxError};
 use std::collections::HashMap;
 use std::path::Path;
@@ -99,12 +100,53 @@ pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Resul
     Ok(())
 }
 
+/// The part of a defined name Excel validates: everything after a `!` sheet
+/// qualifier, or the whole string when there is none.
+///
+/// `Workbook::define_name` splits on `!` and applies its own rules (non-empty,
+/// legal first character, no forbidden characters) to the local part only, so a
+/// screen added here has to look at the same half or `"Sheet1!Q1"` walks past
+/// it. Reported as an unqualified name by the crate, which is why the caller's
+/// key goes back in front of the message.
+fn local_part(name: &str) -> &str {
+    match name.rfind('!') {
+        Some(idx) => &name[idx + 1..],
+        None => name,
+    }
+}
+
+/// Reject a defined name Excel would read as a cell reference.
+///
+/// Unlike a table name, which is sanitized, this refuses: silently renaming a
+/// defined name would leave every formula that references it pointing at a name
+/// the workbook no longer defines, so the caller has to choose the new name.
+/// rust_xlsxwriter 0.98.2 validates the first character and the character set
+/// but not this, so nothing else catches it.
+fn reject_reference_shaped_name(name: &str) -> Result<(), String> {
+    // rust_xlsxwriter 0.98.2 does not check this rule; reported as
+    // https://github.com/jmcnamara/rust_xlsxwriter/issues/189. When the crate
+    // validates it, this screen can be revisited the way the empty-name screen
+    // was for #186 — kept only if its message names the offending key better.
+    if looks_like_cell_reference(local_part(name)) {
+        return Err(format!(
+            "defined_names['{}']: '{}' is a cell reference and cannot be used as a defined name. \
+             Excel reserves names that address a cell (A1-style, the R1C1 forms, and the \
+             selection shortcuts 'R' and 'C'); pick another name, e.g. '_{}'",
+            name,
+            local_part(name),
+            local_part(name)
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_defined_names(
     workbook: &mut Workbook,
     defined_names: Option<&HashMap<String, String>>,
 ) -> Result<(), String> {
     if let Some(names) = defined_names {
         for (name, reference) in names {
+            reject_reference_shaped_name(name)?;
             workbook
                 .define_name(name, reference)
                 .map_err(|e| format!("Failed to define name '{}': {}", name, e))?;

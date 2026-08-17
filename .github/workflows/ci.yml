@@ -94,7 +94,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" -r ${{ matrix.requirements }}
+          pip install "maturin>=1.9,<2.0" -r ${{ matrix.requirements }}
 
       - name: Report the resolved DataFrame library versions
         run: |
@@ -144,7 +144,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv\Scripts\activate
-          pip install "maturin>=1.4,<2.0" -r requirements-test.txt
+          pip install "maturin>=1.9,<2.0" -r requirements-test.txt
 
       - name: Build and install xlsxturbo
         run: |
@@ -189,7 +189,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" -r requirements-test.txt
+          pip install "maturin>=1.9,<2.0" -r requirements-test.txt
 
       - name: Build and install xlsxturbo
         run: |
@@ -270,7 +270,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.4,<2.0" "coverage[toml]>=7" -r requirements-test.txt
+          pip install "maturin>=1.9,<2.0" "coverage[toml]>=7" -r requirements-test.txt
 
       - name: Measure coverage
         run: |

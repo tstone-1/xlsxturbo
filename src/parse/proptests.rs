@@ -21,8 +21,9 @@
 //!   of them is paired with a property that does.
 
 use super::{
-    matches_pattern, naive_date_to_excel, naive_datetime_to_excel, parse_cell_range,
-    parse_cell_ref, parse_color, parse_table_style, parse_value, sanitize_table_name,
+    looks_like_cell_reference, matches_pattern, naive_date_to_excel, naive_datetime_to_excel,
+    parse_cell_range, parse_cell_ref, parse_color, parse_table_style, parse_value,
+    sanitize_table_name,
 };
 use crate::types::{CellValue, DateOrder};
 use proptest::prelude::*;
@@ -364,9 +365,25 @@ proptest! {
     }
 
     /// Names that are already valid pass through untouched.
+    ///
+    /// The generator reaches cell-reference shapes ("A1", "R", "Q1") often —
+    /// measured at roughly one case in 200 — and those are *not* already valid:
+    /// they collide with a cell address, so sanitising prefixes them. Excluding
+    /// them here rather than narrowing the regex keeps the generator wide, and
+    /// the reference-shape behaviour has its own assertions in `tables.rs`.
     #[test]
     fn valid_table_names_are_left_alone(name in "[A-Za-z_][A-Za-z0-9_]{0,40}") {
+        prop_assume!(!looks_like_cell_reference(&name));
         prop_assert_eq!(sanitize_table_name(&name), name);
+    }
+
+    /// A sanitised name never reads as a cell reference, for any input.
+    ///
+    /// The property the prefix exists for, stated over the whole input space
+    /// rather than the handful of named cases in `tables.rs`.
+    #[test]
+    fn sanitized_table_names_are_never_cell_references(name in "[A-Za-z_0-9]{0,12}") {
+        prop_assert!(!looks_like_cell_reference(&sanitize_table_name(&name)));
     }
 
     // --- Column patterns -------------------------------------------------
