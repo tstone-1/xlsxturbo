@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A `table_name` written in decomposed form is no longer mangled.** `sanitize_table_name`
+  screens with an allowlist of `is_alphanumeric() || '_'`, and a combining mark is neither, so
+  `"Verkäufe"` typed as `"Verka" + U+0308` reached the workbook as `Verka_ufe` and `"がくせい"`
+  in NFD as `か_くせい` — silently, with no warning, for names Excel accepts. The name is now
+  normalised to NFC before the screen runs, which repairs every mark that has a precomposed
+  form. Normalisation is NFC and deliberately not NFKC: NFKC folds `U+FF21` FULLWIDTH A to
+  ASCII `A`, which would turn a distinct name into the cell reference `A1` and then into
+  `_A1`.
+
+  Marks with **no** composed form are still rewritten — `"ไม่"` (Thai tone mark `U+0E48`) and
+  `"हिन्दी"` (Hindi virama `U+094D`) become `ไม_` and `हिन_दी` — because closing that gap means
+  widening the allowlist or inverting it to a denylist, which changes what is *accepted* and
+  needs an audit in that direction. `marks_without_a_composed_form_are_still_rewritten` pins
+  the current behaviour so the change cannot land unnoticed.
+
+  Table names only. Defined names are refused rather than rewritten and never went through
+  this screen.
+
+### Added
+- `unicode-normalization` as a direct dependency, for the fix above. It was not previously in
+  the tree, transitively or otherwise, and brings `tinyvec` and `tinyvec_macros` with it.
+
 ## [1.2.0] - 2026-08-17
 
 ### Changed

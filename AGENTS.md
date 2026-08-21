@@ -138,6 +138,83 @@ proper error) is what turns "empty names panic" from an assertion into a measure
 statement about pyo3 panic handling made from memory rather than from a test. Review the
 draft against the packet of what you actually ran, not against what you believe.
 
+## Name validation is ours now — upstream has drawn its line
+
+On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of
+[#189](https://github.com/jmcnamara/rust_xlsxwriter/issues/189#issuecomment-5368521583): he cannot
+replicate Excel's name rules maintainably, so the crate reverted to a simple rule set plus a "keep
+names simple, test in Excel if in doubt" note, and said so directly — *"Other libraries that wrap
+`rust_xlsxwriter` may need a stricter validation but I think that is up to them."* Duplicate-name
+comparison got the same answer: no case folding, out of scope.
+
+**So the crate's checks are a foot-gun guard, not a specification, and they are not going to move
+closer to Excel.** The two screens below stop being temporary workarounds waiting for an upstream
+fix and become the layer xlsxturbo owns. That is a change of intent, not of code — read the removal
+criteria in their doc comments with this in mind.
+
+**What exists today is asymmetric on purpose.** `reject_reference_shaped_name`
+(`src/workbook.rs`) **refuses** a defined name Excel would read as a cell reference, because
+silently renaming one leaves every formula pointing at a name the workbook no longer defines.
+`sanitize_table_name` (`src/parse/tables.rs`) **rewrites** a table name instead, since nothing
+references it. Preserve that split in anything new: rename what nobody points at, refuse what
+somebody might.
+
+**`Cargo.toml` pins `0.98.2`, which predates every #189 fix**, so none of the new crate-side checks
+reach us until that floor moves. Two things a bump will change: the crate starts rejecting
+cell-reference-shaped *defined* names itself, and `XlsxError::TableNameReused` is renamed to
+`NameReused` — we name neither variant anywhere, so that rename costs nothing here.
+
+⚠ **`sanitize_table_name` silently mangled names Excel accepts — measured 2026-08-21 end to end
+through the shipped 1.2.0 wheel, half fixed the same day.** It branches on `is_alphanumeric()`,
+which is the predicate upstream abandoned for exactly this reason: a combining mark is not
+alphanumeric, so it became `_`.
+
+| `table_name=` | written into the workbook |
+|---|---|
+| `Verkäufe` in NFD (`Verka` + U+0308) | `Verka_ufe` |
+| `ไม่` Thai, tone mark U+0E48 | `ไม_` |
+| `हिन्दी` Hindi, virama U+094D | `हिन_दी` |
+| `がくせい` in NFD (U+3099) | `か_くせい` |
+
+Controls in the same run behaved: ASCII `Sales`, NFC `Verkäufe`, `日本語` and NFC `がくせい` all
+survived byte for byte, and `Q1` became `_Q1` as designed. Excel accepts every one of the mangled
+inputs, there was no warning, and NFD text reaches a caller routinely.
+
+**The fix taken was NFC normalisation before the screen** — the smallest of the three candidates,
+because it repairs the mangling without widening what is *accepted*. It closes the first and
+fourth rows of that table and not the second or third: Thai and Hindi marks have no precomposed
+form, so those names are still rewritten. `marks_without_a_composed_form_are_still_rewritten` pins
+that, deliberately, so the remaining gap is a decision on record rather than a surprise — and so
+that widening the allowlist later goes red instead of passing silently. **NFC and not NFKC**:
+NFKC folds `U+FF21` FULLWIDTH A to ASCII `A`, which would turn a name Excel treats as distinct
+into the cell reference `A1` and then into `_A1`. `compatibility_forms_are_not_folded` is that
+control.
+
+**Closing the rest means inverting the allowlist to a denylist, and that direction needs the
+mirror audit** — not "does it still catch the bad names" but "what does it now accept that it used
+to rewrite?". Upstream's own flip in that direction moved 962,590 code points from rejected to
+accepted, which only an enumeration against a real validator could size. Do not take that step from
+reading.
+
+**The proptest cannot see this, and the reason is worth transplanting.**
+`sanitized_table_names_are_always_valid` asserts
+`sanitized.chars().all(|c| c.is_alphanumeric() || c == '_')` — the same predicate
+`sanitize_table_name` branches on. It is the writer agreeing with its own reader, so it holds by
+construction for every input `".*"` can generate and would keep holding if the predicate were
+wrong in any direction. A property that restates the implementation is not a test of it. The
+oracle a name check needs is external: Excel, or a fixed table of names measured against Excel.
+
+**A crate bump will not fix this either**, because the mangling happens in xlsxturbo before
+rust_xlsxwriter is called. `sanitize_table_name` is an allowlist, and therefore *stricter* than the
+crate's new denylist for exactly the characters at issue — the crate would accept every input in
+that table.
+
+**If a stricter layer is built, do not derive the rules from Excel's documentation** — it is wrong
+about several common characters, `?` and `€` among them. Excel's own name validator is scriptable
+and answers in a fraction of a second per name, and it rejects names that a clean file load
+accepts, so it is the better of the two oracles. The measured character surveys behind that claim
+are in the #189 thread.
+
 ## The bundled license notice
 
 `THIRD-PARTY-LICENSES.md` is generated — `python scripts/gen_third_party_licenses.py --write`

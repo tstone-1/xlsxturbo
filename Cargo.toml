@@ -35,6 +35,13 @@ indexmap = "2.14"
 # Staging file for atomic saves (see workbook::save_workbook). Already in the
 # tree via rust_xlsxwriter, so this adds no new download.
 tempfile = "3"
+# NFC normalisation for table names (see parse::tables::sanitize_table_name).
+# The sanitizer's allowlist is `is_alphanumeric() || '_'`, and a combining mark
+# is neither, so decomposed text arrived as `Verka_ufe` for `Verkäufe`. NOT
+# already in the tree -- this is a genuine new dependency, taken because the
+# alternative (normalising in the Python layer) would leave the `cli` entry
+# point unfixed.
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 # Property tests over src/parse/ (src/parse/proptests.rs). `default-features =

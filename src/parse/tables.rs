@@ -1,5 +1,6 @@
 use super::cell_refs::looks_like_cell_reference;
 use rust_xlsxwriter::TableStyle;
+use unicode_normalization::UnicodeNormalization;
 
 /// Generate a table style lookup match from a list of (string, variant) pairs.
 macro_rules! table_style_match {
@@ -40,16 +41,37 @@ pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
 
 /// Sanitize a string for use as an Excel table name
 ///
-/// Invalid characters become `_` and a leading digit gains a `_` prefix. A name
-/// Excel would read as a cell reference (`"Q1"`, `"A1"`, `"XFD1048576"`), an
-/// R1C1 form (`"R1C1"`) or a reserved selection shortcut (`"R"`, `"C"`) gets
-/// the same `_` prefix — `"Q1"` becomes `"_Q1"`, which addresses no cell.
-/// rust_xlsxwriter 0.98.2 stores the name verbatim and Excel then offers to
-/// repair the workbook (measured, rust_xlsxwriter#189), so the screen has to
-/// happen here. See [`looks_like_cell_reference`] for why the
-/// beyond-the-grid shapes (`"AAAA1"`) are deliberately left alone.
+/// The name is normalised to NFC first, then invalid characters become `_` and
+/// a leading digit gains a `_` prefix. A name Excel would read as a cell
+/// reference (`"Q1"`, `"A1"`, `"XFD1048576"`), an R1C1 form (`"R1C1"`) or a
+/// reserved selection shortcut (`"R"`, `"C"`) gets the same `_` prefix —
+/// `"Q1"` becomes `"_Q1"`, which addresses no cell. rust_xlsxwriter 0.98.2
+/// stores the name verbatim and Excel then offers to repair the workbook
+/// (measured, rust_xlsxwriter#189), so the screen has to happen here. See
+/// [`looks_like_cell_reference`] for why the beyond-the-grid shapes
+/// (`"AAAA1"`) are deliberately left alone.
+///
+/// # Why NFC first
+///
+/// The character screen below is an allowlist of `is_alphanumeric() || '_'`,
+/// and a combining mark is neither, so decomposed text was silently rewritten:
+/// `"Verkäufe"` typed as `"Verka" + U+0308` came out as `"Verka_ufe"`, and
+/// `"がくせい"` in NFD as `"か_くせい"`. Excel accepts both spellings, so that
+/// was data loss with no warning. Composing first repairs every name whose
+/// marks have a precomposed form.
+///
+/// It does not repair the rest, and that is a known limit rather than an
+/// oversight: `"ไม่"` (Thai tone mark U+0E48) and `"हिन्दी"` (Hindi virama
+/// U+094D) have no composed form, so they are still rewritten even though
+/// Excel accepts them. Closing that gap means widening the allowlist or
+/// inverting it to a denylist, which changes what is *accepted* and needs its
+/// own audit in that direction — see `AGENTS.md`.
 pub(crate) fn sanitize_table_name(name: &str) -> String {
-    let mut sanitized: String = name
+    // Compose before screening, so a decomposed name is not mangled by the
+    // allowlist below. NFC and not NFKC: NFKC would fold U+FF21 FULLWIDTH A to
+    // ASCII "A", turning names Excel treats as distinct into the same name.
+    let composed: String = name.nfc().collect();
+    let mut sanitized: String = composed
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '_' {
@@ -106,6 +128,82 @@ mod cell_reference_name_tests {
         assert_eq!(sanitize_table_name("Sales"), "Sales");
         assert_eq!(sanitize_table_name("Q1_Sales"), "Q1_Sales");
         assert_eq!(sanitize_table_name("Table1x"), "Table1x");
+    }
+
+    /// Decomposed names survive, because the allowlist below cannot see a
+    /// combining mark as part of a letter.
+    ///
+    /// The expected values are Excel's, not ours: every input here was put to
+    /// Excel's own name validator during the rust_xlsxwriter#189 work and
+    /// accepted, so a rewrite is data loss. That external oracle is the point
+    /// — `sanitized_table_names_are_always_valid` in `proptests.rs` asserts
+    /// the same allowlist the function branches on, so it holds by
+    /// construction and cannot fail on any of these.
+    #[test]
+    fn decomposed_names_are_composed_not_mangled() {
+        // "Verkäufe" written as "Verka" + U+0308 COMBINING DIAERESIS.
+        assert_eq!(
+            sanitize_table_name("Verka\u{308}ufe"),
+            "Verk\u{E4}ufe",
+            "NFD umlaut must compose, not become an underscore"
+        );
+        // "é" as "e" + U+0301 COMBINING ACUTE.
+        assert_eq!(sanitize_table_name("Caf\u{65}\u{301}"), "Caf\u{E9}");
+        // "がくせい" with U+3099 COMBINING VOICED SOUND MARK.
+        assert_eq!(
+            sanitize_table_name("\u{304B}\u{3099}\u{304F}\u{305B}\u{3044}"),
+            "\u{304C}\u{304F}\u{305B}\u{3044}"
+        );
+    }
+
+    /// The controls for the test above: names that were already composed, or
+    /// that contain no marks at all, must come through byte for byte.
+    ///
+    /// Without these, a `sanitize_table_name` that simply returned its input
+    /// would satisfy every assertion up there.
+    #[test]
+    fn already_composed_names_are_unchanged_by_normalisation() {
+        assert_eq!(sanitize_table_name("Verk\u{E4}ufe"), "Verk\u{E4}ufe");
+        assert_eq!(
+            sanitize_table_name("\u{65E5}\u{672C}\u{8A9E}"),
+            "\u{65E5}\u{672C}\u{8A9E}"
+        );
+        assert_eq!(
+            sanitize_table_name("\u{304C}\u{304F}\u{305B}\u{3044}"),
+            "\u{304C}\u{304F}\u{305B}\u{3044}"
+        );
+    }
+
+    /// Composition is NFC and deliberately not NFKC.
+    ///
+    /// NFKC folds U+FF21 FULLWIDTH LATIN CAPITAL A to ASCII "A", which would
+    /// turn the distinct name "Ａ1" into the cell reference "A1" and then into
+    /// "_A1". Excel treats the two as different names, so the compatibility
+    /// forms must survive.
+    #[test]
+    fn compatibility_forms_are_not_folded() {
+        assert_eq!(sanitize_table_name("\u{FF21}1"), "\u{FF21}1");
+        assert_eq!(sanitize_table_name("\u{FB00}1"), "\u{FB00}1");
+    }
+
+    /// The known limit, pinned so it is a decision on record rather than a
+    /// surprise: marks with no composed form are still rewritten.
+    ///
+    /// Excel accepts both of these. Widening the allowlist or inverting it to a
+    /// denylist is what would fix them; see `AGENTS.md`. This test exists to go
+    /// red when someone does that, so the change cannot land unnoticed.
+    #[test]
+    fn marks_without_a_composed_form_are_still_rewritten() {
+        // Thai "\u{E44}\u{E21}\u{E48}", tone mark U+0E48.
+        assert_eq!(
+            sanitize_table_name("\u{E44}\u{E21}\u{E48}"),
+            "\u{E44}\u{E21}_"
+        );
+        // Hindi "\u{939}\u{93F}\u{928}\u{94D}\u{926}\u{940}", virama U+094D.
+        assert_eq!(
+            sanitize_table_name("\u{939}\u{93F}\u{928}\u{94D}\u{926}\u{940}"),
+            "\u{939}\u{93F}\u{928}_\u{926}\u{940}"
+        );
     }
 
     #[test]

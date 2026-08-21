@@ -61,6 +61,7 @@ The name you pass is adjusted to something Excel accepts. In order:
 
 | Input | Result | Rule |
 |-------|--------|------|
+| `"Verka\u0308ufe"` | `"Verkäufe"` | The name is normalised to NFC first |
 | `"Sales Q1!"` | `"Sales_Q1_"` | Anything that is not a letter, digit or `_` becomes `_` |
 | `"2024Sales"` | `"_2024Sales"` | A leading digit gains a `_` prefix |
 | `"Q1"`, `"A1"`, `"XFD1048576"` | `"_Q1"`, `"_A1"`, `"_XFD1048576"` | Excel reserves names that address a cell |
@@ -73,6 +74,19 @@ ordinary names and they pass through unchanged. A zero-padded row counts by the
 row it parses to: `"A01"` is treated as a reference (Excel offers to repair a
 workbook with a table of that name, exactly as for `"Q1"`), while `"A0"` — row
 zero — addresses nothing and passes through.
+
+Normalisation happens before the character rule, and it matters because a
+combining mark is not a letter. Without it, `"Verkäufe"` typed as `"Verka"` plus
+`U+0308 COMBINING DIAERESIS` — which is what a lot of text on macOS looks like —
+would arrive as `"Verka_ufe"`. Composing first repairs every mark that has a
+precomposed form. It is NFC and not NFKC, so compatibility characters stay
+distinct: `"Ａ1"` (fullwidth A) is not folded to `"A1"` and does not become
+`"_A1"`.
+
+Marks with **no** composed form are still replaced, and Excel would have
+accepted them: `"ไม่"` becomes `"ไม_"` (Thai tone mark `U+0E48`) and `"हिन्दी"`
+becomes `"हिन_दी"` (Hindi virama `U+094D`). If you need those names exactly,
+pass a spelling that survives the character rule.
 
 Workbook-level `defined_names` are **not** sanitized — a reference-shaped key
 there raises `ConfigurationError` instead, because silently renaming a defined
