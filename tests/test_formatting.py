@@ -327,6 +327,118 @@ class TestTableName:
             )
 
 
+class TestTableNameCollidesWithDefinedName:
+    """A table name and a defined name may not be the same string.
+
+    Excel requires the two kinds to be unique against each other, not only
+    within their own kind, and repairs a workbook carrying a table ``Sales``
+    beside a defined name ``Sales`` in any scope (measured, Excel 16.112 —
+    rust_xlsxwriter#189). rust_xlsxwriter 0.99.0 enforces it, but from inside
+    ``Workbook::save``, where this library classifies a failure as a
+    ``FileError``: the caller would be told their *file* was the problem. The
+    pre-flight raises before anything is written, which is what the empty output
+    file asserts.
+    """
+
+    @pytest.mark.parametrize("defined", ["Sales", "sales", "Sheet1!Sales"])
+    def test_collision_raises_before_anything_is_written(
+        self, defined: str, tmp_xlsx: str
+    ) -> None:
+        """Case-folded, and a sheet-scoped name collides as much as a global one."""
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(
+            xlsxturbo.WorkbookValidationError, match=r"collides with the table name"
+        ) as excinfo:
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                table_style="Medium2",
+                table_name="Sales",
+                defined_names={defined: "=Sheet1!$A$1"},
+            )
+        message = str(excinfo.value)
+        assert f"defined_names['{defined}']" in message
+        assert "'Sales'" in message
+        assert "Sheet1" in message
+        assert Path(tmp_xlsx).stat().st_size == 0
+
+    def test_the_sanitized_name_is_what_collides(self, tmp_xlsx: str) -> None:
+        """``"My Sales"`` reaches the workbook as ``My_Sales``, so that is the collision.
+
+        Comparing the name as given would miss this one, and comparing it after
+        sanitization is also what makes the check agree with the writer.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(
+            xlsxturbo.WorkbookValidationError, match=r"My_Sales"
+        ):
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                table_style="Medium2",
+                table_name="My Sales",
+                defined_names={"My_Sales": "=Sheet1!$A$1"},
+            )
+
+    def test_collision_raises_in_multi_sheet_mode(self, tmp_xlsx: str) -> None:
+        """The message names the sheet that carries the table."""
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(
+            xlsxturbo.WorkbookValidationError, match=r"on sheet 'Second'"
+        ):
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "First"), (df, "Second", {"table_name": "Totals"})],
+                tmp_xlsx,
+                table_style="Medium2",
+                defined_names={"Totals": "=First!$A$1"},
+            )
+
+    def test_a_different_defined_name_still_works(self, tmp_xlsx: str) -> None:
+        """The control: without it the check is satisfied by refusing every workbook."""
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(
+            df,
+            tmp_xlsx,
+            table_style="Medium2",
+            table_name="Sales",
+            defined_names={"Revenue": "=Sheet1!$A$1"},
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert "Sales" in active_ws(wb).tables
+        assert "Revenue" in {dn.name for dn in wb.defined_names.values()}
+        wb.close()
+
+    @pytest.mark.parametrize(
+        ("label", "kwargs"),
+        [
+            ("no table_style, so no table", {"table_name": "Sales"}),
+            (
+                "a style but no data rows",
+                {"table_style": "Medium2", "table_name": "Sales"},
+            ),
+        ],
+    )
+    def test_a_sheet_that_creates_no_table_claims_no_name(
+        self, label: str, kwargs: dict[str, Any], tmp_xlsx: str
+    ) -> None:
+        """The gate controls: a name only collides once a table actually carries it.
+
+        ``table_name`` without ``table_style`` is ignored, and an empty frame
+        creates no table however it is configured — so ``Sales`` is free in both
+        cases, and refusing them would reject workbooks that save cleanly.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        if "no data rows" in label:
+            df = df.iloc[:0]
+        xlsxturbo.df_to_xlsx(
+            df, tmp_xlsx, defined_names={"Sales": "=Sheet1!$A$1"}, **kwargs
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert len(active_ws(wb).tables) == 0
+        assert "Sales" in {dn.name for dn in wb.defined_names.values()}
+        wb.close()
+
+
 class TestTableNameCellReferenceCollision:
     """A table name Excel would read as a cell address gets an underscore.
 
@@ -347,6 +459,17 @@ class TestTableNameCellReferenceCollision:
             ("R", "_R"),
             ("C", "_C"),
             ("R1C1", "_R1C1"),
+            # Excel stops reading at the end of the index and ignores the rest,
+            # so these are references with trailing text: each drew the recovery
+            # prompt when written verbatim (measured, rust_xlsxwriter#189).
+            ("R2D2", "_R2D2"),
+            ("C3PO", "_C3PO"),
+            ("R1_total", "_R1_total"),
+            ("R1C16385", "_R1C16385"),
+            # Excel's logical constants, which it reserves the same way.
+            ("TRUE", "_TRUE"),
+            ("true", "_true"),
+            ("False", "_False"),
         ],
     )
     def test_reference_shaped_name_is_prefixed(
@@ -360,12 +483,15 @@ class TestTableNameCellReferenceCollision:
         assert list(ws.tables.keys()) == [expected]
         wb.close()
 
-    @pytest.mark.parametrize("name", ["Sales", "Q1_Sales", "Table1x"])
+    @pytest.mark.parametrize(
+        "name", ["Sales", "Q1_Sales", "Table1x", "RCx", "Rate1", "TRUEX"]
+    )
     def test_ordinary_names_pass_through(self, name: str, tmp_xlsx: str) -> None:
         """A name that is not a reference passes through untouched.
 
         The control: without it the parametrization above is satisfied by a
-        function that prefixes everything.
+        function that prefixes everything. ``RCx`` carries no index and
+        ``TRUEX`` is not the constant; Excel opens both without a prompt.
         """
         df = pd.DataFrame({"A": [1, 2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2", table_name=name)

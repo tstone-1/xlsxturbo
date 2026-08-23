@@ -375,6 +375,33 @@ fn write_row_cell(
 /// `dfs_to_xlsx` duplicate-table-name pre-check (which must mirror the same
 /// row_count > 0 condition that gates table creation, so two empty
 /// DataFrames sharing a table name don't false-positive as a conflict).
+/// The table name a sheet claims, sanitized, or `None` when it creates no table.
+///
+/// The gate is `apply_worksheet_features`': a table is added only when a style
+/// is requested, the header row is written and the frame has at least one data
+/// row, and `constant_memory` skips the feature altogether. It lives beside
+/// that code on purpose — a pre-flight that guessed the gate differently would
+/// report a conflict for a workbook that saves cleanly, which is the more
+/// expensive direction to be wrong in.
+pub(crate) fn claimed_table_name(
+    df: &Bound<'_, PyAny>,
+    constant_memory: bool,
+    include_header: bool,
+    table_style: Option<&str>,
+    table_name: Option<&str>,
+) -> Result<Option<String>, String> {
+    if constant_memory || !include_header || table_style.is_none() {
+        return Ok(None);
+    }
+    let Some(name) = table_name else {
+        return Ok(None);
+    };
+    if dataframe_row_count(df)? == 0 {
+        return Ok(None);
+    }
+    Ok(Some(sanitize_table_name(name)))
+}
+
 pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String> {
     if df.hasattr("shape").unwrap_or(false) {
         let shape = df

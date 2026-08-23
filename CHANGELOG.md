@@ -5,9 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-08-23
+
+### Changed
+- **`rust_xlsxwriter` 0.98.2 -> 0.99.0**, and the dependency floor moves with it. 0.99.0 is
+  the release of upstream [#189](https://github.com/jmcnamara/rust_xlsxwriter/issues/189):
+  it validates table names and defined names against Excel's rules, and it requires the two
+  kinds to be unique *against each other*, which is what the new pre-check below reports.
+  Some calls that used to succeed now raise, in every case because the workbook they wrote
+  was one Excel offers to repair — a `defined_names` key containing a character Excel
+  forbids (`My-Name`, `Total$`, `x=y`), one of Excel's logical constants (`TRUE`), or one of
+  its internally reserved names (`_xlnm.Print_Area`). Table names are unaffected: they are
+  sanitized before the crate sees them.
+- The crate's message for an empty defined name changed with it, from `Name '' cannot be
+  empty in Excel` to `Name cannot be blank`. The `defined_names['<key>']:` prefix that
+  xlsxturbo puts in front of it is unchanged.
 
 ### Fixed
+- **A `table_name` that Excel reads as a cell reference *with trailing text* is now
+  sanitized too.** Excel stops reading an R1C1 form once it has the index and ignores
+  whatever follows, so `"R2D2"` is the reference `R2` and `"R1_total"` is `R1` — both drew
+  Excel's recovery prompt when written verbatim, as did `"C3PO"`, `"R1C1x"` and
+  `"R1C16385"`. The check tested the whole string, so all of them passed through untouched
+  and reached the saved workbook. They now gain the `_` prefix like `"Q1"`. Only the leading
+  index has to exist, which is why `"R1C16385"` is prefixed although that column is past the
+  grid; a name that never reaches an index is not a reference and is untouched (`"RCx"`,
+  `"Rate1"`). The same rule now applies to `defined_names`, where a reference-shaped key is
+  refused rather than rewritten — `"R1C1D"` was in the test suite as an *ordinary* name
+  until Excel said otherwise.
+- **A `table_name` of `"TRUE"` or `"FALSE"`, in any case, is now sanitized.** They are
+  Excel's logical constants and it reserves them as names; a table named `"true"` drew the
+  same recovery prompt as one named `"Q1"`. `"TRUE"` becomes `"_TRUE"`. Names that merely
+  start with one (`"TRUEX"`, `"Falsehood"`) are untouched.
 - **A `table_name` written in decomposed form is no longer mangled.** `sanitize_table_name`
   screens with an allowlist of `is_alphanumeric() || '_'`, and a combining mark is neither, so
   `"Verkäufe"` typed as `"Verka" + U+0308` reached the workbook as `Verka_ufe` and `"がくせい"`
@@ -27,8 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this screen.
 
 ### Added
-- `unicode-normalization` as a direct dependency, for the fix above. It was not previously in
-  the tree, transitively or otherwise, and brings `tinyvec` and `tinyvec_macros` with it.
+- `unicode-normalization` as a direct dependency, for the NFC fix above. It was not
+  previously in the tree, transitively or otherwise, and brings `tinyvec` and
+  `tinyvec_macros` with it.
+- **A pre-check for a table name that collides with a `defined_names` key**, raising
+  `WorkbookValidationError` before anything is written. Excel requires the two kinds of name
+  to be unique against each other and repairs a workbook carrying a table `Sales` beside a
+  defined name `Sales` in any scope. rust_xlsxwriter 0.99.0 enforces it, but from inside
+  `Workbook::save`, where this library classifies a failure as `FileError` — so without the
+  pre-check the caller is told their *file* failed, in a message naming neither the sheet nor
+  the option. Names are compared after sanitization and ignoring case, so `table_name="My
+  Sales"` collides with a defined name `My_Sales`, and a sheet-scoped key such as
+  `"Sheet1!Sales"` collides as much as a global one. A sheet that creates no table — no
+  `table_style`, or an empty DataFrame — claims no name and cannot collide.
 
 ## [1.2.0] - 2026-08-17
 

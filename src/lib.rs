@@ -23,7 +23,7 @@ mod write;
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertError};
 pub use types::DateOrder;
 
-use convert::{convert_dataframe_to_xlsx, dataframe_row_count, write_configured_sheet};
+use convert::{claimed_table_name, convert_dataframe_to_xlsx, write_configured_sheet};
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
@@ -31,11 +31,12 @@ use extract::{
     extract_rich_text, extract_sheet_info, extract_sparklines, extract_textboxes,
     extract_validations,
 };
-use parse::sanitize_table_name;
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
-use workbook::{apply_defined_names, save_workbook};
+use workbook::{
+    apply_defined_names, reject_table_name_collisions, save_workbook, ClaimedTableName,
+};
 
 use pyo3::prelude::*;
 use rust_xlsxwriter::Workbook;
@@ -461,6 +462,33 @@ fn df_to_xlsx<'py>(
         cells,
     })?;
 
+    // A table name colliding with a defined name is refused before anything is
+    // written, so it reports as a configuration failure rather than arriving
+    // from the save as a `FileError`. Skipped entirely without defined names,
+    // since nothing else here needs the row count.
+    if defined_names.is_some() {
+        let mut tables: HashMap<String, ClaimedTableName> = HashMap::new();
+        if let Some(name) = claimed_table_name(
+            df,
+            constant_memory,
+            header,
+            table_style,
+            table_name.as_deref(),
+        )
+        .map_err(errors::input_data)?
+        {
+            tables.insert(
+                name.to_lowercase(),
+                ClaimedTableName {
+                    name,
+                    sheet: sheet_name.to_string(),
+                },
+            );
+        }
+        reject_table_name_collisions(&tables, defined_names.as_ref())
+            .map_err(errors::workbook_validation)?;
+    }
+
     convert_dataframe_to_xlsx(
         py,
         df,
@@ -657,7 +685,7 @@ fn dfs_to_xlsx<'py>(
     }
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
-    let mut table_names: HashMap<String, String> = HashMap::new();
+    let mut table_names: HashMap<String, ClaimedTableName> = HashMap::new();
 
     let opts = extract_options(&RawOptions {
         column_widths,
@@ -703,28 +731,33 @@ fn dfs_to_xlsx<'py>(
         // empty DataFrame never claims a table name here either — otherwise
         // two empty sheets sharing a table name would false-positive as a
         // conflict.
-        if !constant_memory && effective_header && effective_table_style.is_some() {
-            let row_count = dataframe_row_count(&df)
-                .map_err(|e| errors::input_data(format!("sheet '{}': {}", sheet_name, e)))?;
-            if row_count > 0 {
-                if let Some(name) = effective_table_name.as_deref() {
-                    let sanitized = sanitize_table_name(name);
-                    // `to_lowercase`, not `to_ascii_lowercase`: this fold has to
-                    // match the writer's own uniqueness check exactly, and
-                    // rust_xlsxwriter folds table names with `to_lowercase`. A
-                    // narrower fold under-reaches -- sanitization keeps every
-                    // alphanumeric codepoint, so 'TÄBLE' and 'täble' both reach the
-                    // workbook, pass this check, and collide during the save, where
-                    // the message names neither sheet. A wider one would refuse
-                    // names Excel accepts, which is the more expensive direction.
-                    let key = sanitized.to_lowercase();
-                    if let Some(previous_sheet) = table_names.insert(key, sheet_name.clone()) {
-                        return Err(errors::workbook_validation(format!(
-                            "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
-                            sanitized, previous_sheet, sheet_name
-                        )));
-                    }
-                }
+        if let Some(sanitized) = claimed_table_name(
+            &df,
+            constant_memory,
+            effective_header,
+            effective_table_style.as_deref(),
+            effective_table_name.as_deref(),
+        )
+        .map_err(|e| errors::input_data(format!("sheet '{}': {}", sheet_name, e)))?
+        {
+            // `to_lowercase`, not `to_ascii_lowercase`: this fold has to match
+            // the writer's own uniqueness check exactly, and rust_xlsxwriter
+            // folds names with `to_lowercase`. A narrower fold under-reaches --
+            // sanitization keeps every alphanumeric codepoint, so 'TÄBLE' and
+            // 'täble' both reach the workbook, pass this check, and collide
+            // during the save, where the message names neither sheet. A wider
+            // one would refuse names Excel accepts, which is the more expensive
+            // direction.
+            let key = sanitized.to_lowercase();
+            let claim = ClaimedTableName {
+                name: sanitized,
+                sheet: sheet_name.clone(),
+            };
+            if let Some(previous) = table_names.insert(key, claim) {
+                return Err(errors::workbook_validation(format!(
+                    "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
+                    previous.name, previous.sheet, sheet_name
+                )));
             }
         }
 
@@ -753,6 +786,9 @@ fn dfs_to_xlsx<'py>(
 
         stats.push(result);
     }
+
+    reject_table_name_collisions(&table_names, defined_names.as_ref())
+        .map_err(errors::workbook_validation)?;
 
     apply_defined_names(&mut workbook, defined_names.as_ref()).map_err(errors::configuration)?;
 

@@ -43,13 +43,24 @@ pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
 ///
 /// The name is normalised to NFC first, then invalid characters become `_` and
 /// a leading digit gains a `_` prefix. A name Excel would read as a cell
-/// reference (`"Q1"`, `"A1"`, `"XFD1048576"`), an R1C1 form (`"R1C1"`) or a
-/// reserved selection shortcut (`"R"`, `"C"`) gets the same `_` prefix —
-/// `"Q1"` becomes `"_Q1"`, which addresses no cell. rust_xlsxwriter 0.98.2
-/// stores the name verbatim and Excel then offers to repair the workbook
-/// (measured, rust_xlsxwriter#189), so the screen has to happen here. See
+/// reference (`"Q1"`, `"A1"`, `"XFD1048576"`, `"R2D2"`), an R1C1 form
+/// (`"R1C1"`) or a reserved selection shortcut (`"R"`, `"C"`) gets the same `_`
+/// prefix — `"Q1"` becomes `"_Q1"`, which addresses no cell. So does one of
+/// Excel's logical constants, `"TRUE"` or `"FALSE"` in any case. See
 /// [`looks_like_cell_reference`] for why the beyond-the-grid shapes
 /// (`"AAAA1"`) are deliberately left alone.
+///
+/// # Why here, when rust_xlsxwriter also refuses these
+///
+/// It refuses them: 0.99.0 validates both rules and `add_table` returns
+/// `NameError` (rust_xlsxwriter#189; before that the name was stored verbatim
+/// and Excel offered to repair the workbook). Rewriting still happens here
+/// because refusing is the wrong answer for a table name — nothing references
+/// it, `table_name` has always fixed up invalid characters and a leading digit
+/// silently, and a hard error for a name we can repair would break callers that
+/// pass a column heading straight through. The screen has to stay at least as
+/// wide as the crate's, or a name we let past becomes an error the caller
+/// cannot act on.
 ///
 /// # Why NFC first
 ///
@@ -66,6 +77,18 @@ pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
 /// Excel accepts them. Closing that gap means widening the allowlist or
 /// inverting it to a denylist, which changes what is *accepted* and needs its
 /// own audit in that direction — see `AGENTS.md`.
+/// True for `TRUE` and `FALSE` in any case.
+///
+/// Excel reserves its two logical constants, and a table named `"true"` draws
+/// the same recovery prompt as one named `"Q1"` (measured on Excel 16.112,
+/// rust_xlsxwriter#189). Folded with `to_uppercase`, which is the fold
+/// rust_xlsxwriter applies, so the two cannot disagree about a name and leave a
+/// rewritten one still being refused at `add_table`.
+pub(crate) fn is_logical_constant(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    upper == "TRUE" || upper == "FALSE"
+}
+
 pub(crate) fn sanitize_table_name(name: &str) -> String {
     // Compose before screening, so a decomposed name is not mangled by the
     // allowlist below. NFC and not NFKC: NFKC would fold U+FF21 FULLWIDTH A to
@@ -87,10 +110,11 @@ pub(crate) fn sanitize_table_name(name: &str) -> String {
         sanitized = format!("_{}", sanitized);
     }
 
-    // Must not collide with a cell reference. Done before the cap so the
-    // 255-character invariant holds unconditionally; a reference-shaped name is
-    // at most 10 characters, so the two branches never both fire.
-    if looks_like_cell_reference(&sanitized) {
+    // Must not collide with a cell reference or a logical constant. Done before
+    // the cap so the 255-character invariant holds unconditionally: the prefix
+    // adds one character, and truncating afterwards cannot reintroduce either
+    // shape, because what survives still starts with the `_`.
+    if looks_like_cell_reference(&sanitized) || is_logical_constant(&sanitized) {
         sanitized = format!("_{}", sanitized);
     }
 
@@ -122,12 +146,36 @@ mod cell_reference_name_tests {
     }
 
     #[test]
+    fn trailing_text_after_a_reference_still_gains_an_underscore() {
+        // Excel ignores what follows a complete R1C1 reference, so these are
+        // references to it and were repaired on opening (measured).
+        assert_eq!(sanitize_table_name("R2D2"), "_R2D2");
+        assert_eq!(sanitize_table_name("C3PO"), "_C3PO");
+        assert_eq!(sanitize_table_name("R1_total"), "_R1_total");
+    }
+
+    #[test]
+    fn logical_constants_gain_an_underscore() {
+        // Excel repairs a workbook whose table is named "TRUE" in any case
+        // (measured); rust_xlsxwriter 0.99.0 refuses it at `add_table`.
+        assert_eq!(sanitize_table_name("TRUE"), "_TRUE");
+        assert_eq!(sanitize_table_name("true"), "_true");
+        assert_eq!(sanitize_table_name("False"), "_False");
+    }
+
+    #[test]
     fn ordinary_names_are_untouched() {
         // The control: without it the assertions above are satisfied by a
         // function that prefixes everything.
         assert_eq!(sanitize_table_name("Sales"), "Sales");
         assert_eq!(sanitize_table_name("Q1_Sales"), "Q1_Sales");
         assert_eq!(sanitize_table_name("Table1x"), "Table1x");
+        // The controls for the two tests above: "RCx" carries no index, and
+        // "TRUEX" is not the constant. Excel opens both without a prompt.
+        assert_eq!(sanitize_table_name("RCx"), "RCx");
+        assert_eq!(sanitize_table_name("Rate1"), "Rate1");
+        assert_eq!(sanitize_table_name("TRUEX"), "TRUEX");
+        assert_eq!(sanitize_table_name("Falsehood"), "Falsehood");
     }
 
     /// Decomposed names survive, because the allowlist below cannot see a

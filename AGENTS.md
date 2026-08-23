@@ -115,10 +115,11 @@ whole job is to be the thing that notices.
 [#186](https://github.com/jmcnamara/rust_xlsxwriter/issues/186) (2026-08-16) —
 `Workbook::define_name` panicked on a name whose local part is empty (`""` or `"Sheet1!"`),
 at `defined_name.name.chars().next().unwrap()`, `workbook.rs:1578` in 0.98.1 — was fixed in
-0.98.2 (2026-08-17), which now returns
-`ParameterError("Name '' cannot be empty in Excel")`. The screen in `apply_defined_names`
-is gone, and `Cargo.toml` carries `0.98.2` as a floor rather than `0.98`, because the
-guard's absence is what makes the floor load-bearing.
+0.98.2 (2026-08-17), which returned
+`ParameterError("Name '' cannot be empty in Excel")` — 0.99.0 says `Name cannot be blank`
+instead, so do not quote that string from here. The screen in `apply_defined_names` is gone,
+and `Cargo.toml` carries an exact floor rather than `0.98`, because the guard's absence is
+what makes the floor load-bearing.
 
 That check — whether the crate's message is as good as the guard's — is worth keeping as
 the removal criterion, and here the answer had two halves. The crate reports the **local**
@@ -159,10 +160,36 @@ silently renaming one leaves every formula pointing at a name the workbook no lo
 references it. Preserve that split in anything new: rename what nobody points at, refuse what
 somebody might.
 
-**`Cargo.toml` pins `0.98.2`, which predates every #189 fix**, so none of the new crate-side checks
-reach us until that floor moves. Two things a bump will change: the crate starts rejecting
-cell-reference-shaped *defined* names itself, and `XlsxError::TableNameReused` is renamed to
-`NameReused` — we name neither variant anywhere, so that rename costs nothing here.
+**Taken: `Cargo.toml` pins `0.99.0` (2026-08-23), the release of every #189 fix.** The rename
+`XlsxError::TableNameReused` -> `NameReused` cost nothing, as predicted — we name neither variant.
+Three things the bump did change, and only the last needed code:
+
+- The crate now refuses cell-reference-shaped *defined* names itself.
+  `reject_reference_shaped_name` was kept anyway, on the criterion in its doc comment: the crate
+  reports the unqualified name only (`Name error for 'Q1'` for both `"Q1"` and `"Sheet1!Q1"`),
+  while ours names the `defined_names` key the caller wrote and suggests a replacement.
+- Calls that used to succeed now raise — a `defined_names` key holding a character Excel forbids
+  (`My-Name`, `Total$`), a logical constant, a reserved `_xlnm.*` name. Every one of them wrote a
+  workbook Excel objects to, so the change is a fix, but it is still a behaviour change and the
+  CHANGELOG says so.
+- **The crate's message for an empty defined name moved** (`Name '' cannot be empty in Excel` ->
+  `Name cannot be blank`), reddening the three tests that pin it. That is the standing cost of
+  having deleted our own screen for #186: those assertions are pinned to a message no test here
+  controls. Re-pin them on a bump; do not reinstate the screen.
+
+**A collision between a table name and a defined name is now a pre-check, not a save failure.**
+0.99.0 enforces Excel's rule that the two kinds must be unique against each other, but from inside
+`Workbook::save` — and `save_workbook` maps everything from there to `FileFailure`, so the caller
+was told their *file* had failed, in a message naming neither the sheet nor the option. Measured,
+with the pre-check disabled: `FileError: Failed to save workbook to '...': Name 'Sales' has already
+been used in this workbook.` The general shape is worth carrying: **a library that validates at
+save time will have its errors classified by whatever the save layer assumes**, so every new
+save-time rule upstream adds is a candidate for a pre-check here.
+
+**`claimed_table_name` (`src/convert.rs`) owns the gate that decides whether a sheet claims a name
+at all** — a style requested, a header row, at least one data row, `constant_memory` off. Both
+pre-checks call it, because a pre-check that guessed the gate differently would refuse workbooks
+that save cleanly. It sits beside `apply_worksheet_features`, the code it mirrors.
 
 ⚠ **`sanitize_table_name` silently mangled names Excel accepts — measured 2026-08-21 end to end
 through the shipped 1.2.0 wheel, half fixed the same day.** It branches on `is_alphanumeric()`,
@@ -207,7 +234,17 @@ oracle a name check needs is external: Excel, or a fixed table of names measured
 **A crate bump will not fix this either**, because the mangling happens in xlsxturbo before
 rust_xlsxwriter is called. `sanitize_table_name` is an allowlist, and therefore *stricter* than the
 crate's new denylist for exactly the characters at issue — the crate would accept every input in
-that table.
+that table. Confirmed by the 0.99.0 bump, which changed none of it.
+
+⚠ **The mirror of that gap: the allowlist must stay at least as WIDE as the crate's denylist, or a
+name we rewrite is still refused.** A sanitized name goes straight to `Table::set_name`, so
+anything the crate rejects that we do not repair becomes a hard error on a name the caller expected
+us to fix. Two were found that way against 0.99.0 and are now screened —
+Excel's logical constants, and a reference with trailing text (`R2D2`) — and the check is
+mechanical: read `utility::check_name` in the crate version being pinned and account for each of
+its rules. `.` and `?` and the invalid-character list already become `_`; a backslash likewise; the
+reserved `_xlnm.*` names cannot survive, since the `.` is rewritten; the 255-character cap and the
+empty name are handled by the sanitizer's own tail.
 
 **If a stricter layer is built, do not derive the rules from Excel's documentation** — it is wrong
 about several common characters, `?` and `€` among them. Excel's own name validator is scriptable

@@ -18,10 +18,19 @@ const MAX_COLUMN_1BASED: u32 = 16_384;
 /// applied here — rather than a letters-then-digits regex, which would over-reach
 /// by exactly those cases.
 ///
-/// Also covered are bare `"R"`/`"C"` in either case — reserved by Excel as
-/// row/column selection shortcuts, not references themselves — and the R1C1
+/// Also covered are bare `"R"`/`"C"`/`"RC"` in either case — reserved by Excel
+/// as row/column selection shortcuts, not references themselves — and the R1C1
 /// forms `R<row>C<col>` with either index optional (`"RC"`, `"R1C1"`, `"R1C"`,
 /// `"RC1"`), again only within the grid.
+///
+/// Excel stops reading an R1C1 form at the end of the index and ignores
+/// whatever follows, so `"R2D2"` is the reference `R2` with `D2` trailing. It
+/// draws the same recovery prompt as `"R1C1"` — measured on Excel 16.112 for
+/// `"R2D2"`, `"C3PO"`, `"R1_total"`, `"R1C1x"` and `"R1C16385"`, with `"RCx"`
+/// (no index at all) opening clean as the control (rust_xlsxwriter#189). Only
+/// the leading index is therefore bounded by the grid: `"R1C16385"` addresses
+/// no cell, but Excel has already committed to row 1 by the time it reaches the
+/// column.
 ///
 /// Case-insensitive throughout (`"q1"` is as much a reference as `"Q1"`). A
 /// zero-padded row is still a reference: a table named `"A01"` draws the same
@@ -40,11 +49,14 @@ fn is_a1_cell_reference(name: &str) -> bool {
         return false;
     }
     let digits = &name[letters..];
-    if digits.is_empty() || digits.len() > 7 || !digits.chars().all(|c| c.is_ascii_digit()) {
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
         return false;
     }
     // Delegating the column bound keeps one definition of "which columns
-    // exist"; `parse_cell_ref` errors past XFD.
+    // exist"; `parse_cell_ref` errors past XFD. It also owns the bound on the
+    // digit string, by failing to parse a row that overflows `u32` — a length
+    // cap here would instead have made `"A00000001"` a legal name, and a
+    // zero-padded row is still a row.
     match parse_cell_ref(name) {
         Ok((row_0based, _)) => row_0based < MAX_ROW_1BASED,
         Err(_) => false,
@@ -52,40 +64,42 @@ fn is_a1_cell_reference(name: &str) -> bool {
 }
 
 /// The R1C1 half of [`looks_like_cell_reference`].
+///
+/// The trailing-character rule is why this is a prefix test rather than a whole
+/// string test: see [`looks_like_cell_reference`] for what Excel does with
+/// `"R2D2"`.
 fn is_reserved_r1c1_name(name: &str) -> bool {
-    if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("c") {
+    // The bare selection shortcuts, which carry no index to bound.
+    if name.eq_ignore_ascii_case("r")
+        || name.eq_ignore_ascii_case("c")
+        || name.eq_ignore_ascii_case("rc")
+    {
         return true;
     }
 
-    let mut chars = name.chars();
-    if !chars.next().is_some_and(|c| c.eq_ignore_ascii_case(&'r')) {
+    // Split at the first digit: what precedes it is the R/C prefix, the digits
+    // that follow are the index, and anything after those digits is what Excel
+    // ignores. An ASCII digit is always a char boundary, so the split is safe.
+    let Some(split) = name.find(|c: char| c.is_ascii_digit()) else {
         return false;
-    }
-    let rest: &str = &name[1..];
-    let row_digits: &str = &rest[..rest.chars().take_while(|c| c.is_ascii_digit()).count()];
-    let after_row = &rest[row_digits.len()..];
+    };
+    let (prefix, tail) = name.split_at(split);
+    let index = &tail[..tail.chars().take_while(|c| c.is_ascii_digit()).count()];
 
-    let mut after = after_row.chars();
-    if !after.next().is_some_and(|c| c.eq_ignore_ascii_case(&'c')) {
-        return false;
+    if prefix.eq_ignore_ascii_case("r") {
+        addresses(index, MAX_ROW_1BASED)
+    } else if prefix.eq_ignore_ascii_case("c") || prefix.eq_ignore_ascii_case("rc") {
+        addresses(index, MAX_COLUMN_1BASED)
+    } else {
+        false
     }
-    let col_digits = &after_row[1..];
-    if !col_digits.chars().all(|c| c.is_ascii_digit()) {
-        return false;
-    }
-
-    // An absent index is the relative form ("RC", "R1C"), which is still a
-    // reference. A present one only counts inside the grid, for the same reason
-    // the A1 half is bounded.
-    within(row_digits, MAX_ROW_1BASED) && within(col_digits, MAX_COLUMN_1BASED)
 }
 
-/// An empty index is the relative form and always qualifies; a present one must
-/// address a row/column that exists.
-fn within(digits: &str, max_1based: u32) -> bool {
-    if digits.is_empty() {
-        return true;
-    }
+/// True when `digits` names a row or column that exists.
+///
+/// A row or column past the grid addresses nothing, so the name is Excel's to
+/// take: `"R1048577C1"` is an ordinary name.
+fn addresses(digits: &str, max_1based: u32) -> bool {
     matches!(digits.parse::<u32>(), Ok(n) if n >= 1 && n <= max_1based)
 }
 
@@ -217,7 +231,20 @@ mod name_shape_tests {
 
     #[test]
     fn ordinary_names_are_not_references() {
-        for name in ["Sales", "Q1_Sales", "_Q1", "Table1x", "R1C1D", "data2024x"] {
+        // "RCx" carries no index, so Excel reads no reference in it and opens
+        // the workbook clean (measured) — it is the control for the
+        // trailing-character rule below, which would otherwise be satisfied by
+        // refusing everything that starts with an R or a C.
+        for name in [
+            "Sales",
+            "Q1_Sales",
+            "_Q1",
+            "Table1x",
+            "data2024x",
+            "RCx",
+            "Rate1",
+            "Costs2024",
+        ] {
             assert!(
                 !looks_like_cell_reference(name),
                 "'{}' should be a legal name",
@@ -238,8 +265,27 @@ mod name_shape_tests {
     }
 
     #[test]
+    fn characters_after_a_complete_r1c1_reference_are_ignored() {
+        // Excel 16.112 offers to repair a workbook whose table is named any of
+        // these, exactly as it does for "R1C1" (measured, rust_xlsxwriter#189).
+        // "R1C16385" is here because it is the one that looks wrong: the column
+        // is past the grid, but Excel has read row 1 and stopped.
+        for name in [
+            "R2D2", "C3PO", "R1_total", "R1C1x", "R1C1D", "R1C16385", "R1C0",
+        ] {
+            assert!(
+                looks_like_cell_reference(name),
+                "'{}' is the reference Excel reads before the trailing text",
+                name
+            );
+        }
+    }
+
+    #[test]
     fn r1c1_indices_outside_the_grid_are_legal_names() {
-        for name in ["R1048577C1", "R1C16385", "R0C1", "R1C0"] {
+        // The *leading* index is what has to exist. Both of these name a row
+        // that does not, so there is no reference to trail anything off.
+        for name in ["R1048577C1", "R0C1"] {
             assert!(
                 !looks_like_cell_reference(name),
                 "'{}' addresses nothing and must stay a legal name",

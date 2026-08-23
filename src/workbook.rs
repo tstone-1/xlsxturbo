@@ -120,13 +120,14 @@ fn local_part(name: &str) -> &str {
 /// Unlike a table name, which is sanitized, this refuses: silently renaming a
 /// defined name would leave every formula that references it pointing at a name
 /// the workbook no longer defines, so the caller has to choose the new name.
-/// rust_xlsxwriter 0.98.2 validates the first character and the character set
-/// but not this, so nothing else catches it.
+///
+/// rust_xlsxwriter 0.99.0 refuses these too (upstream #189), so this screen is
+/// no longer the only thing standing between a caller and a workbook Excel
+/// repairs. It is kept for the one reason the empty-name screen was dropped
+/// for #186: its message is better. The crate reports the unqualified name
+/// only — `Name error for 'Q1'` for both `"Q1"` and `"Sheet1!Q1"` — while this
+/// names the `defined_names` key the caller wrote and suggests a replacement.
 fn reject_reference_shaped_name(name: &str) -> Result<(), String> {
-    // rust_xlsxwriter 0.98.2 does not check this rule; reported as
-    // https://github.com/jmcnamara/rust_xlsxwriter/issues/189. When the crate
-    // validates it, this screen can be revisited the way the empty-name screen
-    // was for #186 — kept only if its message names the offending key better.
     if looks_like_cell_reference(local_part(name)) {
         return Err(format!(
             "defined_names['{}']: '{}' is a cell reference and cannot be used as a defined name. \
@@ -136,6 +137,59 @@ fn reject_reference_shaped_name(name: &str) -> Result<(), String> {
             local_part(name),
             local_part(name)
         ));
+    }
+    Ok(())
+}
+
+/// A table name a sheet actually claims, as it reaches the workbook.
+///
+/// Held beside the sheet that claims it so a conflict can name both halves;
+/// keyed elsewhere by the fold the writer uses.
+pub(crate) struct ClaimedTableName {
+    /// The sanitized name, for the message.
+    pub(crate) name: String,
+    /// The sheet the table is on.
+    pub(crate) sheet: String,
+}
+
+/// Reject a defined name that collides with a table name.
+///
+/// Excel requires the two kinds to be unique against each other, not only
+/// within their own kind, and repairs a workbook that carries a table `Sales`
+/// beside a defined name `Sales` in any scope (measured, rust_xlsxwriter#189).
+/// rust_xlsxwriter 0.99.0 enforces it — but at save time, inside
+/// `Workbook::save`, where this library classifies a failure as a `FileError`
+/// because that is the only thing a save can usually fail at. Catching it here
+/// keeps it a `WorkbookValidationError` that names the sheet and both names,
+/// the same treatment the duplicate-table-name check already gets.
+///
+/// The keys are compared after `to_lowercase`, which is the fold
+/// rust_xlsxwriter applies; a defined name is judged on its local part, since
+/// that is the half the crate stores and compares.
+pub(crate) fn reject_table_name_collisions(
+    tables: &HashMap<String, ClaimedTableName>,
+    defined_names: Option<&HashMap<String, String>>,
+) -> Result<(), String> {
+    let Some(names) = defined_names else {
+        return Ok(());
+    };
+    if tables.is_empty() {
+        return Ok(());
+    }
+    // Sorted, so a workbook with two collisions reports the same one every run:
+    // a `HashMap` iterates in an arbitrary order, and a message that moves
+    // between runs is one nobody can write a test against.
+    let mut keys: Vec<&String> = names.keys().collect();
+    keys.sort();
+    for name in keys {
+        if let Some(claim) = tables.get(&local_part(name).to_lowercase()) {
+            return Err(format!(
+                "defined_names['{}'] collides with the table name '{}' on sheet '{}'. \
+                 Excel requires table names and defined names to be unique against each \
+                 other across a workbook, ignoring case; rename one of them",
+                name, claim.name, claim.sheet
+            ));
+        }
     }
     Ok(())
 }

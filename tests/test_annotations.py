@@ -285,13 +285,20 @@ class TestDefinedNames:
     # the screen is gone and the crate's own ParameterError is what surfaces.
     # Pinned back to 0.98.1 these two fail: a Rust panic reaches Python as
     # pyo3_runtime.PanicException, which is not a ValueError.
+    #
+    # The wording is the crate's, and it moves: 0.98.2 said "Name '' cannot be
+    # empty in Excel", 0.99.0 says "Name cannot be blank". That is the standing
+    # cost of having deleted our own screen — these three assertions are pinned
+    # to a message no test here controls, and a crate bump can turn them red
+    # without anything being wrong. Re-pin them; do not reinstate the screen,
+    # which would only add a second place for the same rule to live.
     @pytest.mark.parametrize("name", ["", "Sheet1!"])
     def test_empty_defined_name_raises_df_to_xlsx(
         self, tmp_xlsx: str, name: str
     ) -> None:
         """An empty name and an empty local part both raise, neither panics."""
         df = pd.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="cannot be empty in Excel"):
+        with pytest.raises(ValueError, match="cannot be blank"):
             xlsxturbo.df_to_xlsx(
                 df,
                 tmp_xlsx,
@@ -301,7 +308,7 @@ class TestDefinedNames:
     def test_empty_defined_name_raises_dfs_to_xlsx(self, tmp_xlsx: str) -> None:
         """The same failure reaches the caller in multi-sheet mode."""
         df = pd.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="cannot be empty in Excel"):
+        with pytest.raises(ValueError, match="cannot be blank"):
             xlsxturbo.dfs_to_xlsx(
                 [(df, "Sheet1")],
                 tmp_xlsx,
@@ -313,13 +320,15 @@ class TestDefinedNames:
     ) -> None:
         """The message still identifies which `defined_names` key failed.
 
-        The crate reports the *local* part, so its own message says `Name ''`
-        for both `""` and `"Sheet1!"`. The wrapper in `apply_defined_names` is
-        what puts the caller's own key back in front of it — without that, a
-        dict of several names would not say which one was rejected.
+        The crate reports the *local* part, so its own message says
+        `Name error for ''` for both `""` and `"Sheet1!"`. The wrapper in
+        `apply_defined_names` is what puts the caller's own key back in front of
+        it — without that, a dict of several names would not say which one was
+        rejected. That half comes from xlsxturbo, which is why this test exists
+        beside the two above.
         """
         df = pd.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="cannot be empty in Excel") as excinfo:
+        with pytest.raises(ValueError, match="cannot be blank") as excinfo:
             xlsxturbo.df_to_xlsx(
                 df,
                 tmp_xlsx,
@@ -338,7 +347,28 @@ class TestDefinedNameCellReferenceCollision:
     first character and the character set but not this.
     """
 
-    @pytest.mark.parametrize("name", ["Q1", "A1", "A01", "XFD1048576", "R", "c", "R1C1"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Q1",
+            "A1",
+            "A01",
+            "XFD1048576",
+            "R",
+            "c",
+            "R1C1",
+            # Excel stops at the end of the index and ignores what follows, so
+            # each of these is a reference with trailing text. Measured: a table
+            # named "R2D2", "C3PO", "R1_total", "R1C1x" or "R1C16385" draws the
+            # recovery prompt, and "R1C1D" was in this suite as an *ordinary*
+            # name until rust_xlsxwriter#189 measured it.
+            "R2D2",
+            "C3PO",
+            "R1_total",
+            "R1C1D",
+            "R1C16385",
+        ],
+    )
     def test_reference_shaped_name_raises(self, name: str, tmp_xlsx: str) -> None:
         """The error names the offending key and the rule."""
         df = pd.DataFrame({"a": [1]})
@@ -370,12 +400,14 @@ class TestDefinedNameCellReferenceCollision:
         assert "defined_names['Sheet1!Q1']" in str(excinfo.value)
         assert "'Q1' is a cell reference" in str(excinfo.value)
 
-    @pytest.mark.parametrize("name", ["MyRange", "Q1_Sales", "R1C1D"])
+    @pytest.mark.parametrize("name", ["MyRange", "Q1_Sales", "RCx", "Rate1"])
     def test_ordinary_names_still_work(self, name: str, tmp_xlsx: str) -> None:
         """An ordinary name is still accepted.
 
         The control: without it the rejections above are satisfied by a check
-        that refuses everything.
+        that refuses everything. ``RCx`` is the sharp one — it starts with the
+        R/C shape but carries no index, so Excel reads no reference in it and
+        opens the workbook clean (measured).
         """
         df = pd.DataFrame({"a": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, defined_names={name: "=Sheet1!$A$1:$A$2"})

@@ -20,6 +20,7 @@
 //!   may be arbitrary UTF-8; they say nothing about correctness, and every one
 //!   of them is paired with a property that does.
 
+use super::tables::is_logical_constant;
 use super::{
     looks_like_cell_reference, matches_pattern, naive_date_to_excel, naive_datetime_to_excel,
     parse_cell_range, parse_cell_ref, parse_color, parse_table_style, parse_value,
@@ -371,9 +372,18 @@ proptest! {
     /// they collide with a cell address, so sanitising prefixes them. Excluding
     /// them here rather than narrowing the regex keeps the generator wide, and
     /// the reference-shape behaviour has its own assertions in `tables.rs`.
+    ///
+    /// The logical constants are excluded for the same reason and are worth a
+    /// word, because this property was *false* for a while without anyone
+    /// noticing: "TRUE" matches the regex, is not a cell reference, and is
+    /// prefixed — but the odds of `".*"`-style generation spelling it are so
+    /// low that the suite would have stayed green indefinitely. Both exclusions
+    /// call the real predicate rather than restating it, so a change to either
+    /// rule moves this property with it.
     #[test]
     fn valid_table_names_are_left_alone(name in "[A-Za-z_][A-Za-z0-9_]{0,40}") {
         prop_assume!(!looks_like_cell_reference(&name));
+        prop_assume!(!is_logical_constant(&name));
         prop_assert_eq!(sanitize_table_name(&name), name);
     }
 

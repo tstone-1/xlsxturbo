@@ -66,6 +66,8 @@ The name you pass is adjusted to something Excel accepts. In order:
 | `"2024Sales"` | `"_2024Sales"` | A leading digit gains a `_` prefix |
 | `"Q1"`, `"A1"`, `"XFD1048576"` | `"_Q1"`, `"_A1"`, `"_XFD1048576"` | Excel reserves names that address a cell |
 | `"R"`, `"C"`, `"R1C1"` | `"_R"`, `"_C"`, `"_R1C1"` | Excel reserves the R1C1 forms and the selection shortcuts `R`/`C` |
+| `"R2D2"`, `"C3PO"`, `"R1_total"` | `"_R2D2"`, `"_C3PO"`, `"_R1_total"` | Excel ignores whatever follows a complete R1C1 reference |
+| `"TRUE"`, `"false"` | `"_TRUE"`, `"_false"` | Excel reserves its logical constants, in any case |
 | a name over 255 characters | first 255 characters | Excel's length limit |
 
 The cell-reference rule is bounded by the actual grid, which ends at
@@ -74,6 +76,12 @@ ordinary names and they pass through unchanged. A zero-padded row counts by the
 row it parses to: `"A01"` is treated as a reference (Excel offers to repair a
 workbook with a table of that name, exactly as for `"Q1"`), while `"A0"` — row
 zero — addresses nothing and passes through.
+
+Excel stops reading an R1C1 form once it has the index and ignores the rest, so
+`"R2D2"` is the reference `R2` with `D2` trailing and gets the prefix. Only the
+leading index has to exist, which is why `"R1C16385"` is prefixed even though
+that column is past the grid. A name that never reaches an index is not a
+reference at all: `"RCx"` and `"Rate1"` pass through unchanged.
 
 Normalisation happens before the character rule, and it matters because a
 combining mark is not a letter. Without it, `"Verkäufe"` typed as `"Verka"` plus
@@ -92,3 +100,24 @@ Workbook-level `defined_names` are **not** sanitized — a reference-shaped key
 there raises `ConfigurationError` instead, because silently renaming a defined
 name would leave the formulas that use it pointing at a name the workbook no
 longer defines.
+
+### A table name may not equal a defined name
+
+Excel requires the two kinds of name to be unique against each other, not only
+within their own kind, and repairs a workbook that carries both. The name is
+compared after sanitization and ignoring case, and a sheet-scoped defined name
+collides just as a global one does:
+
+```python
+xlsxturbo.df_to_xlsx(df, "report.xlsx",
+    table_style="Medium2",
+    table_name="Sales",
+    defined_names={"Sheet1!Sales": "=Sheet1!$A$1:$A$4"},
+)
+# WorkbookValidationError: defined_names['Sheet1!Sales'] collides with the
+# table name 'Sales' on sheet 'Sheet1'.
+```
+
+The check runs before anything is written, so the output file is left alone.
+A sheet that creates no table — no `table_style`, or an empty DataFrame —
+claims no name and cannot collide.

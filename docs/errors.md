@@ -28,7 +28,7 @@ The subclasses say what kind of failure it was:
 | `ConfigurationTypeError` | An option or argument has the wrong **type**: a list where a dict is required, a non-string dictionary key, a `bytes` path | `OptionError`, `TypeError` |
 | `InputDataError` | The object passed as data is not a pandas or polars DataFrame, or its columns cannot be read | `ValueError` |
 | `FileError` | A filesystem read or write failed: a missing output directory, a permissions problem, a full disk, an unreadable CSV input — and the [workbook rules Excel's writer checks only during the save](#save-time-validation-lands-in-fileerror) | `OSError`, `ValueError` |
-| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it. Its one raise site is the pre-check for two sheets claiming the same table name | `ConfigurationError`, so also `OptionError` and `ValueError` |
+| `WorkbookValidationError` | The configuration is well-formed but Excel forbids it. Raised by the two name pre-checks: two sheets claiming the same table name, and a table name that collides with a `defined_names` key | `ConfigurationError`, so also `OptionError` and `ValueError` |
 
 ### "Anything wrong with what I passed"
 
