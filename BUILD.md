@@ -132,10 +132,27 @@ GitHub Release whose notes say Unreleased, with nothing failing. `## [Unreleased
 no tag, so forgetting this step fails the release job instead. `tests/test_ci_config.py`
 enforces it.
 
-### 3. Commit Version Bump
+### 3. Re-lock and Re-run the Suite
+
+The version bump is a code change, and several tests are coupled to it: `uv.lock`
+pins this project itself, `SECURITY.md`'s support table has to name the new minor
+line, and `CHANGELOG.md`'s heading must carry a version and a date. Running the
+suite before the edit and not after it hides all three.
 
 ```bash
-git add Cargo.toml pyproject.toml CHANGELOG.md
+uv lock                                   # uv.lock pins this project's own version
+.venv/bin/python -m pytest tests/ -q      # Windows: .venv\Scripts\python.exe
+```
+
+1.3.0 is why this step is written down. The suite was green before the bump, only
+the two version-coupled modules were re-run after it, and `main` went red on
+`SECURITY.md` still naming 1.2.x as the current line -- a guard doing its job,
+after the push rather than before it.
+
+### 4. Commit Version Bump
+
+```bash
+git add Cargo.toml pyproject.toml CHANGELOG.md uv.lock SECURITY.md
 git commit -m "Release X.Y.Z: <one-line summary of what ships>"
 git push origin main
 ```
@@ -144,7 +161,7 @@ The `Release X.Y.Z: ...` subject is the convention every release since 0.17.0 ha
 `.github/scripts/release-notes.sh` does not depend on it, but the history is easier to
 read when it is consistent.
 
-### 4. Check Dependabot PRs
+### 5. Check Dependabot PRs
 
 Before releasing, review open Dependabot PRs:
 
@@ -157,7 +174,7 @@ Before releasing, review open Dependabot PRs:
 
 Don't release with unreviewed dependency PRs piling up.
 
-### 5. Verify CI Passes
+### 6. Verify CI Passes
 
 **IMPORTANT:** Before creating a release tag, verify GitHub Actions succeed.
 
@@ -174,14 +191,14 @@ Don't release with unreviewed dependency PRs piling up.
 
 Do NOT proceed if CI is failing.
 
-### 6. Create Release Tag
+### 7. Create Release Tag
 
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-### 7. Verify Release Workflow
+### 8. Verify Release Workflow
 
 After pushing the tag:
 
@@ -201,7 +218,7 @@ After pushing the tag:
    - **Create GitHub Release** - attaches the wheels and SBOMs, with notes sliced out of
      `CHANGELOG.md`; it fails rather than publishing empty notes if the tag has no entry
 
-### 8. Verify PyPI Publication
+### 9. Verify PyPI Publication
 
 1. Go to: https://pypi.org/project/xlsxturbo/
 2. Verify new version appears

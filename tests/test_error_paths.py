@@ -411,17 +411,26 @@ class TestAtomicSave:
         assert ws["A1"].value == "B"
         assert ws["A2"].value == "replaced"
 
-    def test_no_temporary_files_are_left_behind(self, tmp_xlsx: str) -> None:
-        """Neither a successful nor a failed save may litter the output directory."""
-        directory = Path(tmp_xlsx).parent
-        before = set(directory.iterdir())
+    def test_no_temporary_files_are_left_behind(self, tmp_path: Path) -> None:
+        """Neither a successful nor a failed save may litter the output directory.
+
+        `tmp_path`, not the shared `tmp_xlsx` fixture: this asserts a directory
+        gained no files, so it has to own that directory. Pointed at the system
+        temp directory it fails whenever anything else on the machine writes
+        there during the call -- measured once, in a run started immediately
+        after a `maturin develop` in the same command, with CI and the three
+        following local runs green. A test that a busy machine can redden is one
+        people learn to re-run rather than read.
+        """
+        target = str(tmp_path / "report.xlsx")
+        before = set(tmp_path.iterdir())
 
         df = pd.DataFrame({"A": [1, 2]})
-        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        xlsxturbo.df_to_xlsx(df, target)
         with pytest.raises(ValueError, match="Failed to save workbook"):
-            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=self.BAD_CHART)  # type: ignore[arg-type]
+            xlsxturbo.df_to_xlsx(df, target, charts=self.BAD_CHART)  # type: ignore[arg-type]
 
-        new_files = set(directory.iterdir()) - before - {Path(tmp_xlsx)}
+        new_files = set(tmp_path.iterdir()) - before - {Path(target)}
         assert not new_files, f"staging files left behind: {new_files}"
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
