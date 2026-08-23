@@ -25,6 +25,21 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    groups:
+      # `github/codeql-action/init`, `/autobuild` and `/analyze` are three entry
+      # points of ONE action reading one config file, and its `getConfig` throws
+      # `Loaded a configuration file for version 'X', but running version 'Y'`
+      # on any mismatch. Dependabot treats the three paths as three
+      # dependencies, so ungrouped it files three PRs, none of which can go
+      # green alone and each of which reddens CodeQL on main if merged first.
+      # That happened for 4.37.4 -> 4.37.6 (PRs #32-34, all closed for one hand
+      # -written commit) and again for 4.37.6 -> 4.37.7 (#35-36) -- where the
+      # limit above was already full, so the third PR was never even filed and
+      # merging both would still have left `analyze` behind.
+      # `TestCodeqlActionPinsMoveTogether` fails if they drift anyway.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # Python dev, build, and docs toolchain (pyproject.toml, requirements-docs.txt).
   #

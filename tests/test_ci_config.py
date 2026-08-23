@@ -533,3 +533,97 @@ class TestChangelogHeadings:
             f"CHANGELOG.md version heading(s) {undated} lack a ' - YYYY-MM-DD' date. "
             f"A released version is dated; unreleased work belongs under '## [Unreleased]'."
         )
+
+
+# `uses: <owner>/<repo>/<path>@<40-hex sha> # v<version>` in a workflow.
+_CODEQL_PIN = re.compile(
+    r"uses:\s*(github/codeql-action/[\w-]+)@([0-9a-f]{40})\s*#\s*(v[\d.]+)"
+)
+
+
+def _codeql_pins() -> dict[str, tuple[str, str]]:
+    """Map each pinned `codeql-action` entry point to its (SHA, version comment)."""
+    pins: dict[str, tuple[str, str]] = {}
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        for path, sha, version in _CODEQL_PIN.findall(
+            workflow.read_text(encoding="utf-8")
+        ):
+            pins[path] = (sha, version)
+    return pins
+
+
+class TestCodeqlActionPinsMoveTogether:
+    """`init`, `autobuild` and `analyze` must be pinned to one SHA.
+
+    They are three entry points of one action reading one config file, and its
+    ``getConfig`` throws ``Loaded a configuration file for version 'X', but
+    running version 'Y'`` on any mismatch — so a workflow mixing versions fails
+    CodeQL, whichever two agree.
+
+    Dependabot files a separate PR per path, so ungrouped it produces three PRs
+    that each move one pin. None can go green alone, and merging them in
+    sequence reddens CodeQL on `main` until the last lands. That happened for
+    4.37.4 -> 4.37.6 (PRs #32-34) and again for 4.37.6 -> 4.37.7 (#35-36),
+    where the `open-pull-requests-limit` was full and the third PR was never
+    filed at all — so merging both open ones would have left `analyze` behind
+    with nothing to say so.
+
+    `dependabot.yml`'s `groups:` entry is what makes them arrive as one PR.
+    This is what fails if they drift regardless — a hand edit, a revert, or a
+    group that stops matching.
+    """
+
+    def test_all_three_entry_points_are_pinned(self) -> None:
+        """The emptiness control: a pattern that matches nothing passes vacuously."""
+        pins = _codeql_pins()
+        assert {
+            "github/codeql-action/init",
+            "github/codeql-action/autobuild",
+            "github/codeql-action/analyze",
+        } <= set(pins), (
+            f"expected all three codeql-action entry points to be pinned in "
+            f"{WORKFLOWS}, found {sorted(pins)}; the pin pattern has stopped "
+            f"matching and the check below is inert"
+        )
+
+    def test_every_codeql_pin_names_the_same_sha(self) -> None:
+        """The failure this class exists for."""
+        pins = _codeql_pins()
+        shas = {sha for sha, _ in pins.values()}
+        assert len(shas) == 1, (
+            f"codeql-action pins point at {len(shas)} different SHAs: "
+            f"{ {path: sha for path, (sha, _) in pins.items()} }. They read one "
+            f"shared config file and CodeQL fails on a version mismatch, so all "
+            f"of them move in one commit or none do."
+        )
+
+    def test_every_codeql_pin_carries_the_same_version_comment(self) -> None:
+        """A matching SHA under two labels means one comment is lying."""
+        pins = _codeql_pins()
+        versions = {version for _, version in pins.values()}
+        assert len(versions) == 1, (
+            f"codeql-action pins carry {len(versions)} different version comments: "
+            f"{ {path: version for path, (_, version) in pins.items()} }. The SHAs "
+            f"agree or the test above would have caught it, so at least one comment "
+            f"is stale — which is invisible in a green build."
+        )
+
+    def test_dependabot_groups_the_codeql_action_paths(self) -> None:
+        """Without the group the three PRs come back, one per entry point."""
+        config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+        actions = [
+            update
+            for update in config["updates"]
+            if update["package-ecosystem"] == "github-actions"
+        ]
+        assert len(actions) == 1, "expected one github-actions Dependabot entry"
+        patterns = [
+            pattern
+            for group in actions[0].get("groups", {}).values()
+            for pattern in group.get("patterns", ())
+        ]
+        assert any("codeql-action" in pattern for pattern in patterns), (
+            "dependabot.yml no longer groups github/codeql-action*, so its three "
+            "entry points will arrive as three PRs again, none of which can pass "
+            "on its own"
+        )
