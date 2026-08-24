@@ -189,6 +189,20 @@ Don't release with unreviewed dependency PRs piling up.
    - **CI / Coverage (informational) (push)** - a failure here means the measurement broke,
      not that coverage fell; it still has to be diagnosed before a release
 
+4. Or read the same answer from the API, which is what a script must do:
+
+   ```bash
+   gh run list --workflow ci.yml --branch main --limit 1 \
+     --json headSha,status,conclusion \
+     --jq '"\(.[0].headSha[0:7]) \(.[0].status) \(.[0].conclusion // "-")"'
+   ```
+
+   The `headSha` is not optional — it is what ties the verdict to the commit about to be
+   tagged. Read `conclusion` and nothing else. **Do not gate on the exit code of
+   `gh run watch --exit-status`**: it is correct on its own, but any command chained after
+   it on the same line (`tail`, `echo`) replaces the status with its own, and the shell then
+   reports success for a failed run.
+
 Do NOT proceed if CI is failing.
 
 ### 7. Create Release Tag
