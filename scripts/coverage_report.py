@@ -48,6 +48,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PROFILE_DIR = REPO_ROOT / "target" / "coverage"
 EXTENSION_DIR = REPO_ROOT / "python" / "xlsxturbo"
 
+# Set for *every* pytest pass this script drives, so the suite can tell it is running
+# against an instrumented build. `LLVM_PROFILE_FILE` is not a substitute: it says where
+# profiles go, and only one of the two passes below sets it -- which is how a timing
+# assertion went on running under instrumentation after being "fixed".
+COVERAGE_MARKER = {"XLSXTURBO_COVERAGE": "1"}
+
 # What the report is *not* about, as one regex, because `llvm-cov` filters by
 # filename and nothing finer:
 #
@@ -244,7 +250,14 @@ def report_python_layer() -> None:
             "pytest",
             "tests/",
             "-q",
-        ]
+        ],
+        # This pass runs against whatever the venv holds, which by now is the
+        # instrumented extension built in step 3 -- and it adds coverage.py's own
+        # tracing on top. Wall-clock measurements are meaningless under both, so
+        # the suite is told, and `tests/test_concurrency.py` skips its timing
+        # assertions. Without this the pass took 24.2s against the same suite's
+        # 12.5s and failed those assertions intermittently.
+        env=COVERAGE_MARKER,
     )
     run([sys.executable, "-m", "coverage", "report", "--show-missing"])
 
@@ -272,6 +285,7 @@ def main() -> int:
     instrument = {"RUSTFLAGS": "-Cinstrument-coverage"}
     profile_env = {
         **instrument,
+        **COVERAGE_MARKER,
         "LLVM_PROFILE_FILE": str(PROFILE_DIR / "xlsxturbo-%p-%m.profraw"),
     }
 

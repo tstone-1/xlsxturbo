@@ -498,6 +498,24 @@ Two things about testing it, because a GIL release is only observable through ti
   threshold is 0.80x with best-of-3 legs and a 4-core skip, chosen to sit in the middle of a
   measured 0.43-vs-0.98 gap rather than close to either side. If it ever flakes, widen the
   threshold — do not delete it.
+- ⚠ **A wall-clock assertion is invalid under `-Cinstrument-coverage`, and this repo runs
+  the whole pytest suite that way.** On an instrumented build four threads are *slower* than
+  one — 1.693s against 1.347s on a 32-core machine where the ordinary build gives 0.43x — so
+  the comparison measures the instrumentation at any threshold. `TestSaveReleasesTheGil`
+  therefore skips when `XLSXTURBO_COVERAGE` is set, which `scripts/coverage_report.py` exports
+  for every pytest pass it drives. **The local suite and every CI test leg passed; only the
+  Coverage job caught it**, which is the job whose failures are easy to wave through as
+  informational. Its `AGENTS.md` line already said what to do: a Coverage failure means the
+  measurement broke. Read it.
+- ⚠ **`scripts/coverage_report.py` runs pytest TWICE, and the first fix keyed on a marker only
+  one of them sets.** Step 3 is the instrumented pass with `LLVM_PROFILE_FILE`; step 5 measures
+  the pure-Python layer under coverage.py — with no env of its own, and against the instrumented
+  extension step 3 left in the venv. Keying the skip on `LLVM_PROFILE_FILE` therefore fixed
+  half of it and left step 5 making a wall-clock assertion under *two* sources of slowdown.
+  Hence the dedicated `COVERAGE_MARKER` constant, set on both. **The tell was that both passes
+  reported the same counts as an ordinary run**, and it was nearly missed because the log had
+  been read through `tail -20`, which showed step 5's summary and hid step 3's. When one script
+  runs a suite more than once, a single summary line is not the job's result.
 - ⚠ **Two detaches need two mutations, and the first draft covered only one of them.** The
   timing test originally exercised `df_to_xlsx` alone, so deleting the `lib.rs` wrapper —
   half the change — left the **entire suite green at 739 tests**. Found by an independent

@@ -36,6 +36,16 @@ ROWS = 4000
 BARRIER_TIMEOUT_S = 30.0
 JOIN_TIMEOUT_S = 300.0
 
+# `scripts/coverage_report.py` builds the extension with `-Cinstrument-coverage` and sets
+# this for both of the pytest passes it drives. Under that build the timing comparison
+# below inverts -- see `TestSaveReleasesTheGil` -- so it is skipped there.
+#
+# Keyed on the script's own marker rather than on `LLVM_PROFILE_FILE`: only the first of
+# those two passes sets that one, so keying on it left the second pass -- which runs
+# against the same instrumented extension, under coverage.py tracing on top -- still
+# making a wall-clock assertion, and failing it intermittently.
+INSTRUMENTED = "XLSXTURBO_COVERAGE" in os.environ
+
 
 def _frame() -> pd.DataFrame:
     """Build a frame big enough that the archive write is a real share of the call."""
@@ -189,6 +199,10 @@ class TestConcurrentWrites:
 @pytest.mark.skipif(
     (os.cpu_count() or 1) < 4, reason="needs 4 cores to observe threads running in parallel"
 )
+@pytest.mark.skipif(
+    INSTRUMENTED,
+    reason="an -Cinstrument-coverage build inverts this comparison; see the class docstring",
+)
 class TestSaveReleasesTheGil:
     """Threaded exports must genuinely run in parallel, not merely interleave.
 
@@ -197,6 +211,14 @@ class TestSaveReleasesTheGil:
     in 0.95-1.02x the single-threaded wall time; with it released they finish in
     about 0.43x. The threshold is 0.80x, and each leg is the best of three runs,
     because best-of is stable against a scheduler hiccup where a mean is not.
+
+    It is skipped under `-Cinstrument-coverage`, and that is not the threshold being
+    too tight. On an instrumented build four threads are *slower* than one: 1.693s
+    against 1.347s, measured on a 32-core machine where the ordinary build gives
+    0.43x. So the comparison there measures the instrumentation rather than the GIL,
+    at any threshold. The uninstrumented CI legs on Linux, macOS and Windows all
+    passed the same assertion on 4-core runners, which is what pins the cause to the
+    build rather than to the core count.
 
     Both entry points are measured separately, and that is not redundancy: they
     detach at two different call sites. Removing only the one in `lib.rs` left the
