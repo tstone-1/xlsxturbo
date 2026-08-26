@@ -904,7 +904,16 @@ pub(crate) fn convert_dataframe_to_xlsx(
 
     apply_defined_names(&mut workbook, defined_names).map_err(ConvertError::Config)?;
 
-    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
+    // Serialising and compressing the archive touches no Python object, so the
+    // GIL is dead weight for what measured as ~58% of this call. Holding it made
+    // threaded `df_to_xlsx` scale 1.06x across 8 threads while `csv_to_xlsx` --
+    // whose whole conversion already runs inside a `detach` -- scaled 5.8x on the
+    // same interpreter. Releasing it here takes the same benchmark to 2.36x; the
+    // remainder is the extraction half above, which reads Python objects and
+    // cannot be detached. `tests/test_concurrency.py` pins both the speedup and
+    // the correctness of concurrent saves.
+    py.detach(|| save_workbook(&mut workbook, output_path))
+        .map_err(ConvertError::File)?;
 
     Ok(result)
 }

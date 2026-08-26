@@ -792,8 +792,11 @@ fn dfs_to_xlsx<'py>(
 
     apply_defined_names(&mut workbook, defined_names.as_ref()).map_err(errors::configuration)?;
 
-    // Save workbook
-    save_workbook(&mut workbook, &output_path).map_err(errors::file)?;
+    // Save workbook, without the GIL -- see the note at the matching call in
+    // `convert.rs`. Every sheet's Python data has been read into owned Rust types
+    // by this point, so the archive write borrows nothing from the interpreter.
+    py.detach(|| save_workbook(&mut workbook, &output_path))
+        .map_err(errors::file)?;
 
     Ok(stats)
 }

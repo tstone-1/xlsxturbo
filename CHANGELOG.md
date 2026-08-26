@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **`df_to_xlsx` and `dfs_to_xlsx` release the GIL while writing the archive.** Serialising
+  and compressing the workbook touches no Python object, and it measured as the larger half
+  of a call — so holding the interpreter lock across it meant threaded exports did not run
+  in parallel at all. Four threads now finish a batch in about 43% of single-threaded wall
+  time, against 98-102% before; single-threaded cost is unchanged. The gain plateaus near
+  2.3x because reading values out of the DataFrame still holds the GIL and cannot be
+  detached. `csv_to_xlsx` already released the GIL for its whole conversion and is
+  unaffected. No API change, and nothing to opt into.
+
+  `tests/test_concurrency.py` pins both halves: that concurrent writes off one shared frame
+  produce correct workbooks — including a failure raised from inside the GIL-free region —
+  and that four threads beat one by a wide enough margin. The timing case runs once per
+  entry point, so removing either `py.detach` alone reddens exactly that entry point.
+
+  Output is unaffected: the same workbook built before and after the change is identical in
+  13 of its 14 archive members, differing only in `docProps/core.xml`, which records the
+  creation time and has never been reproducible between runs.
+
+### Documentation
+- `docs/stability.md` said one `abi3` wheel per platform covers "every supported version".
+  It does not cover free-threaded builds: on `python3.13t`/`python3.14t` there is no usable
+  wheel, so `pip` falls back to the source distribution and needs a Rust toolchain. The page
+  now says so. Measured on 3.14.7t and 3.15.0rc1t, against the ordinary 3.14.7 as a control.
+  No code change — the wheels, and what they support, are unchanged.
+
 ## [1.3.0] - 2026-08-23
 
 ### Changed

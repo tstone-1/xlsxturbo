@@ -99,6 +99,20 @@ the identical `abi3` interface, so CI covers the oldest, a middle, and the newes
 gaps carry no independent risk. What CI would catch on 3.11 that 3.10 and 3.12 do not is
 essentially nothing.
 
+**The table is about the ordinary builds. There is no wheel for a free-threaded
+interpreter.** An `abi3` wheel cannot serve a `Py_GIL_DISABLED` build, so on `python3.13t`,
+`python3.14t` or later `pip` finds no usable wheel at all and falls back to the source
+distribution, which needs a Rust toolchain to build. It does build and run there — measured
+on 3.14.7t and 3.15.0rc1t — but installing takes about a minute instead of a second, and on
+a machine with no Rust it fails outright. The same command on the ordinary 3.14 resolves to
+`xlsxturbo-<version>-cp310-abi3-win_amd64.whl` immediately, which is what makes free
+threading the variable rather than something local.
+
+Built that way it works: the test suite passes on 3.14t, and concurrent exports off a shared
+DataFrame come out correct. But polars publishes no free-threaded wheels either, so on such
+an interpreter only pandas is installable as a frame source. That is the practical reason
+there is no `cp3XXt` wheel here yet, rather than anything measured about the library.
+
 **Python 3.9 was dropped in 1.1.0**, having reached upstream end of life in October 2025.
 `pip` handles this without any action on your part: a 3.9 interpreter resolves to 1.0.0,
 which stays on PyPI and keeps working. Move to 3.10 or newer to receive further releases.
