@@ -6,6 +6,14 @@ use clap::Parser;
 use std::time::Instant;
 use xlsxturbo_core::DateOrder;
 
+/// The conversion was attempted and failed: an unreadable input, a path that
+/// cannot be written, malformed CSV.
+const EXIT_FAILURE: i32 = 1;
+
+/// The command line itself was wrong. Matches what clap returns for the usage
+/// errors it handles, so one value means one thing whoever caught the mistake.
+const EXIT_USAGE: i32 = 2;
+
 #[derive(Parser, Debug)]
 #[command(name = "xlsxturbo")]
 #[command(version)]
@@ -53,7 +61,14 @@ fn main() {
             "Invalid date_order '{}'. Valid values: auto, mdy, us, dmy, eu, european",
             args.date_order
         );
-        std::process::exit(1);
+        // 2, not 1: this is a usage error, and clap already exits 2 for the ones
+        // it rejects itself (an unknown flag, a missing argument). Both exiting 1
+        // made "you typed the command wrong" and "the conversion failed"
+        // indistinguishable to a caller, and left the binary disagreeing with its
+        // own argument parser about which is which. Exit 1 stays for a conversion
+        // that was asked for correctly and failed. The CLI is outside the
+        // stability promise (docs/stability.md), so this is free to change.
+        std::process::exit(EXIT_USAGE);
     });
 
     if args.verbose {
@@ -97,7 +112,7 @@ fn main() {
         }
         Err(e) => {
             eprintln!("Error: {}", e);
-            std::process::exit(1);
+            std::process::exit(EXIT_FAILURE);
         }
     }
 }

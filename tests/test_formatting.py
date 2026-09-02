@@ -439,6 +439,158 @@ class TestTableNameCollidesWithDefinedName:
         wb.close()
 
 
+class TestAutoAssignedTableNames:
+    """The pre-checks see the ``TableN`` names the writer assigns itself.
+
+    ``claimed_table_name`` used to return ``None`` for a sheet that asked for a
+    ``table_style`` and gave no ``table_name``, so both name pre-checks were
+    blind to it -- while rust_xlsxwriter names every unnamed table ``Table{id}``
+    from a workbook-wide counter during the save. The collision the pre-checks
+    exist to catch therefore still arrived as
+    ``FileError: Failed to save workbook to '...': Name 'Table1' has already
+    been used in this workbook``, naming neither the sheet nor the option.
+
+    The counter was measured rather than reasoned about, by writing workbooks
+    and reading ``xl/tables/table*.xml`` back: three auto sheets give
+    ``Table1, Table2, Table3``; naming the first sheet's table ``Zed`` gives
+    ``Zed, Table2, Table3``, so an explicit name still *consumes* an id; and a
+    sheet that creates no table consumes none.
+    """
+
+    def test_auto_name_colliding_with_a_defined_name_is_a_validation_error(
+        self, tmp_xlsx: str
+    ) -> None:
+        """The single-sheet case: one table, so the writer would call it ``Table1``.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(xlsxturbo.WorkbookValidationError) as excinfo:
+            xlsxturbo.df_to_xlsx(
+                df,
+                tmp_xlsx,
+                table_style="Medium9",
+                defined_names={"Table1": "=Sheet1!$A$1"},
+            )
+        message = str(excinfo.value)
+        assert "defined_names['Table1']" in message
+        assert "'Table1'" in message
+        assert "Sheet1" in message
+        assert "table_name" in message, (
+            "a caller who never wrote 'Table1' needs to be told where it came from"
+        )
+
+    def test_an_explicit_name_still_consumes_an_id(self, tmp_xlsx: str) -> None:
+        """Naming sheet A's table ``Table2`` makes sheet B's auto name ``Table2`` too.
+
+        The counter runs over tables, not over *unnamed* tables, which is the
+        half of the numbering that is easy to get wrong by reading.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(xlsxturbo.WorkbookValidationError) as excinfo:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "A", {"table_name": "Table2"}), (df, "B")],
+                tmp_xlsx,
+                table_style="Medium9",
+            )
+        message = str(excinfo.value)
+        assert "Duplicate table name 'Table2'" in message
+        assert "'A'" in message
+        assert "'B'" in message
+
+    def test_the_counter_skips_a_sheet_that_creates_no_table(self, tmp_xlsx: str) -> None:
+        """An empty sheet claims nothing, so the next real table is still ``Table1``.
+
+        The direction that matters: if the counter advanced per *sheet* the
+        second sheet would claim ``Table2`` and this workbook would be accepted,
+        then fail in the save.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        with pytest.raises(xlsxturbo.WorkbookValidationError, match=r"on sheet 'B'"):
+            xlsxturbo.dfs_to_xlsx(
+                [(pd.DataFrame({"A": []}), "A"), (df, "B")],
+                tmp_xlsx,
+                table_style="Medium9",
+                defined_names={"Table1": "=B!$A$1"},
+            )
+
+    def test_auto_named_tables_do_not_collide_with_each_other(self, tmp_xlsx: str) -> None:
+        """The control: three auto-named sheets are an ordinary workbook.
+
+        Without it a pre-check that claimed one constant name for every sheet
+        would pass every case above.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.dfs_to_xlsx(
+            [(df, "A"), (df, "B"), (df, "C")], tmp_xlsx, table_style="Medium9"
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert "Table1" in wb["A"].tables
+        assert "Table2" in wb["B"].tables
+        assert "Table3" in wb["C"].tables
+        wb.close()
+
+    def test_an_unrelated_defined_name_still_works(self, tmp_xlsx: str) -> None:
+        """The second control: claiming a name must not refuse every defined name.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1, 2]})
+        xlsxturbo.df_to_xlsx(
+            df, tmp_xlsx, table_style="Medium9", defined_names={"Sales": "=Sheet1!$A$1"}
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert "Table1" in active_ws(wb).tables
+        wb.close()
+
+
+class TestZeroColumnFrameCreatesNoTable:
+    """A frame with rows and no columns must not get a phantom table.
+
+    ``pd.DataFrame(index=range(3))`` with a ``table_style`` produced a
+    one-column table over ``A1:A4`` carrying the crate-generated header
+    ``Column1`` -- a column the caller never asked for, in a sheet that
+    otherwise holds nothing. The table gate checked the row count and not the
+    column count.
+    """
+
+    def test_no_table_is_written(self, tmp_xlsx: str) -> None:
+        """Read the archive, not openpyxl: the question is whether the part exists.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        rows, cols = xlsxturbo.df_to_xlsx(
+            pd.DataFrame(index=range(3)), tmp_xlsx, table_style="Medium2"
+        )
+        assert (rows, cols) == (4, 0)
+        with zipfile.ZipFile(tmp_xlsx) as archive:
+            tables = [name for name in archive.namelist() if name.startswith("xl/tables/")]
+        assert tables == [], f"a zero-column frame wrote {tables}"
+
+    def test_an_ordinary_frame_still_gets_its_table(self, tmp_xlsx: str) -> None:
+        """The control: the new gate must not suppress every table.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1, 2]}), tmp_xlsx, table_style="Medium2")
+        with zipfile.ZipFile(tmp_xlsx) as archive:
+            tables = [name for name in archive.namelist() if name.startswith("xl/tables/")]
+        assert tables == ["xl/tables/table1.xml"]
+
+
 class TestTableNameCellReferenceCollision:
     """A table name Excel would read as a cell address gets an underscore.
 
@@ -826,6 +978,262 @@ class TestRowHeights:
         # Default height is ~15, so it should not be 50
         assert ws.row_dimensions[1].height != 50 or ws.row_dimensions[1].height is None
         wb.close()
+
+
+class TestRowHeightsValidation:
+    """``row_heights`` validates its own keys and values.
+
+    It was the one dict option that never got the pass the rest of the surface
+    got in 1.2.0: the PyO3 signature took it as ``HashMap<u32, f64>``, so the
+    binding's conversion decided everything. Measured through the shipped 1.3.0
+    wheel, ``{True: 40}`` sized row 2 (``ht="39.75"``), ``{0: True}`` set a
+    height of one point, and a negative or oversized key raised
+    ``builtins.OverflowError`` -- an ``ArithmeticError``, so outside the
+    exception hierarchy *and* outside the ``except (XlsxTurboError, TypeError)``
+    that ``docs/errors.md`` recommends for option mistakes.
+
+    Every case is run against both entry points, because a per-sheet
+    ``row_heights`` used to travel through a different extraction path
+    (``extract_scalar!``) and now shares the top-level one.
+    """
+
+    @staticmethod
+    def _frame() -> pd.DataFrame:
+        """A two-row frame, so row indices 0 and 1 both exist.
+
+        Returns:
+            The frame every case in this class writes.
+        """
+        return pd.DataFrame({"A": [1, 2]})
+
+    def _export(self, per_sheet: bool, path: str, heights: object) -> None:
+        """Write ``heights`` through the top-level kwarg or the per-sheet dict.
+
+        Args:
+            per_sheet: Use ``dfs_to_xlsx`` with a per-sheet options dict.
+            path: Output path.
+            heights: The ``row_heights`` value under test.
+        """
+        if per_sheet:
+            xlsxturbo.dfs_to_xlsx(
+                [(self._frame(), "Sheet1", {"row_heights": heights})],  # type: ignore[dict-item]
+                path,
+            )
+        else:
+            xlsxturbo.df_to_xlsx(self._frame(), path, row_heights=heights)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_bool_key_is_refused(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """``{True: 40}`` sized row 2 instead of raising.
+
+        ``bool`` subclasses ``int``, so the conversion read ``True`` as index 1.
+        The same shape 1.2.0 closed for ``column_widths`` keys.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        with pytest.raises(TypeError, match=r"row_heights\['True'\]"):
+            self._export(per_sheet, tmp_xlsx, {True: 40})
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_bool_value_is_refused(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """``{0: True}`` set a one-point row height instead of raising.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        with pytest.raises(TypeError, match=r"row_heights\['0'\]"):
+            self._export(per_sheet, tmp_xlsx, {0: True})
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_negative_key_stays_in_the_hierarchy(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """A negative key is an ``XlsxTurboError``, not an ``OverflowError``.
+
+        Asserted against the hierarchy rather than against ``ValueError`` alone:
+        the defect was not that nothing was raised but that what was raised was
+        an ``ArithmeticError`` nobody would think to catch.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError, match="must be a non-negative row index"):
+            self._export(per_sheet, tmp_xlsx, {-1: 20})
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_key_beyond_excels_last_row_is_refused(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """1048576 is one past the last row Excel has.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError, match="exceeds Excel's maximum row index"):
+            self._export(per_sheet, tmp_xlsx, {1_048_576: 20})
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_last_row_is_accepted(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """The control for the bound above: 1048575 is a real row.
+
+        Without it, an off-by-one that refused the last row would satisfy every
+        other case in this class.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        self._export(per_sheet, tmp_xlsx, {1_048_575: 20})
+        assert Path(tmp_xlsx).exists()
+
+    @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
+    def test_string_key_is_refused(self, tmp_xlsx: str, per_sheet: bool) -> None:
+        """There is no numeric-string key form, unlike ``column_widths``.
+
+        The stub declares ``dict[int, int | float]``; accepting more here would
+        widen the promise rather than fix anything.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            per_sheet: Which entry point to drive.
+        """
+        with pytest.raises(TypeError, match="must be an integer row index"):
+            self._export(per_sheet, tmp_xlsx, {"0": 20})
+
+    @pytest.mark.parametrize("height", [-5, float("nan"), float("inf")], ids=["negative", "nan", "inf"])
+    def test_non_finite_or_negative_height_is_refused(self, tmp_xlsx: str, height: float) -> None:
+        """Excel's row maximum is 409.5 points; infinity produced 3,221,225,471.
+
+        rust_xlsxwriter does ``round() as u32`` internally, so nothing below
+        this layer was ever going to complain.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            height: The value under test.
+        """
+        with pytest.raises(
+            xlsxturbo.XlsxTurboError, match="height must be a finite, non-negative number"
+        ):
+            self._export(False, tmp_xlsx, {0: height})
+
+    @pytest.mark.parametrize("height", [409.5, 500, 1e6], ids=["at_max", "over", "far_over"])
+    def test_a_height_above_excels_maximum_is_accepted(
+        self, tmp_xlsx: str, height: float
+    ) -> None:
+        """A finite over-limit height is written through, deliberately.
+
+        Excel's row maximum is 409.5 points, so refusing anything larger looks
+        like the same class of fix as the 1.2.0 name screens. It is not: those
+        screens exist because Excel objected to the file. Measured on Excel for
+        Mac 16 with the recovery probe, a workbook holding ``{0: 500}`` or
+        ``{0: 1e6}`` draws no repair prompt, opens cleanly, and shows a row
+        height of 409.5 -- Excel clamps on load. A control corrupted in the same
+        run did draw the prompt, so the probe was seeing dialogs.
+
+        Pinned so that turning this into a rejection is a decision someone
+        re-measures rather than a tidy-up: it would be a breaking change under
+        ``docs/stability.md`` for no defect.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            height: The value under test.
+        """
+        self._export(False, tmp_xlsx, {0: height})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        written = ws.row_dimensions[1].height
+        assert written is not None
+        assert written >= 409, f"expected the over-limit height through, got {written}"
+        wb.close()
+
+    def test_a_plain_height_still_works(self, tmp_xlsx: str) -> None:
+        """The control: ordinary input is unaffected by any of the screens above.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        self._export(False, tmp_xlsx, {0: 30})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws.row_dimensions[1].height is not None
+        assert abs(ws.row_dimensions[1].height - 30) < 1
+        wb.close()
+
+    def test_a_failing_row_height_names_the_row(self, tmp_xlsx: str) -> None:
+        """A write-time row-height failure says which row it was.
+
+        The extractor's own bound makes this unreachable from Python today, so
+        this drives the apply site through ``constant_memory=False`` with a key
+        the extractor accepts. It exists because the message used to be a bare
+        ``Failed to set row height: ...`` with nothing to act on -- kept as the
+        positive form: the message *does* carry the key.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        self._export(False, tmp_xlsx, {5: 20})
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws.row_dimensions[6].height is not None
+        wb.close()
+
+
+class TestColumnWidthValues:
+    """``column_widths`` validates its values, not only its keys.
+
+    Measured on 1.3.0: ``{0: -5}`` wrote
+    ``<col min="1" max="1" width="0" hidden="1" customWidth="1"/>`` -- an
+    off-by-sign in a caller's width calculation made the column *disappear*, in
+    silence. ``nan`` and ``inf`` produced widths of 0.7109375 and 0.5703125
+    characters. Negative *keys* were already tested; the values were not.
+    """
+
+    @pytest.mark.parametrize("width", [-5, float("nan"), float("inf")], ids=["negative", "nan", "inf"])
+    def test_non_finite_or_negative_width_is_refused(self, tmp_xlsx: str, width: float) -> None:
+        """Rather than hiding the column or writing an arbitrary width.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+            width: The value under test.
+        """
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        with pytest.raises(
+            xlsxturbo.XlsxTurboError, match="width must be a finite, non-negative number"
+        ):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: width})
+
+    def test_the_all_key_is_validated_too(self, tmp_xlsx: str) -> None:
+        """``"_all"`` takes a width like any other key and gets the same screen.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        with pytest.raises(xlsxturbo.XlsxTurboError, match=r"column_widths\['_all'\]"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={"_all": -1})  # type: ignore[dict-item]
+
+    def test_bool_width_is_refused(self, tmp_xlsx: str) -> None:
+        """``{0: True}`` is a one-character column, not a width anyone meant.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        with pytest.raises(TypeError, match=r"column_widths\['0'\]"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: True})  # type: ignore[dict-item]
+
+    def test_zero_width_is_still_accepted(self, tmp_xlsx: str) -> None:
+        """The control: zero is how a caller hides a column on purpose.
+
+        The screen is ``< 0``, not ``<= 0``, and this is what keeps it there.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1], "B": [2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: 0})
+        assert Path(tmp_xlsx).exists()
 
 
 class TestBorderStyles:

@@ -15,7 +15,7 @@ import xlsxturbo
 from tests.helpers import HAS_OPENPYXL, TINY_PNG_B64, active_ws, load_workbook
 
 if TYPE_CHECKING:
-    from xlsxturbo.xlsxturbo import (
+    from xlsxturbo.types import (
         ChartOptions,
         CheckboxOptions,
         CommentOptions,

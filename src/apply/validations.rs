@@ -183,7 +183,9 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
         }
         _ => {
             return Err(format!(
-                "Unknown validation type '{}'. Valid types: list, whole_number, decimal, text_length",
+                "{}: 'type': Unknown validation type '{}'. \
+                 Valid types: list, whole_number, decimal, text_length",
+                view.context(),
                 val_type
             ));
         }

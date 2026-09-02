@@ -22,3 +22,15 @@ can therefore never leave you with neither.
 
 Because the staging file is created in the destination's directory, that directory must
 exist and be writable. When an existing file is replaced, its permissions are preserved.
+
+A symlink at the output path is **written through**: the file it points at is replaced and
+the link itself survives, so exporting to `latest.xlsx -> archive/2026-09.xlsx` updates the
+archive. The staging file is created beside the resolved target, which is what keeps the
+rename atomic. A link whose target does not exist is the one exception — the export creates
+a regular file at the link's own path instead of failing. Following the link would write
+to a path the caller never named, in a directory that need not exist; creating the file
+where the caller pointed is the smaller surprise.
+
+This restores the behaviour of every release before 0.18.0, which wrote through a symlink
+because the underlying writer used `File::create`. Between 0.18.0 and 1.3.0 the atomic
+save's rename replaced the *link*, silently orphaning its target.

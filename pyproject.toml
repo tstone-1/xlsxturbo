@@ -8,14 +8,18 @@ build-backend = "maturin"
 
 [project]
 name = "xlsxturbo"
-version = "1.3.0"
+version = "1.4.0"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 readme = "README.md"
 license = { text = "MIT" }
 # Both land in the wheel's `.dist-info/licenses/`. THIRD-PARTY-LICENSES.md is
-# not decoration: the wheel contains compiled code from ~95 Rust crates whose
-# licenses require their copyright notice to travel with the binary, and LICENSE
-# covers only xlsxturbo's own code. Generated -- see the file's header.
+# not decoration: the wheel contains compiled code from every crate in the Rust
+# dependency tree, whose licenses require their copyright notice to travel with
+# the binary, and LICENSE covers only xlsxturbo's own code. The crate count lives
+# in the generated notice and is deliberately not restated here: four
+# hand-written copies of it, in this file, README.md, AGENTS.md and the generator
+# script, had drifted to three different numbers, none of them current.
+# Generated -- see the file's header.
 license-files = ["LICENSE", "THIRD-PARTY-LICENSES.md"]
 requires-python = ">=3.10"
 keywords = ["excel", "xlsx", "csv", "converter", "performance", "rust"]

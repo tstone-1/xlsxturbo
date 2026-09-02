@@ -3,6 +3,19 @@
 use rust_xlsxwriter::Worksheet;
 use std::collections::HashMap;
 
+/// Set one column's width, naming the column in any failure.
+///
+/// The five call sites used to share the message "Failed to set column width",
+/// which told a caller with a dict of widths nothing about which entry Excel
+/// refused. `column_widths` is keyed by column index, so the index is the key
+/// the caller wrote.
+fn set_width(worksheet: &mut Worksheet, col_idx: u16, width: f64) -> Result<(), String> {
+    worksheet
+        .set_column_width(col_idx, width)
+        .map(|_| ())
+        .map_err(|e| format!("column_widths['{}']: {}", col_idx, e))
+}
+
 /// Apply an explicitly-given column width for every key in `widths` that
 /// names a column index at or beyond `col_count` (i.e. outside the data
 /// range the `0..col_count` loops in this module cover). `"_all"` is a
@@ -21,9 +34,7 @@ fn apply_out_of_range_column_widths(
         }
         if let Ok(col_idx) = key.parse::<u16>() {
             if col_idx >= col_count {
-                worksheet
-                    .set_column_width(col_idx, width)
-                    .map_err(|e| format!("Failed to set column width: {}", e))?;
+                set_width(worksheet, col_idx, width)?;
             }
         }
     }
@@ -42,13 +53,9 @@ pub(crate) fn apply_column_widths(
         let col_key = col_idx.to_string();
         // Specific column overrides '_all'
         if let Some(width) = widths.get(&col_key) {
-            worksheet
-                .set_column_width(col_idx, *width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
+            set_width(worksheet, col_idx, *width)?;
         } else if let Some(width) = global_width {
-            worksheet
-                .set_column_width(col_idx, width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
+            set_width(worksheet, col_idx, width)?;
         }
     }
     apply_out_of_range_column_widths(worksheet, col_count, widths)
@@ -70,9 +77,7 @@ pub(crate) fn apply_column_widths_with_autofit_cap(
         let col_key = col_idx.to_string();
         if let Some(width) = widths.get(&col_key) {
             // Specific width overrides autofit and cap
-            worksheet
-                .set_column_width(col_idx, *width)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
+            set_width(worksheet, col_idx, *width)?;
         } else {
             // Autofit capped at '_all'
             let autofit_width = content_widths
@@ -80,9 +85,7 @@ pub(crate) fn apply_column_widths_with_autofit_cap(
                 .copied()
                 .unwrap_or(8.43); // Excel default
             let capped = autofit_width.min(global_cap);
-            worksheet
-                .set_column_width(col_idx, capped)
-                .map_err(|e| format!("Failed to set column width: {}", e))?;
+            set_width(worksheet, col_idx, capped)?;
         }
     }
     apply_out_of_range_column_widths(worksheet, col_count, widths)

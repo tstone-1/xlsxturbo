@@ -12,7 +12,7 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 | License | Crates |
 | --- | ---: |
-| MIT License | 95 |
+| MIT License | 92 |
 | Apache License 2.0 | 3 |
 | Unicode License v3 | 1 |
 | zlib License | 1 |
@@ -618,7 +618,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.4.3](https://github.com/rust-lang/cc-rs)
+- [cc 1.4.4](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.11](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.104](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -696,7 +696,7 @@ DEALINGS IN THE SOFTWARE.
 Applies to:
 
 - [bitflags 2.13.1](https://github.com/bitflags/bitflags)
-- [log 0.4.33](https://github.com/rust-lang/log)
+- [log 0.4.34](https://github.com/rust-lang/log)
 - [num-traits 0.2.19](https://github.com/rust-num/num-traits)
 
 ```text
@@ -732,7 +732,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [flate2 1.1.9](https://github.com/rust-lang/flate2-rs)
+- [flate2 1.1.10](https://github.com/rust-lang/flate2-rs)
 
 ```text
 Copyright (c) 2014-2026 Alex Crichton
@@ -767,7 +767,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [either 1.17.0](https://github.com/rayon-rs/either)
+- [either 1.18.0](https://github.com/rayon-rs/either)
 
 ```text
 Copyright (c) 2015
@@ -981,7 +981,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [indexmap 2.14.0](https://github.com/indexmap-rs/indexmap)
+- [indexmap 2.14.1](https://github.com/indexmap-rs/indexmap)
 
 ```text
 Copyright (c) 2016--2017
@@ -1343,7 +1343,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [crc32fast 1.5.0](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.1](https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License
@@ -1407,7 +1407,7 @@ Applies to:
 
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.98.2](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.99.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1473,76 +1473,6 @@ SOFTWARE.
 
 Applies to:
 
-- [miniz_oxide 0.8.9](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
-
-```text
-MIT License
-
-Copyright 2013-2014 RAD Game Tools and Valve Software
-Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
-Copyright (c) 2017 Frommi
-Copyright (c) 2017-2024 oyvindln
-
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-```
-
-### MIT License
-
-Applies to:
-
-- [miniz_oxide 0.8.9](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
-
-```text
-MIT License
-
-Copyright 2013-2014 RAD Game Tools and Valve Software
-Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
-Copyright (c) 2017 Frommi
-Copyright (c) 2017-2024 oyvindln
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-```
-
-### MIT License
-
-Applies to:
-
-- [adler2 2.0.1](https://github.com/oyvindln/adler2)
 - [fastrand 2.5.0](https://github.com/smol-rs/fastrand)
 - [itoa 1.0.18](https://github.com/dtolnay/itoa)
 - [linux-raw-sys 0.12.1](https://github.com/sunfishcode/linux-raw-sys)
@@ -1555,7 +1485,7 @@ Applies to:
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.3](https://github.com/dtolnay/syn)
+- [syn 3.0.4](https://github.com/dtolnay/syn)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
 

@@ -84,8 +84,16 @@ impl std::error::Error for ConvertError {}
 /// ragged rows, since a worksheet has no fixed width to violate. Buffering is
 /// `csv::ReaderBuilder`'s own.
 fn open_csv_reader(input_path: &str) -> Result<csv::Reader<File>, ConvertError> {
-    let file = File::open(input_path)
-        .map_err(|e| ConvertError::File(FileFailure::from_io("Failed to open input file", &e)))?;
+    // The path goes in the message for the same reason `save_workbook` puts it
+    // in every one of its own: a bare "No such file or directory" leaves a
+    // caller who built the path from several parts with nothing to compare
+    // against what they meant.
+    let file = File::open(input_path).map_err(|e| {
+        ConvertError::File(FileFailure::from_io(
+            format!("Failed to open input file '{}'", input_path),
+            &e,
+        ))
+    })?;
     Ok(ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -369,40 +377,66 @@ fn write_row_cell(
     )
 }
 
-/// Get a DataFrame's row count without reading its data.
-///
-/// Shared by `write_sheet_data` (to decide whether to write a table) and the
-/// `dfs_to_xlsx` duplicate-table-name pre-check (which must mirror the same
-/// row_count > 0 condition that gates table creation, so two empty
-/// DataFrames sharing a table name don't false-positive as a conflict).
-/// The table name a sheet claims, sanitized, or `None` when it creates no table.
+/// The table name a sheet claims, as it reaches the workbook, or `None` when
+/// the sheet creates no table.
 ///
 /// The gate is `apply_worksheet_features`': a table is added only when a style
 /// is requested, the header row is written and the frame has at least one data
-/// row, and `constant_memory` skips the feature altogether. It lives beside
-/// that code on purpose — a pre-flight that guessed the gate differently would
-/// report a conflict for a workbook that saves cleanly, which is the more
-/// expensive direction to be wrong in.
+/// row and one column, and `constant_memory` skips the feature altogether. It
+/// lives beside that code on purpose — a pre-flight that guessed the gate
+/// differently would report a conflict for a workbook that saves cleanly, which
+/// is the more expensive direction to be wrong in.
+///
+/// `next_table_id` is the id rust_xlsxwriter would assign this table, and it is
+/// what makes the pre-checks see a sheet that asked for a style and gave no
+/// name. The crate names every unnamed table `Table{id}` from a workbook-wide
+/// counter (`worksheet.rs::prepare_worksheet_tables`, called per worksheet from
+/// `workbook.rs::prepare_tables`), so those names collide with a caller's own
+/// `Table2` or a `defined_names` entry called `Table1` — and, because the crate
+/// only notices while saving, the collision used to arrive as `FileError:
+/// Failed to save workbook ...: Name 'Table1' has already been used in this
+/// workbook`, naming neither sheet nor option.
+///
+/// The counter is measured, not assumed: writing three sheets and reading
+/// `xl/tables/table*.xml` back gives `Table1, Table2, Table3`; an explicitly
+/// named first sheet gives `Zed, Table2, Table3`, so an explicit name still
+/// *consumes* an id; and a sheet that creates no table (no style, no header, no
+/// data rows) consumes none. So the caller increments only when this returns
+/// `Some`.
 pub(crate) fn claimed_table_name(
     df: &Bound<'_, PyAny>,
     constant_memory: bool,
     include_header: bool,
     table_style: Option<&str>,
     table_name: Option<&str>,
+    next_table_id: u32,
 ) -> Result<Option<String>, String> {
     if constant_memory || !include_header || table_style.is_none() {
         return Ok(None);
     }
-    let Some(name) = table_name else {
-        return Ok(None);
-    };
-    if dataframe_row_count(df)? == 0 {
+    let (row_count, col_count) = dataframe_shape(df)?;
+    if row_count == 0 || col_count == Some(0) {
         return Ok(None);
     }
-    Ok(Some(sanitize_table_name(name)))
+    Ok(Some(match table_name {
+        Some(name) => sanitize_table_name(name),
+        // Not sanitized: `TableN` is already a valid Excel name, and running it
+        // through the sanitizer would only invite the two to drift.
+        None => format!("Table{}", next_table_id),
+    }))
 }
 
-pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String> {
+/// Get a DataFrame's `(rows, columns)` without reading its data.
+///
+/// The column count is `None` for an object that exposes only `__len__`;
+/// callers treat that as "has columns", since the alternative is to refuse a
+/// table for a frame whose width simply could not be read.
+///
+/// Shared by `write_sheet_data` (to decide whether to write a table) and by the
+/// table-name pre-checks, which must mirror the same conditions that gate table
+/// creation — so two empty DataFrames sharing a table name don't false-positive
+/// as a conflict.
+pub(crate) fn dataframe_shape(df: &Bound<'_, PyAny>) -> Result<(usize, Option<usize>), String> {
     if df.hasattr("shape").unwrap_or(false) {
         let shape = df
             .getattr("shape")
@@ -410,13 +444,20 @@ pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String
         let shape_tuple: (usize, usize) = shape
             .extract()
             .map_err(|e| format!("Failed to extract DataFrame shape: {}", e))?;
-        Ok(shape_tuple.0)
+        Ok((shape_tuple.0, Some(shape_tuple.1)))
     } else {
-        df.call_method0("__len__")
+        let rows: usize = df
+            .call_method0("__len__")
             .map_err(|e| format!("Failed to get DataFrame length: {}", e))?
             .extract()
-            .map_err(|e| format!("Failed to extract DataFrame length: {}", e))
+            .map_err(|e| format!("Failed to extract DataFrame length: {}", e))?;
+        Ok((rows, None))
     }
+}
+
+/// A DataFrame's row count. See [`dataframe_shape`].
+pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String> {
+    Ok(dataframe_shape(df)?.0)
 }
 
 /// Write DataFrame data and apply all features to a worksheet.
@@ -693,9 +734,16 @@ fn apply_worksheet_features(
         return Ok(col_count);
     }
 
-    // Add Excel Table if requested (requires header + at least one data row)
+    // Add Excel Table if requested (requires header, at least one data row and
+    // at least one column).
+    //
+    // The column gate is not symmetry for its own sake: a frame with rows and no
+    // columns (`pd.DataFrame(index=range(3))`) used to produce a one-column
+    // table over `A1:A4` whose single column carried the crate-generated header
+    // `Column1` — a column the caller never asked for, written into a sheet that
+    // otherwise holds nothing. `claimed_table_name` mirrors this condition.
     if let Some(style_name) = config.table_style {
-        if row_count > 0 && config.include_header {
+        if row_count > 0 && col_count > 0 && config.include_header {
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
@@ -777,9 +825,12 @@ fn apply_worksheet_features(
     // Apply custom row heights
     if let Some(heights) = config.row_heights {
         for (&row_idx_h, &height) in heights.iter() {
-            worksheet
-                .set_row_height(row_idx_h, height)
-                .map_err(|e| format!("Failed to set row height: {}", e))?;
+            worksheet.set_row_height(row_idx_h, height).map_err(|e| {
+                format!(
+                    "row_heights['{}']: failed to set row height: {}",
+                    row_idx_h, e
+                )
+            })?;
         }
     }
 
@@ -863,57 +914,66 @@ fn apply_worksheet_features(
     Ok(total_col_count)
 }
 
+/// Apply the workbook-level options and write the archive.
+///
+/// Everything that happens once per *workbook* rather than once per sheet lives
+/// here, because it used to live in two places: `convert_dataframe_to_xlsx`
+/// held one copy and `dfs_to_xlsx` in `lib.rs` held the other, and a rule
+/// written twice gets changed once. That is on record rather than hypothetical
+/// — the first draft of the GIL release below wrapped only the `convert.rs`
+/// copy, and the whole suite stayed green at 739 tests because the multi-sheet
+/// path had its own unwrapped save.
+///
+/// It also fixes the classification in one place: `apply_defined_names` is a
+/// [`ConvertError::Config`] failure (the caller's `defined_names`) and the save
+/// is a [`ConvertError::File`] one.
+pub(crate) fn finish_workbook(
+    py: Python<'_>,
+    workbook: &mut Workbook,
+    defined_names: Option<&HashMap<String, String>>,
+    output_path: &str,
+) -> Result<(), ConvertError> {
+    apply_defined_names(workbook, defined_names).map_err(ConvertError::Config)?;
+
+    // Serialising and compressing the archive touches no Python object, so the
+    // GIL is dead weight for what measured as ~58% of a `df_to_xlsx` call.
+    // Holding it made threaded `df_to_xlsx` scale 1.06x across 8 threads while
+    // `csv_to_xlsx` -- whose whole conversion already runs inside a `detach` --
+    // scaled 5.8x on the same interpreter. Releasing it here takes the same
+    // benchmark to 2.36x; the remainder is the extraction half, which reads
+    // Python objects and cannot be detached. Every sheet's data has been read
+    // into owned Rust types by this point, so the archive write borrows nothing
+    // from the interpreter. `tests/test_concurrency.py` pins both the speedup
+    // (per entry point) and the correctness of concurrent saves.
+    py.detach(|| save_workbook(workbook, output_path))
+        .map_err(ConvertError::File)?;
+
+    Ok(())
+}
+
 /// Convert a DataFrame (pandas or polars) to XLSX format
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_dataframe_to_xlsx(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
     output_path: &str,
     sheet_name: &str,
-    include_header: bool,
-    autofit: bool,
-    table_style: Option<&str>,
-    freeze_panes: bool,
-    table_name: Option<&str>,
-    row_heights: Option<&HashMap<u32, f64>>,
-    constant_memory: bool,
+    config: &WriteConfig<'_>,
     opts: &ExtractedOptions,
     defined_names: Option<&HashMap<String, String>>,
 ) -> Result<(u32, u16), ConvertError> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
-
-    let config = WriteConfig {
-        include_header,
-        autofit,
-        table_style,
-        freeze_panes,
-        table_name,
-        row_heights,
-        constant_memory,
-    };
 
     let result = write_configured_sheet(
         py,
         &mut workbook,
         df,
         sheet_name,
-        &config,
+        config,
         opts.as_effective(),
     )
     .map_err(ConvertError::Config)?;
 
-    apply_defined_names(&mut workbook, defined_names).map_err(ConvertError::Config)?;
-
-    // Serialising and compressing the archive touches no Python object, so the
-    // GIL is dead weight for what measured as ~58% of this call. Holding it made
-    // threaded `df_to_xlsx` scale 1.06x across 8 threads while `csv_to_xlsx` --
-    // whose whole conversion already runs inside a `detach` -- scaled 5.8x on the
-    // same interpreter. Releasing it here takes the same benchmark to 2.36x; the
-    // remainder is the extraction half above, which reads Python objects and
-    // cannot be detached. `tests/test_concurrency.py` pins both the speedup and
-    // the correctness of concurrent saves.
-    py.detach(|| save_workbook(&mut workbook, output_path))
-        .map_err(ConvertError::File)?;
+    finish_workbook(py, &mut workbook, defined_names, output_path)?;
 
     Ok(result)
 }

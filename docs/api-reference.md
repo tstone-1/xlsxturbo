@@ -23,7 +23,8 @@ Writes one pandas or polars DataFrame to one worksheet.
 - **`df`** — any object exposing a pandas- or polars-compatible interface. The type is
   detected at runtime; neither library is a dependency of xlsxturbo.
 - **`output_path`** — `str` or `os.PathLike`.
-- **returns** `None`.
+- **returns** `tuple[int, int]` — the number of rows and columns written, the header
+  row included when `header=True`.
 
 Everything else is a keyword argument. See [DataFrame export](dataframe-export.md).
 
@@ -33,9 +34,11 @@ Writes several DataFrames into one workbook, one sheet each.
 
 - **`sheets`** — a list of `(df, sheet_name)` or `(df, sheet_name, options)` tuples. The
   two-tuple form uses the top-level options; the three-tuple form overrides them for that
-  sheet only.
+  sheet only. A `list` of the same shape is accepted wherever a tuple is shown; the tuple is
+  the recommended form and the one the type stubs describe.
 - **`output_path`** — `str` or `os.PathLike`.
-- **returns** `None`.
+- **returns** `list[tuple[int, int]]` — one `(rows, cols)` pair per sheet, in the order
+  the sheets were given.
 
 Top-level keyword arguments become the default for every sheet. Not every option is
 overridable per sheet; the capability matrix has the exact set. See
@@ -67,15 +70,25 @@ no `TYPE_CHECKING` guard is needed:
 from xlsxturbo.types import ChartOptions, HeaderFormat
 
 header: HeaderFormat = {"bold": True, "bg_color": "#DDDDDD"}
-chart: ChartOptions = {"type": "column", "categories": "A2:A10", "values": "B2:B10"}
+chart: ChartOptions = {
+    "type": "column",
+    "categories": "Sheet1!$A$2:$A$10",
+    "values": "Sheet1!$B$2:$B$10",
+}
 
 xlsxturbo.df_to_xlsx(df, "out.xlsx", header_format=header, charts={"D2": chart})
 ```
 
+Chart and sparkline ranges must name their sheet: an unqualified `"B2:B10"` is refused
+rather than quietly plotting the wrong thing (a values range without a `!` produces a
+misleading error from the writer, and a categories range without one is ignored
+altogether). See [Charts and media](charts-and-media.md).
+
 The module imports nothing beyond the standard library, so importing it costs nothing and
 works before the extension is built. `SheetOptions` is the shape of a `dfs_to_xlsx`
-per-sheet dict, and `PathArg` is what the path parameters accept. `__all__` lists exactly
-these 20 names, so `import *` brings in the shapes and nothing else.
+per-sheet dict, and `PathArg` is what the path parameters accept. `__all__` names the option
+shapes and aliases and nothing else, so `import *` brings those in without the typing
+helpers they are built from.
 
 **Fields the library requires are marked required.** `ImageOptions` needs `path`,
 `ChartOptions` needs `type`, `SparklineOptions` needs `range`, and so on — so a checker
@@ -91,18 +104,23 @@ evaluated, so resolving the hints raised. Dropping 3.9 removed the split.
 
 ## Exceptions
 
-Six classes, all exported from `xlsxturbo`:
+Seven classes, all exported from `xlsxturbo`:
 
 ```
-XlsxTurboError                  # base -- catches everything the library raises
-├── ConfigurationError          # also ValueError
-│   └── WorkbookValidationError
-├── ConfigurationTypeError      # also TypeError
-├── InputDataError              # also ValueError
-└── FileError                   # also OSError and ValueError
+XlsxTurboError                      # base -- catches everything the library raises
+├── OptionError                     # never raised itself; catches both of its children
+│   ├── ConfigurationError          # also ValueError
+│   │   └── WorkbookValidationError
+│   └── ConfigurationTypeError      # also TypeError
+├── InputDataError                  # also ValueError
+└── FileError                       # also OSError and ValueError
 ```
 
-Each one keeps the builtin exception its failures raised before 0.19.0, so
+`OptionError` exists so that `except OptionError` catches every problem with what you
+passed -- a bad value and a wrong type -- and nothing else. It has no builtin base of its
+own, which is what keeps the value/type split meaningful to an `except` clause.
+
+Each of the others keeps the builtin exception its failures raised before 0.19.0, so
 `except ValueError` and `except TypeError` behave as they always did. See
 [Errors and warnings](errors.md) for which failures land where, and for the two places the
 classification is deliberately coarser than the class names suggest.

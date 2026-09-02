@@ -2,6 +2,7 @@
 
 mod cell_refs;
 mod colors;
+mod context;
 mod formats;
 mod patterns;
 mod tables;
@@ -9,6 +10,7 @@ mod values;
 
 pub(crate) use cell_refs::{looks_like_cell_reference, parse_cell_range, parse_cell_ref};
 pub(crate) use colors::{parse_color, parse_color_enum};
+pub(crate) use context::WithOptionContext;
 pub(crate) use formats::{
     build_column_formats, parse_column_format, parse_header_format, parse_horizontal_alignment,
     parse_icon_type, parse_rich_text_format, parse_vertical_alignment,
@@ -42,6 +44,129 @@ mod tests {
         assert!(matches!(
             parse_value("-456", DateOrder::Auto),
             CellValue::Integer(-456)
+        ));
+    }
+
+    #[test]
+    fn integers_beyond_i64_parse_to_text_not_to_a_rounded_float() {
+        // The f64 branch parses any run of digits, so before this screen a CSV
+        // cell of 20 digits was written as a rounded number -- against the
+        // documented "above 2^53 becomes text" guarantee that the DataFrame
+        // path keeps. Each case here is a value f64 cannot hold exactly.
+        for text in [
+            "9223372036854775808",      // i64::MAX + 1
+            "18446744073709551615",     // u64::MAX
+            "18446744073709551616",     // u64::MAX + 1, beyond every Rust int
+            "-9223372036854775809",     // i64::MIN - 1
+            "-99999999999999999999999", // far below i64::MIN
+            "123456789012345678901234567890",
+        ] {
+            let parsed = parse_value(text, DateOrder::Auto);
+            assert!(
+                matches!(&parsed, CellValue::String(s) if s == text),
+                "expected the text {:?} back, got {:?}",
+                text,
+                parsed
+            );
+        }
+
+        // A leading `+` is dropped while the value still fits a Rust integer,
+        // matching what the i64 arm does with "+42"; past u64 the digits are
+        // written through as given because nothing can re-parse them.
+        assert!(
+            matches!(parse_value("+18446744073709551615", DateOrder::Auto),
+                     CellValue::String(ref s) if s == "18446744073709551615")
+        );
+
+        // A digit string long enough that f64 parses it as infinity used to
+        // become an empty cell, which loses the value outright.
+        let huge = "1".repeat(400);
+        assert!(
+            matches!(parse_value(&huge, DateOrder::Auto), CellValue::String(ref s) if *s == huge)
+        );
+    }
+
+    #[test]
+    fn the_integer_text_screen_does_not_swallow_floats_or_i64_values() {
+        // Controls for the screen above: everything an f64 should still own,
+        // and the i64 range it must not reach at all.
+        assert!(matches!(
+            parse_value("9007199254740992", DateOrder::Auto), // 2^53, fits i64
+            CellValue::Integer(9_007_199_254_740_992)
+        ));
+        assert!(matches!(
+            parse_value("007", DateOrder::Auto),
+            CellValue::Integer(7)
+        ));
+        // Numbers the float branch owns must still reach it as numbers.
+        for text in ["1e3", "1.0", "-2.5", ".5", "1e400"] {
+            let parsed = parse_value(text, DateOrder::Auto);
+            assert!(
+                matches!(parsed, CellValue::Float(_) | CellValue::Empty),
+                "{:?} must stay on the float branch, got {:?}",
+                text,
+                parsed
+            );
+        }
+
+        // Text that only looks numeric keeps falling through to the string
+        // default, untrimmed, as it did before.
+        for text in ["1_000", "٣٤", "12a", "+", "-", ""] {
+            let parsed = parse_value(text, DateOrder::Auto);
+            let expected = if text.is_empty() {
+                CellValue::Empty
+            } else {
+                CellValue::String(text.to_string())
+            };
+            assert_eq!(
+                format!("{:?}", parsed),
+                format!("{:?}", expected),
+                "unexpected parse of {:?}",
+                text
+            );
+        }
+    }
+
+    #[test]
+    fn the_length_gate_on_the_integer_screens_falls_exactly_on_19_bytes() {
+        // The two overflow screens sit behind `trimmed.len() >= 19` so that
+        // ordinary cells skip them. 19 is the shortest an integer literal that
+        // fails `i64` can be (`i64::MAX` + 1 is 9223372036854775808), so the
+        // gate must let 19 bytes through and may stop at 18. These cases pin
+        // both sides of it; widening the gate to 20 loses the first, and
+        // narrowing it to 18 would only cost time, not behaviour.
+        //
+        // 19 bytes and not an integer: the float branch still owns it.
+        let float_19 = "1234567890.12345678";
+        assert_eq!(float_19.len(), 19);
+        assert!(
+            matches!(parse_value(float_19, DateOrder::Auto), CellValue::Float(_)),
+            "19-byte float changed branch: {:?}",
+            parse_value(float_19, DateOrder::Auto)
+        );
+
+        // 19 bytes and an integer above i64::MAX: text, via the screens.
+        let int_19 = "9999999999999999999";
+        assert_eq!(int_19.len(), 19);
+        assert!(
+            matches!(parse_value(int_19, DateOrder::Auto), CellValue::String(ref s) if s == int_19),
+            "19-digit integer above i64::MAX must stay text, got {:?}",
+            parse_value(int_19, DateOrder::Auto)
+        );
+
+        // 18 bytes: below the gate, and unchanged either way -- a float stays
+        // a float, and every 18-digit integer fits i64.
+        let float_18 = "123456789.12345678";
+        assert_eq!(float_18.len(), 18);
+        assert!(matches!(
+            parse_value(float_18, DateOrder::Auto),
+            CellValue::Float(_)
+        ));
+        let int_18 = "999999999999999999";
+        assert_eq!(int_18.len(), 18);
+        assert!(matches!(
+            parse_value(int_18, DateOrder::Auto),
+            CellValue::Integer(999_999_999_999_999_999)
         ));
     }
 

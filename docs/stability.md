@@ -46,7 +46,7 @@ Breaking — 2.0.0 only, and never without a deprecation period:
 Not breaking — these can land in a minor or a patch:
 
 - A new keyword argument, option key, or exception subclass. Everything in this library is
-  additive by design; the [7-touchpoint checklist](https://github.com/tstone-1/xlsxturbo/blob/main/AGENTS.md)
+  additive by design; the [feature-wiring checklist](https://github.com/tstone-1/xlsxturbo/blob/main/AGENTS.md)
   exists so that stays true.
 - Accepting an input that previously raised.
 - A new `RuntimeWarning` — for example, a further option that `constant_memory=True` cannot

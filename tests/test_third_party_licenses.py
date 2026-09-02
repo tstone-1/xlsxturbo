@@ -35,6 +35,10 @@ NOTICE = REPO_ROOT / "THIRD-PARTY-LICENSES.md"
 #: A crate entry in the rendered "Applies to" lists: ``- [name 1.2.3](url)``.
 ENTRY = re.compile(r"^- \[([A-Za-z0-9_.\-]+) [^\]]+\]\(", re.MULTILINE)
 
+#: The same entry with the version captured too. Kept separate from ``ENTRY``
+#: so the two name-only checks keep their exact behaviour.
+VERSIONED_ENTRY = re.compile(r"^- \[([A-Za-z0-9_.\-]+) ([^\]\s]+)\]\(", re.MULTILINE)
+
 #: Our own crate. Its terms are in LICENSE; the notice is about third parties.
 SELF_CRATE = "xlsxturbo"
 
@@ -46,8 +50,8 @@ SELF_CRATE = "xlsxturbo"
 NEVER_COMPILED = "cfg(any())"
 
 
-def _shipped_crates() -> set[str]:
-    """Names of every crate compiled into what we distribute.
+def _shipped_packages() -> dict[str, set[str]]:
+    """Name to versions for every crate compiled into what we distribute.
 
     Walks ``cargo metadata``'s resolved graph from the root package, following
     normal and build dependencies and refusing dev-dependency edges -- proptest
@@ -56,7 +60,10 @@ def _shipped_crates() -> set[str]:
     with (it adds ``pyo3/extension-module`` on top).
 
     Returns:
-        The crate names, excluding xlsxturbo itself.
+        The crate names, excluding xlsxturbo itself, each with the set of
+        versions the lock resolves it at. Usually one; ``syn`` is currently two,
+        because two dependents pin incompatible majors, and the notice lists it
+        twice for the same reason.
     """
     raw = subprocess.run(
         ["cargo", "metadata", "--format-version", "1"],  # noqa: S607 - cargo is on PATH by design here
@@ -88,9 +95,22 @@ def _shipped_crates() -> set[str]:
                 seen.add(dep["pkg"])
                 queue.append(dep["pkg"])
 
-    shipped = {names[pkg_id] for pkg_id in seen} - {SELF_CRATE}
+    versions = {pkg["id"]: pkg["version"] for pkg in meta["packages"]}
+    shipped: dict[str, set[str]] = {}
+    for pkg_id in seen:
+        if names[pkg_id] != SELF_CRATE:
+            shipped.setdefault(names[pkg_id], set()).add(versions[pkg_id])
     assert len(shipped) > 20, f"the dependency walk found only {len(shipped)} crates; it is not working"
     return shipped
+
+
+def _shipped_crates() -> set[str]:
+    """Names of every crate compiled into what we distribute.
+
+    Returns:
+        The crate names, excluding xlsxturbo itself.
+    """
+    return set(_shipped_packages())
 
 
 def _noticed_crates() -> set[str]:
@@ -102,6 +122,21 @@ def _noticed_crates() -> set[str]:
     listed = set(ENTRY.findall(NOTICE.read_text(encoding="utf-8")))
     assert listed, "no crate entries parsed out of the notice; the pattern or the template changed"
     return listed
+
+
+def _noticed_versions() -> dict[str, set[str]]:
+    """Every version the committed notice lists for each crate name.
+
+    Returns:
+        Name to the set of versions written beside it. A crate under two licenses
+        appears twice with the same version; two *different* versions would mean
+        the graph resolved it twice.
+    """
+    versions: dict[str, set[str]] = {}
+    for name, version in VERSIONED_ENTRY.findall(NOTICE.read_text(encoding="utf-8")):
+        versions.setdefault(name, set()).add(version)
+    assert versions, "no versioned entries parsed out of the notice; the pattern or the template changed"
+    return versions
 
 
 class TestNoticeCoversWhatWeShip:
@@ -137,6 +172,35 @@ class TestNoticeCoversWhatWeShip:
         assert not extra, (
             f"the notice lists crates that are not in the dependency graph: {sorted(extra)} -- "
             "run `python scripts/gen_third_party_licenses.py --write`"
+        )
+
+    @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo not installed")
+    def test_the_notice_names_the_versions_we_ship(self) -> None:
+        """A ``cargo update`` that moves a version without regenerating fails here.
+
+        The two name checks above cannot see this: a bump keeps every name. The
+        1.3.0 release commit refreshed ``Cargo.lock`` and shipped a notice still
+        naming ``cc 1.4.3``, ``log 0.4.33``, ``either 1.17.0``, ``crc32fast
+        1.5.0`` and -- in the release whose whole point was that bump --
+        ``rust_xlsxwriter 0.98.2`` for a wheel compiled against 0.99.0. Found by
+        the generator's own ``--check``, which runs in no CI job, ten days later.
+        The notice text was right; the version beside it was not, and a notice
+        that is wrong in a way nobody reads is still wrong.
+
+        Compared as sets, because a crate the lock resolves at two versions is
+        listed twice, and the first draft of this test kept one of the two and
+        went red on a correct notice.
+        """
+        shipped = _shipped_packages()
+        noticed = _noticed_versions()
+        stale = {
+            name: (sorted(noticed[name]), sorted(shipped[name]))
+            for name in shipped
+            if name in noticed and noticed[name] != shipped[name]
+        }
+        assert not stale, (
+            f"the notice names a different version than Cargo.lock resolves (notice, lock): {stale} -- "
+            "run `python scripts/gen_third_party_licenses.py --write` after `cargo update`"
         )
 
     def test_it_does_not_claim_to_cover_xlsxturbo_itself(self) -> None:

@@ -12,7 +12,13 @@
 
 - Only commit and push when explicitly asked by the user.
 - Do not include Claude-related or AI-generated footers in commit messages.
-- Before commit or push, run `cargo update` to check for Rust dependency updates.
+- Before commit or push, run `cargo update` to check for Rust dependency updates — **and
+  regenerate `THIRD-PARTY-LICENSES.md` afterwards** (`python scripts/gen_third_party_licenses.py --write`).
+  The notice lists a version beside every crate, so a lock refresh makes it stale; the 1.3.0
+  release commit refreshed the lock and shipped a notice naming the previous version of five
+  crates — `rust_xlsxwriter 0.98.2` in the release that moved it to 0.99.0 — and the guard
+  compared names only until 2026-09-02. It compares versions now, so
+  forgetting this fails `tests/test_third_party_licenses.py` rather than shipping.
 - Follow `BUILD.md` before release or push-ready work.
 
 ## Account Enforcement
@@ -47,7 +53,8 @@
   That guard exists because the same bug landed three times in two days: `tests/test_docs_site.py` imported `yaml` (declared in `dev`, broke three CI jobs); fixing those three left a **fourth** copy of the list in `release.yml`'s smoke-test job, which failed the v0.19.0 release after every wheel had already built; and the guard's first run found `numpy` imported by `tests/test_core.py` and never declared anywhere — working only because pandas pulls it in. A comment saying "remember the other copies" was the fix after the first, and it did not survive a day.
 
 - **The release smoke test runs `pytest tests/` against an installed wheel from outside the checkout, with only `tests/` copied.** So a test module that reads *repository* files — `mkdocs.yml`, the capability matrix, the generator script, the workflows — has nothing to read there and must skip via `tests.helpers.repo_checkout_available()`, not fail. This is invisible in ordinary CI and surfaces only when a tag is pushed: `test_docs_site.py` and `test_capability_matrix.py` were both added after v0.18.0, so v0.19.0 was the first release to run them and all 16 failed. Inside a checkout a missing file stays a hard failure — the guard distinguishes "no repository here" from "the repository is broken". Reproduce the job locally before tagging: `cp -r tests "$TMP/smoke" && cd "$TMP/smoke" && python -m pytest tests/ -q`.
-- Standard local checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `maturin develop --release`, then `pytest tests/`.
+- Standard local checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release`, `maturin develop --release`, then `pytest tests/`, then `mkdocs build --strict` when anything under `docs/` moved (needs `uv pip install -r requirements-docs.txt` into the venv once; the `dev` extras deliberately do not carry it). `BUILD.md`'s Pre-Push Checklist is the CI-verbatim list; this line is the short form.
+- **`tests/test_build_is_current.py` fails when the built extension is older than any tracked Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`.** A stale `.so` does not error, it measures the wrong code with full confidence: on 2026-09-02 a whole review ran against 1.3.0 code believing it was HEAD, and a later gate run blamed a timing test for what was the build. CI builds immediately before pytest, so the test only ever fires locally, where `maturin develop --release` is the answer. A `git checkout` that touches a `.rs` file trips it on purpose.
 - Plain `cargo test` must work outside maturin. Keep `pyo3/extension-module` enabled through `pyproject.toml` / maturin, not directly in `Cargo.toml`.
 - Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
@@ -57,7 +64,10 @@
 - To confirm a release on PyPI, query the version-specific endpoint `https://pypi.org/pypi/xlsxturbo/<version>/json` (authoritative within seconds). The aggregate `https://pypi.org/pypi/xlsxturbo/json` `info.version` field lags several minutes behind (CDN cache) and can still show the previous version; trust the publish job's green status over it.
 - For multi-phase implementation work, run a deep diff review after each completed, verified phase before building the next phase on top of it.
 
-## Adding a Feature - the 7-Touchpoint Checklist
+## Adding a Feature - the Touchpoint Checklist
+
+(Named without a count on purpose: it was "7-Touchpoint" for two releases after the eighth
+item arrived, and two documents and a source comment carried the wrong number with it.)
 
 1. `src/types.rs` - add the field to the `define_options!` macro list (generates ExtractedOptions/EffectiveOpts/as_effective/merge_with) AND the matching field on the hand-written `SheetConfig` struct. A missing SheetConfig field is a compile error in the generated merge_with. A cell_ref/location-keyed feature map (images, charts, comments, ...) must be `IndexMap`, not `HashMap` — iteration order feeds straight into the generated XML, so a `HashMap` makes output non-reproducible across runs.
 2. `src/extract.rs` - add `extract_<feature>()`; register it in `extract_sheet_info` via the `extract_dict_field!`/`extract_list_field!` macro and add the option name to `SHEET_OPTION_NAMES` (guard test enforces this). Two extraction patterns coexist by design: simple structures (column_widths, formula_columns, merged_range tuples) are eagerly typed into real Rust types here, at extract time; features whose parsing needs a `py`/rust_xlsxwriter type (a `Format`, a `Color`, a chart/sparkline builder) instead extract only a raw `HashMap<String, Py<PyAny>>` "blob" here and defer real validation to the matching `apply/*` function, since that parsing can't happen without the GIL-bound types apply time has. Don't "fix" a blob extractor by eagerly typing it — that's the wrong layer for that feature.
@@ -259,7 +269,9 @@ are in the #189 thread.
 it by hand; `tests/test_third_party_licenses.py` compares it against `cargo metadata` in
 both directions and will say so.
 
-Why it exists at all: the wheel is a binary containing compiled code from 92 crates, and
+Why it exists at all: the wheel is a binary containing compiled code from every crate in
+the dependency tree (the notice itself is the count; a hand-written number here disagreed
+with three others within two releases), and
 MIT, Apache-2.0, Zlib and Unicode-3.0 all require the copyright notice to be distributed
 with a binary. `LICENSE` covers xlsxturbo's own code and nothing else. **maturin's
 CycloneDX SBOM is not a substitute** — it records which license applies to each crate,
@@ -425,7 +437,7 @@ in `release.yml`, and `xlsxturbo.__all__` — in both directions. Consequences:
 
 - **A new exported name fails the suite until the page names it.** That is deliberate: the
   page is the list of things that cannot be removed before 2.0.0, so adding to it should be a
-  decision rather than a side effect. New *options* need nothing here; the 7-touchpoint
+  decision rather than a side effect. New *options* need nothing here; the touchpoint
   checklist already covers those.
 - **Adding a Python version to the CI matrix fails until the classifier and the page agree.**
   A version tested and nowhere else declared reads as a widened promise when it is only a

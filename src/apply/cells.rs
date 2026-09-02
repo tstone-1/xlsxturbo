@@ -26,6 +26,12 @@ pub(crate) fn apply_cells(
             if let Some(nf) = &cell.num_format {
                 f = f.set_num_format(nf);
             }
+            // These two cannot fail here: `extract_cells` parses both
+            // alignment strings at extract time and refuses the call, so a bad
+            // value never reaches this loop. Adding the option context would
+            // therefore be a per-cell allocation for a message nobody can
+            // read; the site that produces the user-visible message is
+            // `extract::extract_cells`, and that is where the context belongs.
             if let Some(ah) = &cell.align_horizontal {
                 f = f.set_align(parse_horizontal_alignment(ah)?);
             }

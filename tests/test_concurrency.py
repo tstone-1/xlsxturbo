@@ -225,40 +225,76 @@ class TestSaveReleasesTheGil:
     whole suite green while `df_to_xlsx` was still covered -- measured, which is how
     the second case got written.
 
-    To prove either can fail, delete the matching `py.detach` wrapper around
-    `save_workbook` in `src/convert.rs` or `src/lib.rs`, rebuild, and run this
-    class: the affected case reports about 0.95x and goes red.
+    The two legs are **interleaved** -- serial, parallel, serial, parallel,
+    serial, parallel -- rather than run as two blocks, and best-of is taken per
+    leg. Best-of protects a leg against a hiccup *inside* it; it cannot protect
+    against machine load that covers the whole serial block and lifts before the
+    parallel one, which inflates `serial` and produces a pass with the feature
+    absent -- the one outcome this test exists to refuse. That is not
+    hypothetical: during a review the `df_to_xlsx` leg passed against a build
+    with neither `py.detach`, while a `cargo test` ran in the background; in
+    isolation the same leg failed 10 of 10 runs. Interleaving makes any such
+    load fall on both legs.
+
+    A passing run records its ratio with `record_property`, so the number
+    reaches the junit output instead of vanishing -- an assertion that prints
+    nothing when it passes leaves nothing to compare a later run against.
+    Measured: `--junitxml` yields `<property name="ratio" value="0.386..."/>`
+    per case. pytest warns that `record_property` is "incompatible with
+    junit_family 'xunit2'" and writes the property anyway; setting
+    `junit_family = "legacy"` would silence it, and is not worth a change to
+    `pyproject.toml` while nothing consumes the file.
+
+    To prove either case can fail, delete the matching `py.detach` wrapper
+    around `save_workbook` in `src/convert.rs` or `src/lib.rs`, rebuild, and run
+    this class: the affected case reports about 0.95x and goes red.
     """
 
     @staticmethod
-    def _best_of_three(n_threads: int, per_thread: int, export: Callable[[str], None]) -> float:
-        """Return the fastest of three runs of `n_threads` x `per_thread` exports.
+    def _interleaved_best_of_three(
+        total: int, export: Callable[[str], None]
+    ) -> tuple[float, float]:
+        """Time the serial and parallel legs alternately, best of three each.
 
         Args:
-            n_threads: Threads to spread the work over.
-            per_thread: Exports each thread performs.
+            total: Exports per timed run, spread over that run's threads.
             export: Called with a unique output path; performs one export.
 
         Returns:
-            The shortest wall time of the three runs, in seconds.
+            `(serial, parallel)`, the shortest wall time of each leg's three
+            runs, in seconds.
         """
-        best = float("inf")
+        best = {"s": float("inf"), "p": float("inf")}
+        legs = (("s", 1, total), ("p", 4, total // 4))
         for run in range(3):
+            for leg, n_threads, per_thread in legs:
 
-            def body(index: int, run: int = run) -> None:
-                for k in range(per_thread):
-                    export(f"r{run}-{index}-{k}.xlsx")
+                def body(
+                    index: int, leg: str = leg, run: int = run, per_thread: int = per_thread
+                ) -> None:
+                    for k in range(per_thread):
+                        export(f"{leg}{run}-{index}-{k}.xlsx")
 
-            elapsed, failures = _run_threads(n_threads, body)
-            assert not failures, failures
-            best = min(best, elapsed)
-        return best
+                elapsed, failures = _run_threads(n_threads, body)
+                assert not failures, failures
+                best[leg] = min(best[leg], elapsed)
+        return best["s"], best["p"]
 
     @pytest.mark.parametrize("entry_point", ["df_to_xlsx", "dfs_to_xlsx"])
     def test_four_threads_beat_one_by_a_wide_margin(
-        self, tmp_path: Path, entry_point: str
+        self,
+        tmp_path: Path,
+        entry_point: str,
+        record_property: Callable[[str, object], None],
     ) -> None:
-        """Four threads must finish a batch in under 80% of one thread's time."""
+        """Four threads must finish a batch in under 80% of one thread's time.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+            entry_point: The exported function under test.
+            record_property: pytest's junit-property recorder, used so a passing
+                run leaves its measured ratio behind.
+        """
         frame = _frame()
 
         if entry_point == "df_to_xlsx":
@@ -276,8 +312,8 @@ class TestSaveReleasesTheGil:
         # otherwise land entirely on whichever leg happens to run first.
         export("warmup.xlsx")
 
-        serial = self._best_of_three(1, total, export)
-        parallel = self._best_of_three(4, total // 4, export)
+        serial, parallel = self._interleaved_best_of_three(total, export)
+        record_property("ratio", parallel / serial)
 
         assert parallel < serial * 0.80, (
             f"{entry_point}: four threads took {parallel:.3f}s against {serial:.3f}s on "

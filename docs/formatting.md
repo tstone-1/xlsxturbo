@@ -33,11 +33,12 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - bg_color (str): Background color
 # - font_size (float): Font size in points
 # - underline (bool): Underlined text
-# - border (bool|str): True = thin all sides, or style name
-# - border_left/right/top/bottom (str): Per-side border style
+# - border (bool|str): True = thin all sides, or a style name
+# - border_left/right/top/bottom (bool|str): Per-side border, same values
 # - border_color (str): Color for all borders
-# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify'
-# - align_vertical (str): 'top', 'center', 'bottom'
+# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify',
+#     'center_across', 'distributed'
+# - align_vertical (str): 'top', 'center', 'bottom', 'justify', 'distributed'
 # - wrap_text (bool): Enable text wrapping within cell
 ```
 
@@ -82,18 +83,21 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
 # - bold (bool): Bold text
 # - italic (bool): Italic text
 # - underline (bool): Underlined text
-# - border (bool|str): True = thin all sides, or style name all sides
-# - border_left (str): Border style for left side only
-# - border_right (str): Border style for right side only
-# - border_top (str): Border style for top side only
-# - border_bottom (str): Border style for bottom side only
+# - border (bool|str): True = thin all sides, or a style name for all sides
+# - border_left (bool|str): True = thin, or a style name, left side only
+# - border_right (bool|str): True = thin, or a style name, right side only
+# - border_top (bool|str): True = thin, or a style name, top side only
+# - border_bottom (bool|str): True = thin, or a style name, bottom side only
 # - border_color (str): Color for all borders ('#RRGGBB' or named)
 #
+# Every border key takes either a bool or a style name. True means thin;
+# False means no border, which is the same as omitting the key.
 # Border styles: thin, medium, thick, dashed, dotted, double, hair,
 #   medium_dashed, dash_dot, medium_dash_dot, dash_dot_dot,
 #   medium_dash_dot_dot, slant_dash_dot
-# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify'
-# - align_vertical (str): 'top', 'center', 'bottom'
+# - align_horizontal (str): 'left', 'center', 'right', 'fill', 'justify',
+#     'center_across', 'distributed'
+# - align_vertical (str): 'top', 'center', 'bottom', 'justify', 'distributed'
 # - wrap_text (bool): Enable text wrapping within cell
 
 # First matching pattern wins (order preserved)
@@ -140,6 +144,18 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx",
     row_heights={0: 22}
 )
 ```
+
+### Excel's own limits
+
+Excel caps a column at 255 characters and a row at 409.5 points. A larger value
+is accepted rather than rejected, and nothing is lost by asking for one: widths
+above the cap are already clamped as the file is written (255, 300 and
+1,000,000 all produce the same stored width), and Excel clamps an over-limit
+row height when it loads the workbook. Measured on Excel for Mac 16: a workbook
+written with `row_heights={0: 500}` or `{0: 1e6}` opens with no repair prompt
+and shows a height of 409.5, and one written with `column_widths={0: 1e6}`
+shows the same width as `{0: 255}`. So the values below the cap are the ones
+worth writing, but an over-limit one costs only its own precision.
 
 ## Global Column Width Cap
 
@@ -200,7 +216,11 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 **Merged range format:**
 - Tuple of `(range, text)` or `(range, text, format_dict)`
 - Range uses Excel notation: `'A1:D1'`, `'B3:B10'`, etc.
-- Format options same as `header_format`: bold, italic, font_color, bg_color, font_size, underline
+- Format options are the same set `header_format` takes -- the font keys (bold, italic,
+  underline, font_color, bg_color, font_size) **and** the cell keys (border and the four
+  per-side border keys, border_color, align_horizontal, align_vertical, wrap_text). Only
+  `num_format` is out of scope; that one is accepted by `column_formats` and the nested
+  `format` keys.
 
 **Notes:**
 - Merged cells are applied after data is written, so plan row positions accordingly

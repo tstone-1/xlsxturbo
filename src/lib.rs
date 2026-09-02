@@ -23,20 +23,20 @@ mod write;
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertError};
 pub use types::DateOrder;
 
-use convert::{claimed_table_name, convert_dataframe_to_xlsx, write_configured_sheet};
+use convert::{
+    claimed_table_name, convert_dataframe_to_xlsx, finish_workbook, write_configured_sheet,
+};
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
     extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
-    extract_rich_text, extract_sheet_info, extract_sparklines, extract_textboxes,
-    extract_validations,
+    extract_rich_text, extract_row_heights, extract_sheet_info, extract_sparklines,
+    extract_textboxes, extract_validations,
 };
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
-use workbook::{
-    apply_defined_names, reject_table_name_collisions, save_workbook, ClaimedTableName,
-};
+use workbook::{reject_table_name_collisions, ClaimedTableName};
 
 use pyo3::prelude::*;
 use rust_xlsxwriter::Workbook;
@@ -70,6 +70,23 @@ fn require_dict<'py>(
             pytype_name(value)
         ))
     })
+}
+
+/// Extract the `row_heights` kwarg, which both entry points take as a raw
+/// object rather than through `ExtractedOptions`.
+///
+/// It is not part of `RawOptions` because it is not a per-sheet *complex*
+/// option in the `define_options!` sense -- it travels in `WriteConfig`
+/// alongside the scalars. What it does share with the complex options, since
+/// this function exists, is that its keys and values are validated by
+/// xlsxturbo rather than by PyO3's `HashMap<u32, f64>` conversion; see
+/// `extract_row_heights` for what that conversion used to let through.
+fn extract_row_heights_kwarg(
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<HashMap<u32, f64>>> {
+    value
+        .map(|v| require_dict(v, "row_heights").and_then(|d| extract_row_heights(&d)))
+        .transpose()
 }
 
 /// Helper: cast a PyAny to PyList or raise TypeError with a clear message.
@@ -223,7 +240,13 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
 ///     Tuple of (rows, columns) written to the Excel file
 ///
 /// Raises:
-///     ValueError: If the conversion fails
+///     XlsxTurboError: If the conversion fails. The subclass says what kind of
+///         failure it was -- ConfigurationError / ConfigurationTypeError for an
+///         option, InputDataError for the frame, FileError for the filesystem.
+///         Every one of them is also the builtin its failures raised before
+///         0.19.0, so `except ValueError` still works; note
+///         ConfigurationTypeError is a TypeError rather than a ValueError.
+///         Full contract: https://tstone-1.github.io/xlsxturbo/errors/
 ///
 /// Example:
 ///     >>> import xlsxturbo
@@ -291,6 +314,13 @@ fn csv_to_xlsx(
 ///                    listed columns get the explicit width, unlisted columns are autofitted.
 ///                    With autofit=True and an "_all" key: "_all" caps the autofit width for
 ///                    unlisted columns instead of overriding it.
+///     table_name: Custom name for the Excel table (requires table_style; default: auto-generated,
+///                 `Table1`, `Table2`, ... in sheet order).
+///                 Must be alphanumeric/underscore, max 255 chars; anything else is
+///                 rewritten. Effective names must be unique across the workbook after
+///                 that rewrite, and must not collide with a defined_names entry.
+///     header_format: Dict with header cell formatting options (default: None)
+///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///                  Example: {0: 20, 5: 30} sets heights for specific rows
 ///     constant_memory: Use constant memory mode for large files (default: False).
@@ -306,8 +336,6 @@ fn csv_to_xlsx(
 ///     conditional_formats: Dict mapping column names/patterns to conditional format configs (default: None)
 ///                          Supported types: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 ///                          Example: {"score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}}
-///     table_name: Custom name for the Excel table (requires table_style; default: auto-generated).
-///                 Must be alphanumeric/underscore, max 255 chars.
 ///     formula_columns: Dict mapping column names to Excel formula templates (default: None).
 ///                      Use {row} as placeholder for the current row number.
 ///                      Example: {"Total": "=SUM(A{row}:C{row})"}
@@ -319,7 +347,8 @@ fn csv_to_xlsx(
 ///               Example: {"A1": "Note text"} or {"A1": {"text": "Note", "author": "John"}}
 ///     validations: Dict mapping column names/patterns to validation configs (default: None).
 ///                  Types: list, whole_number, decimal, text_length
-///                  (aliases accepted, e.g. integer/number/length — see README).
+///                  (aliases accepted, e.g. integer/number/length — the full table is at
+///                  https://tstone-1.github.io/xlsxturbo/data-validation/).
 ///                  Example: {"status": {"type": "list", "values": ["Open", "Closed"]}}
 ///                  For "whole_number", min/max are bounded to the i32 range
 ///                  (-2147483648..=2147483647); a value outside that range raises
@@ -366,7 +395,13 @@ fn csv_to_xlsx(
 ///     Tuple of (rows, columns) written to the Excel file
 ///
 /// Raises:
-///     ValueError: If the conversion fails
+///     XlsxTurboError: If the conversion fails. The subclass says what kind of
+///         failure it was -- ConfigurationError / ConfigurationTypeError for an
+///         option, InputDataError for the frame, FileError for the filesystem.
+///         Every one of them is also the builtin its failures raised before
+///         0.19.0, so `except ValueError` still works; note
+///         ConfigurationTypeError is a TypeError rather than a ValueError.
+///         Full contract: https://tstone-1.github.io/xlsxturbo/errors/
 ///
 /// Example:
 ///     >>> import xlsxturbo
@@ -423,7 +458,7 @@ fn df_to_xlsx<'py>(
     column_widths: Option<&Bound<'py, PyAny>>,
     table_name: Option<String>,
     header_format: Option<&Bound<'py, PyAny>>,
-    row_heights: Option<HashMap<u32, f64>>,
+    row_heights: Option<&Bound<'py, PyAny>>,
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
     conditional_formats: Option<&Bound<'py, PyAny>>,
@@ -443,6 +478,7 @@ fn df_to_xlsx<'py>(
 ) -> PyResult<(u32, u16)> {
     let output_path = path_arg_to_string(output_path, "output_path")?;
     require_supported_dataframe(df, None)?;
+    let row_heights = extract_row_heights_kwarg(row_heights)?;
     let opts = extract_options(&RawOptions {
         column_widths,
         header_format,
@@ -465,7 +501,9 @@ fn df_to_xlsx<'py>(
     // A table name colliding with a defined name is refused before anything is
     // written, so it reports as a configuration failure rather than arriving
     // from the save as a `FileError`. Skipped entirely without defined names,
-    // since nothing else here needs the row count.
+    // since nothing else here needs the shape. The `1` is this workbook's only
+    // possible table id, so a sheet asking for a style without a name claims
+    // the `Table1` the writer will give it.
     if defined_names.is_some() {
         let mut tables: HashMap<String, ClaimedTableName> = HashMap::new();
         if let Some(name) = claimed_table_name(
@@ -474,6 +512,7 @@ fn df_to_xlsx<'py>(
             header,
             table_style,
             table_name.as_deref(),
+            1,
         )
         .map_err(errors::input_data)?
         {
@@ -482,6 +521,7 @@ fn df_to_xlsx<'py>(
                 ClaimedTableName {
                     name,
                     sheet: sheet_name.to_string(),
+                    auto: table_name.is_none(),
                 },
             );
         }
@@ -489,18 +529,22 @@ fn df_to_xlsx<'py>(
             .map_err(errors::workbook_validation)?;
     }
 
+    let config = WriteConfig {
+        include_header: header,
+        autofit,
+        table_style,
+        freeze_panes,
+        table_name: table_name.as_deref(),
+        row_heights: row_heights.as_ref(),
+        constant_memory,
+    };
+
     convert_dataframe_to_xlsx(
         py,
         df,
         &output_path,
         sheet_name,
-        header,
-        autofit,
-        table_style,
-        freeze_panes,
-        table_name.as_deref(),
-        row_heights.as_ref(),
-        constant_memory,
+        &config,
         &opts,
         defined_names.as_ref(),
     )
@@ -547,8 +591,11 @@ fn version() -> &'static str {
 ///                    key: listed columns get the explicit width, unlisted columns are
 ///                    autofitted. With autofit=True and an "_all" key: "_all" caps the
 ///                    autofit width for unlisted columns instead of overriding it.
-///     table_name: Name for Excel table (requires table_style; default: auto-generated).
-///         Effective names must be unique across the workbook after sanitization.
+///     table_name: Name for Excel table (requires table_style; default: auto-generated,
+///                 `Table1`, `Table2`, ... in sheet order).
+///                 Must be alphanumeric/underscore, max 255 chars; anything else is
+///                 rewritten. Effective names must be unique across the workbook after
+///                 that rewrite, and must not collide with a defined_names entry.
 ///     header_format: Dict with header cell formatting options (default: None)
 ///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
@@ -572,7 +619,8 @@ fn version() -> &'static str {
 ///     comments: Dict mapping cell refs to note text or config dict (default: None).
 ///     validations: Dict mapping column names/patterns to validation configs (default: None).
 ///                  Types: list, whole_number, decimal, text_length
-///                  (aliases accepted, e.g. integer/number/length — see README).
+///                  (aliases accepted, e.g. integer/number/length — the full table is at
+///                  https://tstone-1.github.io/xlsxturbo/data-validation/).
 ///                  For "whole_number", min/max are bounded to the i32 range
 ///                  (-2147483648..=2147483647); a value outside that range raises
 ///                  ValueError naming the field and range.
@@ -596,13 +644,20 @@ fn version() -> &'static str {
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
 ///            Values can be simple (str, int, float, bool) or dicts with "value" and optional
 ///            "num_format", "align_horizontal", "align_vertical", and "wrap_text".
+///            Cells are written after all DataFrame data, so they can overwrite data cells.
 ///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
 /// Returns:
 ///     List of (rows, columns) tuples for each sheet
 ///
 /// Raises:
-///     ValueError: If the conversion fails
+///     XlsxTurboError: If the conversion fails. The subclass says what kind of
+///         failure it was -- ConfigurationError / ConfigurationTypeError for an
+///         option, InputDataError for the frame, FileError for the filesystem.
+///         Every one of them is also the builtin its failures raised before
+///         0.19.0, so `except ValueError` still works; note
+///         ConfigurationTypeError is a TypeError rather than a ValueError.
+///         Full contract: https://tstone-1.github.io/xlsxturbo/errors/
 ///
 /// Example:
 ///     >>> import xlsxturbo
@@ -659,7 +714,7 @@ fn dfs_to_xlsx<'py>(
     column_widths: Option<&Bound<'py, PyAny>>,
     table_name: Option<String>,
     header_format: Option<&Bound<'py, PyAny>>,
-    row_heights: Option<HashMap<u32, f64>>,
+    row_heights: Option<&Bound<'py, PyAny>>,
     constant_memory: bool,
     column_formats: Option<&Bound<'py, PyAny>>,
     conditional_formats: Option<&Bound<'py, PyAny>>,
@@ -683,6 +738,7 @@ fn dfs_to_xlsx<'py>(
             "dfs_to_xlsx requires at least one sheet, got an empty list",
         ));
     }
+    let row_heights = extract_row_heights_kwarg(row_heights)?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
     let mut table_names: HashMap<String, ClaimedTableName> = HashMap::new();
@@ -706,8 +762,14 @@ fn dfs_to_xlsx<'py>(
         cells,
     })?;
 
-    for sheet_tuple in sheets {
-        let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple)?;
+    // The id rust_xlsxwriter will give the next table it names itself. It counts
+    // tables, not sheets, so it advances only where one is actually created --
+    // including for an explicitly named table, which consumes an id without
+    // using the generated name. See `claimed_table_name` for the measurement.
+    let mut next_table_id: u32 = 1;
+
+    for (index, sheet_tuple) in sheets.into_iter().enumerate() {
+        let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple, index)?;
         require_supported_dataframe(&df, Some(&sheet_name))?;
 
         // Merge per-sheet scalar options with global defaults
@@ -727,7 +789,7 @@ fn dfs_to_xlsx<'py>(
             sheet_config.row_heights.as_ref().or(row_heights.as_ref());
 
         // A table is only actually created when there's at least one data row
-        // (see the `row_count > 0` gate in `apply_worksheet_features`), so an
+        // and one column (see the gate in `apply_worksheet_features`), so an
         // empty DataFrame never claims a table name here either — otherwise
         // two empty sheets sharing a table name would false-positive as a
         // conflict.
@@ -737,9 +799,12 @@ fn dfs_to_xlsx<'py>(
             effective_header,
             effective_table_style.as_deref(),
             effective_table_name.as_deref(),
+            next_table_id,
         )
         .map_err(|e| errors::input_data(format!("sheet '{}': {}", sheet_name, e)))?
         {
+            next_table_id += 1;
+            let auto = effective_table_name.is_none();
             // `to_lowercase`, not `to_ascii_lowercase`: this fold has to match
             // the writer's own uniqueness check exactly, and rust_xlsxwriter
             // folds names with `to_lowercase`. A narrower fold under-reaches --
@@ -752,11 +817,15 @@ fn dfs_to_xlsx<'py>(
             let claim = ClaimedTableName {
                 name: sanitized,
                 sheet: sheet_name.clone(),
+                auto,
             };
             if let Some(previous) = table_names.insert(key, claim) {
                 return Err(errors::workbook_validation(format!(
-                    "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook",
-                    previous.name, previous.sheet, sheet_name
+                    "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook.{}",
+                    previous.name,
+                    previous.sheet,
+                    sheet_name,
+                    workbook::auto_table_name_hint(previous.auto || auto)
                 )));
             }
         }
@@ -790,13 +859,12 @@ fn dfs_to_xlsx<'py>(
     reject_table_name_collisions(&table_names, defined_names.as_ref())
         .map_err(errors::workbook_validation)?;
 
-    apply_defined_names(&mut workbook, defined_names.as_ref()).map_err(errors::configuration)?;
-
-    // Save workbook, without the GIL -- see the note at the matching call in
-    // `convert.rs`. Every sheet's Python data has been read into owned Rust types
-    // by this point, so the archive write borrows nothing from the interpreter.
-    py.detach(|| save_workbook(&mut workbook, &output_path))
-        .map_err(errors::file)?;
+    // The same "finish" as the single-sheet path, and the same code: the
+    // defined names and the detached save were written out twice until 1.3.x,
+    // which is how the GIL release first shipped in a draft that covered only
+    // one of them. See `convert::finish_workbook`.
+    finish_workbook(py, &mut workbook, defined_names.as_ref(), &output_path)
+        .map_err(PyErr::from)?;
 
     Ok(stats)
 }

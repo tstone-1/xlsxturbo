@@ -132,7 +132,11 @@ def csv_to_xlsx(
         Tuple of (rows, columns) written to the Excel file.
 
     Raises:
-        ValueError: If the conversion fails.
+        XlsxTurboError: If the conversion fails. The subclass says what kind of
+            failure it was; every one is also the builtin its failures raised
+            before 0.19.0, so ``except ValueError`` still works, and
+            ``ConfigurationTypeError`` is a ``TypeError``.
+            Full contract: https://tstone-1.github.io/xlsxturbo/errors/
     """
 
 def df_to_xlsx(

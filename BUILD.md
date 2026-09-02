@@ -23,8 +23,9 @@ uv run maturin develop --release
 ### Running Tests
 
 ```bash
-# Rust unit tests
-cargo test
+# Rust unit tests (the same profile CI uses; a plain `cargo test` also works,
+# but the numbers a debug build prints are not the ones to write down)
+cargo test --release
 
 # Python integration tests
 uv run pytest tests/
@@ -79,7 +80,16 @@ cargo audit --deny warnings
 
 # 11. Action pins still name their SHAs              (CI: Action pin comments)
 bash .github/scripts/check-action-pins.sh
+
+# 12. Documentation site builds                      (CI: Docs / Build site)
+mkdocs build --strict
 ```
+
+Step 12 needs the documentation dependencies in the venv, which the `dev` extras do not
+carry: `uv pip install -r requirements-docs.txt`. Nothing else runs `mkdocs` locally, so
+until it was added here a broken link or a page missing from the nav was found by CI
+after the push — three factual errors sat on `docs/api-reference.md` that way. `--strict`
+is the whole point: without it MkDocs downgrades both to warnings and exits 0.
 
 Steps 5-8 run tools from the project-local `.venv`, whose executables live in
 `Scripts/` on Windows and `bin/` on macOS/Linux. This repo is worked on from both, so
@@ -96,8 +106,10 @@ documents:
 Step 5 carries CI's `-v`, which is the flag the `python-test*` jobs run; the release
 smoke test runs the same suite with `-q`. The two differ in verbosity only.
 
-Steps 1-9 must succeed before pushing. Steps 10-11 rarely fail from a code change, but
-they are gates on `main`, so a release must not skip them.
+Steps 1-9 must succeed before pushing. Steps 10-12 rarely fail from a code change, but
+they are gates on `main`, so a release must not skip them. Step 12 is triggered in CI only
+by a change under `docs/`, `mkdocs.yml` or `requirements-docs.txt` — run it whenever you
+touch one of those.
 
 CI additionally runs `pip-audit`, CodeQL for Python and Rust, and — on pull requests
 only — dependency review. Those need no local equivalent.

@@ -67,6 +67,15 @@ xlsxturbo input.csv output.xlsx [OPTIONS]
 - `-p, --parallel`: Use multi-core CSV processing (faster for large files, uses more memory)
 - `-v, --verbose`: Show progress information
 
+### Exit codes
+
+- `0`: the conversion succeeded; `OK <rows> <cols>` is printed to stdout.
+- `1`: the conversion was attempted and failed (an unreadable input, an output path that
+  cannot be written, malformed CSV). The reason is printed to stderr.
+- `2`: the command line itself was wrong, an invalid `--date-order` included. This is the
+  same code clap uses for the usage errors it rejects itself, so a script can tell "you
+  typed the command wrong" from "the conversion failed" without parsing stderr.
+
 ### Examples
 
 ```bash

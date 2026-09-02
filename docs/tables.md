@@ -121,3 +121,11 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 The check runs before anything is written, so the output file is left alone.
 A sheet that creates no table — no `table_style`, or an empty DataFrame —
 claims no name and cannot collide.
+
+A sheet that asks for a `table_style` without a `table_name` still claims one:
+the writer names such tables `Table1`, `Table2`, ... numbered over the
+workbook's tables in sheet order, and those names take part in both checks.
+So `defined_names={"Table1": ...}` collides with the first auto-named table,
+and an explicit `table_name="Table2"` on one sheet collides with an auto-named
+table on the second. The message says which name was generated and where, so a
+name you never typed is not a mystery.

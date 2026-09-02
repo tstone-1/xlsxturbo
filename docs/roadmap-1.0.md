@@ -306,6 +306,12 @@ carve-out, and from Python the three options look the same. Either make the two 
 classify them, or accept the split — but decide it rather than inheriting it from which Rust
 type someone reached for. Documented in `docs/errors.md` meanwhile.
 
+**Answered for `row_heights` on 2026-09-02**, in the first of the two directions the question
+offered: it is now declared `&Bound<PyAny>` and read by `extract_row_heights`, so a wrong key
+or value raises `ConfigurationTypeError` naming the option, exactly as `column_widths` does.
+`defined_names` still converts through the signature as `HashMap<String, String>`, so the
+split has narrowed from two options to one rather than closed.
+
 **2. `xlsxturbo.types` has no `__all__`.** `PathLike`, `Literal`, `TypedDict` and `Union` are
 all exported by `from xlsxturbo.types import *`. `tests/test_types_module.py` hides them
 behind a hardcoded exclusion list, so it validates a cleaner namespace than users get, and

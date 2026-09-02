@@ -5,6 +5,7 @@ use rust_xlsxwriter::{ConditionalFormatIconType, Format, FormatAlign, FormatBord
 use std::collections::HashMap;
 
 use super::colors::parse_color;
+use super::context::WithOptionContext;
 use super::patterns::matches_pattern;
 
 /// Parse icon type string into `ConditionalFormatIconType`
@@ -162,7 +163,7 @@ impl FormatScope {
 }
 
 /// Font-level keys — the only ones an inline text run can carry. Kept in sync
-/// with the `RichTextFormat` TypedDict in `python/xlsxturbo/xlsxturbo.pyi`.
+/// with the `RichTextFormat` TypedDict in `python/xlsxturbo/types.py`.
 const FORMAT_KEYS_FONT: &[&str] = &[
     "bold",
     "italic",
@@ -209,7 +210,7 @@ fn get_border_field(
         return Ok(None);
     }
     if let Ok(style_str) = bound.extract::<String>() {
-        return Ok(Some(parse_border_style(&style_str)?));
+        return Ok(Some(parse_border_style(&style_str).in_field(context, key)?));
     }
     if let Ok(flag) = bound.extract::<bool>() {
         return Ok(if flag { Some(FormatBorder::Thin) } else { None });
@@ -256,11 +257,12 @@ fn parse_format_dict(
     }
 
     if let Some(color_str) = view.string("bg_color")? {
-        format = format.set_background_color(parse_color(&color_str)?);
+        format =
+            format.set_background_color(parse_color(&color_str).in_field(context, "bg_color")?);
     }
 
     if let Some(color_str) = view.string("font_color")? {
-        format = format.set_font_color(parse_color(&color_str)?);
+        format = format.set_font_color(parse_color(&color_str).in_field(context, "font_color")?);
     }
 
     if let Some(size) = view.f64("font_size")? {
@@ -302,15 +304,19 @@ fn parse_format_dict(
     }
 
     if let Some(color_str) = view.string("border_color")? {
-        format = format.set_border_color(parse_color(&color_str)?);
+        format =
+            format.set_border_color(parse_color(&color_str).in_field(context, "border_color")?);
     }
 
     if let Some(align_str) = view.string("align_horizontal")? {
-        format = format.set_align(parse_horizontal_alignment(&align_str)?);
+        format = format.set_align(
+            parse_horizontal_alignment(&align_str).in_field(context, "align_horizontal")?,
+        );
     }
 
     if let Some(align_str) = view.string("align_vertical")? {
-        format = format.set_align(parse_vertical_alignment(&align_str)?);
+        format = format
+            .set_align(parse_vertical_alignment(&align_str).in_field(context, "align_vertical")?);
     }
 
     if view.bool("wrap_text")?.unwrap_or(false) {

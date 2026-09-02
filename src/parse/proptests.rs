@@ -15,6 +15,12 @@
 //!   implementation that matches *everything*. Each pattern property is stated
 //!   as an equivalence against the `str` method it claims to implement, so it
 //!   discriminates in both directions.
+//! - **A round-trip may be over the rendered text, not over the value.**
+//!   `decimal_integer_literals_round_trip_at_any_length` compares the digits a
+//!   caller wrote against the digits the cell carries, because past `i64` there
+//!   is no value left to compare -- the policy under test is precisely that the
+//!   number becomes text. The list above is the set of invariant kinds, not the
+//!   set of shapes each may take.
 //! - **A totality check is not a property.** `..._never_panics` tests earn
 //!   their place only because these parsers slice by byte offset on input that
 //!   may be arbitrary UTF-8; they say nothing about correctness, and every one
@@ -462,6 +468,30 @@ proptest! {
             matches!(parsed, CellValue::Integer(got) if got == v),
             "expected Integer({}), got {:?}", v, parsed
         );
+    }
+
+    /// A decimal integer literal renders back to itself, at any length.
+    ///
+    /// Stated as a round-trip rather than as "digit strings never become
+    /// floats", because that weaker form is satisfied by an implementation
+    /// that keeps the digits and loses their order. The generator is
+    /// `[1-9][0-9]{0,40}` so that the value is already canonical (no leading
+    /// zeros to normalise away) and the comparison can be a literal one.
+    ///
+    /// **The generator has to straddle `i64::MAX`, and `".*"` would not.**
+    /// A repetition count up to 40 puts roughly half the cases past 19 digits,
+    /// which is where the defect this property was written for lives; mutating
+    /// either overflow branch out of `parse_value` reddens it in a handful of
+    /// cases.
+    #[test]
+    fn decimal_integer_literals_round_trip_at_any_length(text in "[1-9][0-9]{0,40}") {
+        let parsed = parse_value(&text, DateOrder::Auto);
+        let rendered = match &parsed {
+            CellValue::Integer(v) => v.to_string(),
+            CellValue::String(s) => s.clone(),
+            other => return Err(TestCaseError::fail(format!("unexpected {:?}", other))),
+        };
+        prop_assert_eq!(&rendered, &text, "digits changed: {:?}", parsed);
     }
 
     /// Every finite non-integral `f64` is detected as a float, bit for bit.

@@ -1,8 +1,12 @@
 """Generate THIRD-PARTY-LICENSES.md from the Rust dependency tree.
 
-The published wheel contains compiled code from 92 Rust crates. Their licenses
--- MIT, Apache-2.0, Zlib, Unicode-3.0 -- all require the copyright notice to be
-distributed with the binary, and `LICENSE` covers only xlsxturbo's own code.
+The published wheel contains compiled code from every crate in the dependency
+tree. Their licenses -- MIT, Apache-2.0, Zlib, Unicode-3.0 -- all require the
+copyright notice to be distributed with the binary, and `LICENSE` covers only
+xlsxturbo's own code. The crate count is not written down here on purpose: the
+generated file counts them per license, and the hand-maintained copies of that
+number that used to sit in this docstring, `pyproject.toml` and `README.md` had
+drifted to three different values.
 maturin already writes a CycloneDX SBOM into the wheel, but an SBOM records
 *which* license applies; it does not carry the notice text.
 

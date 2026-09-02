@@ -18,17 +18,21 @@ a test that passes for the wrong reason looks exactly like one that works.
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo test`
+- [ ] `cargo test --release`
 - [ ] `maturin develop --release` then `pytest tests/ -q`
 - [ ] ruff, bandit and pyright clean (see CONTRIBUTING.md for the commands)
 - [ ] `CHANGELOG.md` updated under `## [Unreleased]`
-- [ ] `README.md` updated, if behaviour or options changed
-- [ ] Type stubs updated in `python/xlsxturbo/xlsxturbo.pyi`, if options changed
+- [ ] The relevant page under `docs/` updated, if behaviour or options changed
+- [ ] Option shapes updated in `python/xlsxturbo/types.py` (the stub imports them),
+      if options changed
 - [ ] `uv lock` re-run, if dev dependencies changed
 
 <!--
-Adding a new option? It threads through seven places -- the checklist is in
-AGENTS.md ("Adding a Feature"). Two that are easy to miss: the option name must go
-into SHEET_OPTION_NAMES, and you must decide its constant_memory classification.
-Guard tests enforce both, so CI will tell you, but knowing up front is quicker.
+Adding a new option? It threads through several layers -- follow the checklist in
+AGENTS.md ("Adding a Feature") rather than from memory. Two steps that are easy to
+miss: the option name must go into SHEET_OPTION_NAMES, and you must decide its
+constant_memory classification. Guard tests enforce both, so CI will tell you, but
+knowing up front is quicker.
+
+Per-feature examples belong on the docs page for that feature, not in README.md.
 -->

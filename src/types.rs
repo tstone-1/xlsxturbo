@@ -222,7 +222,7 @@ where
 /// the error" boilerplate (~400 lines total across `apply/*` and
 /// `parse/formats.rs`). `OptionMap` holds the context once and exposes typed
 /// accessors, so a new call site is one line instead of a new wrapper
-/// function. See `AGENTS.md` (7-touchpoint checklist, touchpoint 4) for when
+/// function. See `AGENTS.md` (the touchpoint checklist, touchpoint 4) for when
 /// to reach for this vs. eager typed extraction at extract time.
 pub(crate) struct OptionMap<'py, 'm> {
     py: Python<'py>,

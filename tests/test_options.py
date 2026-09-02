@@ -143,28 +143,34 @@ class TestLowering:
         opts = ExportOptions(freeze_panes=True, header_format={"bold": True})
         assert opts.as_kwargs() == {"freeze_panes": True, "header_format": {"bold": True}}
 
-    def test_sheet_options_drop_exactly_the_rejected_options(self) -> None:
+    def test_sheet_options_drop_exactly_the_rejected_options(
+        self, tmp_path: Path
+    ) -> None:
         """``as_sheet_options`` drops precisely what a per-sheet dict rejects.
 
         The set is derived by asking the library, not copied from the module. A
         hardcoded list here would agree with the hardcoded list there forever,
         including when both are wrong -- and this is exactly the kind of split
         that gets one side updated.
+
+        The probe writes into ``tmp_path``. It used to write ``tests/_probe.xlsx``
+        inside the checkout, cleaned in a ``finally``: an interrupted run left an
+        untracked file behind (``.gitignore`` un-ignores ``tests/*.xlsx``), and two
+        concurrent runs collided on the one path.
         """
+        probe = tmp_path / "_probe.xlsx"
         rejected: set[str] = set()
         for name, value in sorted(SAMPLE_VALUES.items()):
             try:
                 xlsxturbo.dfs_to_xlsx(
                     [(_frame(), "S", {name: value})],  # type: ignore[list-item]
-                    Path(__file__).parent / "_probe.xlsx",
+                    probe,
                 )
             except xlsxturbo.ConfigurationError as exc:
                 if "Unknown sheet option" in str(exc):
                     rejected.add(name)
             except xlsxturbo.XlsxTurboError:
                 pass  # a different complaint means the key itself was accepted
-            finally:
-                (Path(__file__).parent / "_probe.xlsx").unlink(missing_ok=True)
 
         assert rejected, "no option was rejected per-sheet; the probe is not working"
         full, sheet = set(ExportOptions(**SAMPLE_VALUES).as_kwargs()), set(

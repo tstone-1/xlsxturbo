@@ -28,17 +28,23 @@ the test suite crawl and makes any timing you look at meaningless.
 
 ## Checks
 
-Run these before opening a pull request. They are the same checks CI runs, and CI
-runs them with these exact flags -- `cargo clippy` without `--all-targets -- -D warnings`
-is a weaker check than the gate.
+Run these before opening a pull request. The flags are not optional: `cargo clippy`
+without `--all-targets -- -D warnings` is a weaker check than the gate, and `cargo test`
+without `--release` is a different build from the one CI runs.
 
 ```bash
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo test --release
 maturin develop --release
 pytest tests/ -q
 ```
+
+[BUILD.md](BUILD.md) holds the full pre-push checklist, copied verbatim from
+`.github/workflows/ci.yml` and kept in step with it. When the two disagree, BUILD.md is
+the one that was reconciled against the workflow; this list is the short form. Two of
+these commands once drifted from the gate here, which is why the longer list exists and
+why this one now points at it rather than trying to be a second copy.
 
 Python lint, type and security gates:
 
@@ -97,30 +103,26 @@ is a separate Cargo `[[bin]]` target that is **not** packaged -- it is built by 
 
 ## Adding a feature: the touchpoint checklist
 
-Options in this library thread through several layers, and missing one is usually a
-compile error rather than a silent bug -- but not always. The full checklist, with the
-reasoning behind each step, is in [AGENTS.md](AGENTS.md#adding-a-feature---the-7-touchpoint-checklist).
-In short:
+An option threads through several layers of Rust and Python, and missing one is usually
+a compile error or a named test failure rather than a silent bug -- but not always.
+**The checklist is in [AGENTS.md](AGENTS.md#adding-a-feature---the-touchpoint-checklist)**,
+with the reasoning behind each step and the guard test that enforces it. Follow it there
+rather than from a summary: this section used to restate the steps, and the copy drifted
+-- it still sent option shapes to the stub two releases after they moved to
+`python/xlsxturbo/types.py`.
 
-1. `src/types.rs` -- the `define_options!` list and the `SheetConfig` field. Use
-   `IndexMap`, not `HashMap`, for anything keyed by cell reference: iteration order
-   feeds straight into the generated XML, so a `HashMap` makes output non-reproducible.
-2. `src/extract.rs` -- an `extract_<feature>()`, registered in `extract_sheet_info`,
-   plus the option name in `SHEET_OPTION_NAMES` (a guard test enforces this).
-3. `src/lib.rs` -- the `RawOptions` field, `extract_options()`, and the kwarg,
-   `#[pyo3(signature)]` entry and docstring on **both** `df_to_xlsx` and `dfs_to_xlsx`.
-4. `src/apply/<family>.rs` -- an `apply_<feature>()` with unknown-key validation and
-   context-rich errors. Use `types::OptionMap` accessors rather than hand-rolling a new
-   field-parsing wrapper family.
-5. `src/convert.rs` -- the apply call in `apply_worksheet_features` (order matters:
-   `cells` stays last), and a `constant_memory` classification decision. A guard test
-   forces that decision.
-6. `python/xlsxturbo/xlsxturbo.pyi` -- the option `TypedDict` and the kwarg on both
-   signatures and on `SheetOptions`.
-7. `tests/test_<feature area>.py` -- a `TestXxx` class that reads the produced `.xlsx`
-   back via openpyxl or raw XML. Assertions about behaviour, not about internals.
+What the checklist will not tell you, because it is about mechanics rather than taste:
 
-Also update `README.md` and `CHANGELOG.md`.
+- **Reproducibility is a per-option decision.** Anything keyed by cell reference must be
+  an `IndexMap`; iteration order feeds straight into the generated XML.
+- **Errors carry their context.** A failure names the option and the key that caused it
+  (`charts['D2']: ...`), so a caller with twenty entries knows which one to fix.
+- **Every option needs a `constant_memory` classification**, and the default is
+  "skipped with a warning". A guard test refuses to let you skip the decision.
+
+Then update the relevant page under `docs/` and `CHANGELOG.md`. New per-feature examples
+go on the docs page, not in `README.md` -- the README is a landing page, and it stopped
+carrying per-option examples when the site was split out in 0.19.0.
 
 ## Tests
 

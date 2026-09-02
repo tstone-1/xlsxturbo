@@ -209,13 +209,22 @@ fn integer_boundaries_are_detected_as_integers() {
 }
 
 #[test]
-fn integers_beyond_i64_become_floats_or_strings_but_never_wrong_integers() {
-    // Past `i64::MAX` the integer branch stops matching. What matters is only
-    // that nothing silently wraps to a different integer.
-    let beyond = "9223372036854775808"; // i64::MAX + 1
-    match parse(beyond) {
-        CellValue::Integer(v) => panic!("wrapped to Integer({})", v),
-        CellValue::Float(f) => assert!(f > 9.223_372_036_854_775e18),
-        other => panic!("unexpected {:?}", other),
+fn integers_beyond_i64_become_text_carrying_every_digit() {
+    // Past `i64::MAX` the integer branch stops matching. This used to accept a
+    // `Float` as well, which is how a 20-digit CSV cell shipped rounded for
+    // several releases: the assertion `f > 9.223e18` is satisfied by a value
+    // that has already lost its low digits, so it could not see the defect.
+    // Text is now the only correct answer, and the digits are compared
+    // literally rather than to a tolerance.
+    for beyond in [
+        "9223372036854775808",  // i64::MAX + 1
+        "-9223372036854775809", // i64::MIN - 1
+        "18446744073709551616", // u64::MAX + 1
+    ] {
+        match parse(beyond) {
+            CellValue::Integer(v) => panic!("wrapped to Integer({})", v),
+            CellValue::String(s) => assert_eq!(s, beyond),
+            other => panic!("unexpected {:?} for {}", other, beyond),
+        }
     }
 }

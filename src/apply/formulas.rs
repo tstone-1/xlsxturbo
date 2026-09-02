@@ -26,11 +26,19 @@ pub(crate) fn apply_formula_columns(
             if let Some(fmt) = header_format {
                 worksheet
                     .write_string_with_format(0, col_idx, col_name, fmt)
-                    .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+                    .map_err(|e| {
+                        format!(
+                            "formula_columns['{}']: failed to write the column header: {}",
+                            col_name, e
+                        )
+                    })?;
             } else {
-                worksheet
-                    .write_string(0, col_idx, col_name)
-                    .map_err(|e| format!("Failed to write formula column header: {}", e))?;
+                worksheet.write_string(0, col_idx, col_name).map_err(|e| {
+                    format!(
+                        "formula_columns['{}']: failed to write the column header: {}",
+                        col_name, e
+                    )
+                })?;
             }
         }
 
@@ -44,7 +52,12 @@ pub(crate) fn apply_formula_columns(
 
             worksheet
                 .write_formula(row, col_idx, formula.as_str())
-                .map_err(|e| format!("Failed to write formula at row {}: {}", row, e))?;
+                .map_err(|e| {
+                    format!(
+                        "formula_columns['{}']: failed to write the formula at row {}: {}",
+                        col_name, row, e
+                    )
+                })?;
         }
 
         col_offset = col_offset

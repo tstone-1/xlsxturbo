@@ -178,6 +178,73 @@ class TestErrorPaths:
                 rich_text={"A1": [("Bold", {"bold": True}, "ignored")]},  # type: ignore[list-item]
             )
 
+    # One wrong-shaped item per list-taking option, in both the shapes that
+    # produced different escapes: an `int` has no `len()` and a `dict` has one
+    # but indexes by key.
+    NON_TUPLE_ITEMS: ClassVar[list[object]] = [5, {"a": 1, "b": 2}, "A1:B1"]
+
+    @pytest.mark.parametrize("item", NON_TUPLE_ITEMS)
+    def test_non_tuple_sheets_item_stays_in_the_hierarchy(
+        self, item: object, tmp_xlsx: str
+    ) -> None:
+        """A non-tuple ``sheets`` entry is named, not leaked as a raw builtin error.
+
+        ``len()`` and ``get_item(0)`` propagate PyO3's own error, so on 1.3.0
+        ``dfs_to_xlsx([5], p)`` raised
+        ``builtins.TypeError: object of type 'int' has no len()`` and
+        ``dfs_to_xlsx([{"a": 1, "b": 2}], p)`` raised ``builtins.KeyError: 0``.
+        The second escapes even the ``except (XlsxTurboError, TypeError)`` that
+        ``docs/errors.md`` recommends, which is why the assertion is on the
+        hierarchy rather than on ``TypeError``.
+
+        Args:
+            item: The wrong-shaped entry under test.
+            tmp_xlsx: Output path fixture.
+        """
+        with pytest.raises(xlsxturbo.XlsxTurboError, match=r"sheets\[0\]"):
+            xlsxturbo.dfs_to_xlsx([item], tmp_xlsx)  # type: ignore[list-item]
+
+    @pytest.mark.parametrize("option", ["merged_ranges", "hyperlinks"])
+    @pytest.mark.parametrize("item", NON_TUPLE_ITEMS)
+    def test_non_tuple_list_item_stays_in_the_hierarchy(
+        self, option: str, item: object, tmp_xlsx: str
+    ) -> None:
+        """The same two calls sit in both list extractors.
+
+        Args:
+            option: The list-taking option under test.
+            item: The wrong-shaped entry under test.
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(xlsxturbo.XlsxTurboError, match=rf"{option}\[0\]"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, **{option: [item]})  # type: ignore[arg-type]
+
+    def test_the_message_names_the_offending_index(self, tmp_xlsx: str) -> None:
+        """A workbook with one bad sheet out of three says which one.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(xlsxturbo.XlsxTurboError, match=r"sheets\[2\]"):
+            xlsxturbo.dfs_to_xlsx([(df, "A"), (df, "B"), 5], tmp_xlsx)  # type: ignore[list-item]
+
+    def test_list_shaped_items_are_still_accepted(self, tmp_xlsx: str) -> None:
+        """The control: the screen must not refuse the shapes callers really write.
+
+        A ``list`` indexes exactly like a ``tuple`` and the docs say "tuple"
+        only as a convention, so refusing one would be a behaviour change rather
+        than a fix.
+
+        Args:
+            tmp_xlsx: Output path fixture.
+        """
+        df = pd.DataFrame({"A": [1]})
+        xlsxturbo.dfs_to_xlsx([[df, "Sheet1"]], tmp_xlsx)  # type: ignore[list-item]
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, merged_ranges=[["A1:B1", "Title"]])  # type: ignore[list-item]
+        assert Path(tmp_xlsx).exists()
+
     def test_dfs_to_xlsx_per_sheet_invalid_dict_option_raises(self, tmp_xlsx: str) -> None:
         """Per-sheet dict options reject wrong container types."""
         df = pd.DataFrame({"A": [1]})
@@ -455,3 +522,65 @@ class TestAtomicSave:
 
         xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), target)
         assert stat.S_IMODE(Path(target).stat().st_mode) & 0o044
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+    def test_symlink_destination_is_written_through(self, tmp_path: Path) -> None:
+        """Exporting to a symlink updates its target and leaves the link alone.
+
+        ``NamedTempFile::persist`` is a rename, and a rename over a symlink
+        replaces the *link*. Measured on 1.3.0: after exporting to
+        ``link.xlsx -> real.xlsx`` the link was gone, ``real.xlsx`` was
+        byte-unchanged, and a pipeline writing to ``latest.xlsx ->
+        archive/2026-09.xlsx`` silently stopped updating the archive. Before
+        0.18.0's atomic save the underlying ``File::create`` wrote through, so
+        this is the restored behaviour rather than a new one.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+        """
+        target = tmp_path / "real.xlsx"
+        link = tmp_path / "latest.xlsx"
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), str(target))
+        original = target.read_bytes()
+        link.symlink_to(target)
+
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"B": ["replaced", "rows"]}), str(link))
+
+        assert link.is_symlink(), "the export replaced the symlink instead of its target"
+        assert target.read_bytes() != original, "the symlink's target was not updated"
+        wb = load_workbook(str(target))
+        ws = wb[wb.sheetnames[0]]
+        assert ws["A1"].value == "B"
+        wb.close()
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+    def test_dangling_symlink_destination_still_writes_a_file(self, tmp_path: Path) -> None:
+        """A symlink with no target does not become an error.
+
+        The resolve step is best effort: ``canonicalize`` fails on a dangling
+        link, and refusing the export there would be a worse answer than the
+        pre-0.18.0 behaviour, which created the file. The control that makes
+        the test above about *symlinks* rather than about existing files.
+
+        The last two assertions decide *where* the file landed, and they are
+        the reason this test says anything. ``exists()`` follows the link, so
+        it is satisfied both by the behaviour pinned here and by the one it
+        rules out -- following the link and creating its missing target, which
+        writes to a path the caller never named, in a directory that need not
+        exist. Only ``is_symlink()`` and the target's absence separate the two.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+        """
+        link = tmp_path / "dangling.xlsx"
+        target = tmp_path / "never_created.xlsx"
+        link.symlink_to(target)
+
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), str(link))
+
+        assert Path(link).exists()
+        wb = load_workbook(str(link))
+        assert wb[wb.sheetnames[0]]["A1"].value == "A"
+        wb.close()
+        assert not link.is_symlink(), "the export left a link rather than a regular file"
+        assert not target.exists(), "the export created the link's missing target"

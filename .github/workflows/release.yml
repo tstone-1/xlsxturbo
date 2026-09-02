@@ -130,9 +130,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate Rust SBOM (CycloneDX)
+      - name: Generate Rust SBOM (CycloneDX, cargo-cyclonedx 0.5.9)
         run: |
-          cargo install cargo-cyclonedx --locked
+          # Pinned for the same reason cyclonedx-bom below is, and it matters
+          # more here: this job runs only on a tag, `github-release` needs its
+          # `sbom` artifact, and a breaking cargo-cyclonedx release would fail
+          # the GitHub Release step after PyPI publish has already happened.
+          # `--locked` pins the tool's dependencies, not the tool -- the version
+          # has to be written out. It is in the step name too, because
+          # `cargo install` prints `Successfully installed` for a version that
+          # did not move, so the log alone does not say which one ran.
+          cargo install cargo-cyclonedx@0.5.9 --locked
           cargo cyclonedx --format json --all
           mkdir -p sbom
           # cargo-cyclonedx writes per-manifest files next to each Cargo.toml.

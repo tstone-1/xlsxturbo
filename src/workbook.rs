@@ -37,6 +37,33 @@ fn set_output_permissions(tmp: &NamedTempFile, dest: &Path) {
 #[cfg(not(unix))]
 fn set_output_permissions(_tmp: &NamedTempFile, _dest: &Path) {}
 
+/// Resolve a symlink destination to the file it points at, so an export
+/// replaces the *target* and leaves the link in place.
+///
+/// `NamedTempFile::persist` is a rename, and a rename over a symlink replaces
+/// the link itself: measured on 1.3.0, exporting to `link.xlsx -> real.xlsx`
+/// left `os.path.islink(link)` false and `real.xlsx` byte-unchanged, so a
+/// pipeline exporting to `latest.xlsx -> archive/2026-09.xlsx` silently stopped
+/// updating the archive. Before 0.18.0's atomic save this library used
+/// `Workbook::save`, i.e. `File::create`, which writes through a link — so the
+/// behaviour changed without a note, and this restores it.
+///
+/// Returns `None` when the path is not a symlink (the ordinary case, where
+/// nothing should change) and also when it is a *dangling* one, whose target
+/// cannot be canonicalized: creating the target through the link is what the
+/// old behaviour did too, and refusing the export would be worse than either.
+///
+/// Resolving before the staging directory is chosen is load-bearing: the
+/// temporary file has to be created beside the resolved target, or the rename
+/// crosses filesystems and stops being atomic.
+fn resolve_symlink_dest(dest: &Path) -> Option<std::path::PathBuf> {
+    let metadata = std::fs::symlink_metadata(dest).ok()?;
+    if !metadata.file_type().is_symlink() {
+        return None;
+    }
+    std::fs::canonicalize(dest).ok()
+}
+
 /// Save a workbook so the destination is only ever replaced by a complete file.
 ///
 /// `Workbook::save` calls `File::create` — which truncates the destination —
@@ -51,8 +78,12 @@ fn set_output_permissions(_tmp: &NamedTempFile, _dest: &Path) {}
 /// `$TMPDIR` so the rename stays within one filesystem and is therefore atomic;
 /// a cross-filesystem rename would degrade into a copy and reintroduce the
 /// partial-write window.
+///
+/// A symlink destination is written *through* — see [`resolve_symlink_dest`].
 pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Result<(), FileFailure> {
-    let dest = Path::new(output_path);
+    let requested = Path::new(output_path);
+    let resolved = resolve_symlink_dest(requested);
+    let dest = resolved.as_deref().unwrap_or(requested);
     let dir = match dest.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -150,6 +181,25 @@ pub(crate) struct ClaimedTableName {
     pub(crate) name: String,
     /// The sheet the table is on.
     pub(crate) sheet: String,
+    /// Whether the writer assigned this name rather than the caller.
+    ///
+    /// A caller who never typed `Table2` needs to be told where it came from,
+    /// or the message reads as being about a name they cannot find in their own
+    /// call.
+    pub(crate) auto: bool,
+}
+
+/// Explain an auto-assigned table name, for a message that names one.
+///
+/// Empty when both halves of the conflict were written by the caller, so the
+/// common case does not carry an explanation nobody needs.
+pub(crate) fn auto_table_name_hint(auto: bool) -> &'static str {
+    if auto {
+        " A sheet given `table_style` and no `table_name` is named `TableN` by the writer, \
+         numbering tables in sheet order; pass an explicit `table_name` to choose it."
+    } else {
+        ""
+    }
 }
 
 /// Reject a defined name that collides with a table name.
@@ -186,8 +236,11 @@ pub(crate) fn reject_table_name_collisions(
             return Err(format!(
                 "defined_names['{}'] collides with the table name '{}' on sheet '{}'. \
                  Excel requires table names and defined names to be unique against each \
-                 other across a workbook, ignoring case; rename one of them",
-                name, claim.name, claim.sheet
+                 other across a workbook, ignoring case; rename one of them.{}",
+                name,
+                claim.name,
+                claim.sheet,
+                auto_table_name_hint(claim.auto)
             ));
         }
     }

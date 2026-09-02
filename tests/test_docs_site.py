@@ -192,3 +192,156 @@ class TestDocsSite:
             f"exclude_docs names {len(stale)} path(s) that neither exist nor are "
             f"gitignored: {stale}"
         )
+
+
+API_REFERENCE = DOCS_DIR / "api-reference.md"
+
+# The DataFrame entry points, and the section heading each is documented under.
+# Both return a shape, not `None`: `df_to_xlsx` gives `(rows, cols)` and
+# `dfs_to_xlsx` a list of one such pair per sheet, the header row counted when
+# `header=True`. The page said `None` for both -- a caller reading it would have
+# thrown away the only report the library makes of what it wrote.
+DATAFRAME_ENTRY_POINTS = ("df_to_xlsx", "dfs_to_xlsx")
+
+_COUNT_WORDS = {
+    2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six",
+    7: "Seven", 8: "Eight", 9: "Nine", 10: "Ten",
+}
+
+
+def _api_reference_sections() -> dict[str, str]:
+    """`api-reference.md` split into its `##` sections, keyed by heading text."""
+    sections: dict[str, str] = {}
+    heading, body = "", []
+    for line in API_REFERENCE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            if heading:
+                sections[heading] = "\n".join(body)
+            heading, body = line[3:].strip(), []
+        else:
+            body.append(line)
+    if heading:
+        sections[heading] = "\n".join(body)
+    return sections
+
+
+def _section_for(name: str) -> str:
+    """The body of the section whose heading mentions `name`."""
+    matches = [
+        body for heading, body in _api_reference_sections().items() if name in heading
+    ]
+    assert len(matches) == 1, (
+        f"expected exactly one `##` section in api-reference.md mentioning "
+        f"`{name}`, found {len(matches)}"
+    )
+    return matches[0]
+
+
+def _returns_bullet(name: str) -> str:
+    """The `- **returns**` bullet from that function's section."""
+    lines = [
+        line.strip()
+        for line in _section_for(name).splitlines()
+        if line.strip().startswith("- **returns**")
+    ]
+    assert len(lines) == 1, (
+        f"expected exactly one `- **returns**` bullet in api-reference.md's "
+        f"`{name}` section, found {len(lines)}"
+    )
+    return lines[0]
+
+
+def _exported_error_names() -> set[str]:
+    """Every exception class the package exports, from `xlsxturbo.__all__`.
+
+    Derived rather than listed, because a hardcoded copy here would agree with a
+    stale page forever -- which is the failure this class exists to catch.
+    """
+    import xlsxturbo
+
+    return {name for name in xlsxturbo.__all__ if name.endswith("Error")}
+
+
+class TestApiReferenceMatchesTheLibrary:
+    """`docs/api-reference.md` calls itself authoritative; nothing read it.
+
+    It said both DataFrame entry points return `None` (they return a shape),
+    and it drew an exception tree of "Six classes" that omitted `OptionError`
+    -- the one class most callers should be catching, since it is what makes
+    `except OptionError` mean "anything wrong with what I passed".
+
+    `tests/test_stability_policy.py` deliberately exempts exception names from
+    its public-surface check, so this page was the one part of the documented
+    surface with no mechanical reader at all.
+
+    Every assertion below is derived from the package or from the page's own
+    structure, and each has a control asserting it examined something.
+    """
+
+    def test_the_page_parses_into_the_sections_this_class_reads(self) -> None:
+        """Control: a parser matching nothing passes every check below."""
+        sections = _api_reference_sections()
+        assert len(sections) >= 5, (
+            f"api-reference.md parsed into {len(sections)} `##` section(s); the "
+            "checks below read named sections, so a page that stopped parsing "
+            "would pass them all while reading nothing"
+        )
+        assert "Exceptions" in sections, (
+            f"api-reference.md has no `## Exceptions` section; found "
+            f"{sorted(sections)}"
+        )
+        for name in DATAFRAME_ENTRY_POINTS:
+            assert _returns_bullet(name), f"no returns bullet found for `{name}`"
+
+    def test_the_dataframe_entry_points_do_not_claim_to_return_none(self) -> None:
+        """Both return a `(rows, cols)` shape, and the page must say so."""
+        wrong = [
+            f"{name}: {_returns_bullet(name)}"
+            for name in DATAFRAME_ENTRY_POINTS
+            if "`None`" in _returns_bullet(name)
+        ]
+        assert not wrong, (
+            f"api-reference.md documents {len(wrong)} DataFrame entry point(s) as "
+            f"returning `None`. They return the rows and columns written -- "
+            f"`tuple[int, int]` and `list[tuple[int, int]]`: {wrong}"
+        )
+
+    def test_the_exception_section_names_every_exported_error_class(self) -> None:
+        """A class missing from the tree is a class nobody knows to catch."""
+        exported = _exported_error_names()
+        assert len(exported) >= 5, (
+            f"only {len(exported)} exception name(s) derived from xlsxturbo.__all__ "
+            f"({sorted(exported)}); the comparison below would be near-vacuous"
+        )
+        section = _section_for("Exceptions")
+        missing = sorted(name for name in exported if name not in section)
+        assert not missing, (
+            f"api-reference.md's Exceptions section does not name {missing}, which "
+            f"xlsxturbo.__all__ exports. Every exported class is part of the "
+            f"stability promise and has to be catchable from the documentation."
+        )
+
+    def test_the_stated_class_count_matches_what_is_exported(self) -> None:
+        """The page opens with a count, and a count is a claim.
+
+        It read "Six classes" against seven exported ones for two releases. A
+        number written in prose beside a list is the part of a page that rots
+        first, because adding to the list does not touch it.
+        """
+        expected = _COUNT_WORDS[len(_exported_error_names())]
+        section = _section_for("Exceptions")
+        stated = [
+            line.strip()
+            for line in section.splitlines()
+            if line.strip().endswith("classes, all exported from `xlsxturbo`:")
+        ]
+        assert len(stated) == 1, (
+            f"expected one '<N> classes, all exported from `xlsxturbo`:' line in "
+            f"api-reference.md's Exceptions section, found {stated}"
+        )
+        assert stated[0].startswith(expected), (
+            f"api-reference.md says {stated[0]!r} but xlsxturbo exports "
+            f"{len(_exported_error_names())} exception classes "
+            f"({sorted(_exported_error_names())}), so it should read "
+            f"{expected!r}"
+        )

@@ -118,6 +118,49 @@ fn write_float(
     }
 }
 
+/// Write a pre-1900 temporal value as its Python `str()` instead of a serial.
+///
+/// Excel's serial numbering assumes a phantom 1900-02-29, so anything below
+/// serial 61 would render one day late. Three branches of
+/// [`write_py_value_with_format`] need this and differ only in what they call
+/// the value in the error message, which is what `what` supplies.
+fn write_pre_1900_as_text(
+    worksheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    value: &Bound<'_, PyAny>,
+    fmt: Option<&Format>,
+    what: &str,
+) -> Result<(), String> {
+    let s = value
+        .str()
+        .map_err(|e| format!("Failed to convert {} to string: {}", what, e))?
+        .to_string();
+    write_str(worksheet, row, col, s, fmt)
+}
+
+/// Read `year`, `month` and `day` off a Python date or datetime.
+///
+/// The datetime branch reads six more attributes after these three; only the
+/// shared head is here, so the two branches still differ where they actually
+/// differ. `what` is "datetime" or "date", reproducing each branch's own
+/// wording.
+fn extract_ymd(value: &Bound<'_, PyAny>, what: &str) -> Result<(i32, u32, u32), String> {
+    let year: i32 = value
+        .getattr("year")
+        .and_then(|v| v.extract())
+        .map_err(|e| format!("Failed to extract {} year: {}", what, e))?;
+    let month: u32 = value
+        .getattr("month")
+        .and_then(|v| v.extract())
+        .map_err(|e| format!("Failed to extract {} month: {}", what, e))?;
+    let day: u32 = value
+        .getattr("day")
+        .and_then(|v| v.extract())
+        .map_err(|e| format!("Failed to extract {} day: {}", what, e))?;
+    Ok((year, month, day))
+}
+
 /// Write a cell value to the worksheet with appropriate formatting.
 pub(crate) fn write_cell(
     worksheet: &mut Worksheet,
@@ -245,11 +288,14 @@ pub(crate) fn write_py_value_with_format(
         // Dates before 1900-03-01 (serial 61) can't be represented correctly
         // due to Excel's 1900 leap-year bug; fall back to string.
         if excel_dt < 61.0 {
-            let s = value
-                .str()
-                .map_err(|e| format!("Failed to convert numpy datetime64 to string: {}", e))?
-                .to_string();
-            return write_str(worksheet, row, col, s, column_format);
+            return write_pre_1900_as_text(
+                worksheet,
+                row,
+                col,
+                value,
+                column_format,
+                "numpy datetime64",
+            );
         }
         let fmt = column_format.unwrap_or(datetime_format);
         return write_num(worksheet, row, col, excel_dt, Some(fmt));
@@ -263,18 +309,7 @@ pub(crate) fn write_py_value_with_format(
     // (pandas Timestamp is itself a datetime subclass, so the typed check
     // already covers it, but the string check costs nothing extra here).
     if value.cast::<PyDateTime>().is_ok() || type_name == "datetime" || type_name == "Timestamp" {
-        let year: i32 = value
-            .getattr("year")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime year: {}", e))?;
-        let month: u32 = value
-            .getattr("month")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime month: {}", e))?;
-        let day: u32 = value
-            .getattr("day")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract datetime day: {}", e))?;
+        let (year, month, day) = extract_ymd(value, "datetime")?;
         let hour: u32 = value
             .getattr("hour")
             .and_then(|v| v.extract())
@@ -318,11 +353,7 @@ pub(crate) fn write_py_value_with_format(
         // Dates before 1900-03-01 (serial 61) can't be represented correctly
         // due to Excel's 1900 leap-year bug; fall back to string.
         if excel_dt < 61.0 {
-            let s = value
-                .str()
-                .map_err(|e| format!("Failed to convert datetime to string: {}", e))?
-                .to_string();
-            return write_str(worksheet, row, col, s, column_format);
+            return write_pre_1900_as_text(worksheet, row, col, value, column_format, "datetime");
         }
         let fmt = column_format.unwrap_or(datetime_format);
         return write_num(worksheet, row, col, excel_dt, Some(fmt));
@@ -333,18 +364,7 @@ pub(crate) fn write_py_value_with_format(
     // (checked first) already returns for any datetime/subclass instance,
     // even though `PyDate` would also match those (datetime is-a date).
     if value.cast::<PyDate>().is_ok() || type_name == "date" {
-        let year: i32 = value
-            .getattr("year")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date year: {}", e))?;
-        let month: u32 = value
-            .getattr("month")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date month: {}", e))?;
-        let day: u32 = value
-            .getattr("day")
-            .and_then(|v| v.extract())
-            .map_err(|e| format!("Failed to extract date day: {}", e))?;
+        let (year, month, day) = extract_ymd(value, "date")?;
 
         let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
             .ok_or_else(|| format!("Invalid date: year={}, month={}, day={}", year, month, day))?;
@@ -352,11 +372,7 @@ pub(crate) fn write_py_value_with_format(
         // Dates before 1900-03-01 (serial 61) can't be represented correctly
         // due to Excel's 1900 leap-year bug; fall back to string.
         if excel_date < 61.0 {
-            let s = value
-                .str()
-                .map_err(|e| format!("Failed to convert date to string: {}", e))?
-                .to_string();
-            return write_str(worksheet, row, col, s, column_format);
+            return write_pre_1900_as_text(worksheet, row, col, value, column_format, "date");
         }
         let fmt = column_format.unwrap_or(date_format);
         return write_num(worksheet, row, col, excel_date, Some(fmt));

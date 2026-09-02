@@ -627,3 +627,93 @@ class TestCodeqlActionPinsMoveTogether:
             "entry points will arrive as three PRs again, none of which can pass "
             "on its own"
         )
+
+
+# `cargo install <crate>` with no version resolves to whatever crates.io serves
+# on the day the job runs. `--locked` does not help: it pins the tool's
+# *dependencies*, not the tool. The release job's SBOM step was unpinned, six
+# lines above a comment recording that the Python SBOM tool had been unpinned,
+# floated to 7.x and failed the v0.19.0 release on a renamed flag -- and the
+# release path is the worse place for it, because `github-release` needs the
+# `sbom` artifact and PyPI publish has already happened by then.
+CARGO_INSTALL = re.compile(r"cargo install\s+(?P<spec>[A-Za-z0-9_.@-]+)")
+
+
+def _cargo_installs() -> list[tuple[str, int, str]]:
+    """Every `cargo install <spec>` in a workflow, as (file, line, spec)."""
+    found: list[tuple[str, int, str]] = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            match = CARGO_INSTALL.search(line)
+            if match:
+                found.append((path.name, number, match.group("spec")))
+    return found
+
+
+class TestCargoInstalledToolsArePinned:
+    """A workflow that installs a Rust tool must name its version.
+
+    Two failure modes, and the second is the one that cost a release. An
+    unpinned tool takes a breaking upgrade on some later run, with nothing in
+    the diff to explain the red build. And an unpinned tool whose *binary* is
+    cached under a fixed key -- which is what `ci.yml` did for `cargo-audit` --
+    never moves at all: the version is whatever the first run happened to
+    install, pinned in effect and written down nowhere, so a bump cannot reach
+    the runner even deliberately.
+
+    Writing `crate@version` fixes both: the version is in the diff, and where a
+    cache key carries it, changing it is what misses the cache.
+    """
+
+    def test_the_scan_finds_the_install_lines_it_audits(self) -> None:
+        """Control: a sweep matching nothing passes every assertion below."""
+        installs = _cargo_installs()
+        assert installs, (
+            "no `cargo install` line was found in any workflow, so the pin check "
+            "below is vacuous; the scan, not the workflows, is what to fix"
+        )
+        files = {name for name, _, _ in installs}
+        assert {"ci.yml", "release.yml"} <= files, (
+            "expected `cargo install` lines in both ci.yml (cargo-audit) and "
+            f"release.yml (cargo-cyclonedx); found them only in {sorted(files)}"
+        )
+
+    def test_every_cargo_installed_tool_names_a_version(self) -> None:
+        """`cargo install foo` is a floating dependency; `foo@1.2.3` is not."""
+        unpinned = [
+            f"{name}:{number} installs `{spec}`"
+            for name, number, spec in _cargo_installs()
+            if "@" not in spec
+        ]
+        assert not unpinned, (
+            f"{len(unpinned)} `cargo install` line(s) name no version, so the tool "
+            f"floats and a breaking release lands with nothing in the diff to "
+            f"explain it: {unpinned}. Write `crate@X.Y.Z`; `--locked` pins the "
+            f"tool's dependencies, not the tool."
+        )
+
+    def test_the_cargo_audit_cache_key_carries_its_version(self) -> None:
+        """A cache key that never changes is a pin nobody can move.
+
+        `ci.yml` caches `~/.cargo/bin/cargo-audit` and installs only on a miss.
+        With the key fixed at `-bin-v1` the miss never happened again, so the
+        pinned version below could be bumped and the runner would keep the old
+        binary. The key has to move with the version or one of the two is
+        decoration.
+        """
+        text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        specs = [
+            spec
+            for name, _, spec in _cargo_installs()
+            if name == "ci.yml" and spec.startswith("cargo-audit@")
+        ]
+        assert len(specs) == 1, (
+            f"expected exactly one pinned `cargo install cargo-audit@...` in ci.yml, "
+            f"found {specs}"
+        )
+        version = specs[0].split("@", 1)[1]
+        assert f"cargo-audit-bin-{version}" in text, (
+            f"ci.yml installs cargo-audit {version} but no cache key names that "
+            f"version, so a cached older binary is used instead and the pin never "
+            f"reaches the runner"
+        )

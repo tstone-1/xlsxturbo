@@ -171,12 +171,16 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         "WorkbookValidationError",
         &[configuration_ty],
         "The configuration is well-formed, but Excel does not permit it.\n\n\
-         Its one raise site is the pre-check that rejects two sheets claiming the \
-         same table name -- Excel requires those to be unique across a workbook -- \
-         and the message names both sheets. Workbook rules the writer only detects \
+         Raised by the workbook-level name pre-checks: two sheets claiming the same \
+         table name, and a `defined_names` entry colliding with a table name. Excel \
+         requires both kinds to be unique across a workbook, and each message names \
+         the sheet and both names involved. Workbook rules the writer only detects \
          while serialising, a duplicate sheet name among them, surface as \
          `FileError` instead. A subclass of `ConfigurationError`, and so also a \
-         `ValueError`.",
+         `ValueError`.\n\n\
+         Deliberately not phrased as a count of raise sites: that wording went stale \
+         twice as pre-checks were added, so `tests/test_errors.py` now asserts the \
+         subjects rather than the number.",
     )?;
 
     // `get_or_init` rather than `set`: re-importing the extension must not invalidate a

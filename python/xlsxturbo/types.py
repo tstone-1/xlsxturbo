@@ -155,7 +155,9 @@ class ConditionalFormat(_ConditionalRequired, total=False):
     solid: bool  # True for solid fill, False for gradient (default)
     direction: str  # 'left_to_right', 'right_to_left', or 'context' (default)
     # For icon sets:
-    icon_type: str  # '3_arrows', '3_traffic_lights', '3_flags', '4_arrows', '5_arrows', etc. (see README)
+    # '3_arrows', '3_traffic_lights', '3_flags', '4_arrows', '5_arrows', ...
+    # Full list: https://tstone-1.github.io/xlsxturbo/conditional-formatting/
+    icon_type: str
     reverse: bool  # Reverse icon order
     icons_only: bool  # Show only icons, hide values
     # For cell rules (type='cell'):

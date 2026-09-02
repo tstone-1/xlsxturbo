@@ -5,26 +5,208 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-09-02
+
+### Fixed
+- **CSV integers too large for `i64` are written as text instead of being silently
+  rounded.** `parse_value` tried `i64` and fell straight through to `f64`, which parses any
+  run of digits, so a CSV cell `12345678901234567890` reached the workbook as
+  12345678901234567000 and a digit string long enough to parse as infinity reached it as an
+  empty cell. Both contradicted the documented guarantee — kept all along on the DataFrame
+  path — that integers above 2^53 are written as text. Values within `u64` are canonicalised
+  (a leading `+` or leading zeros are dropped, as the `i64` arm already did); past that the
+  caller's digits are written through unchanged. A test in `src/parse/boundaries.rs` had
+  accepted the rounded float as long as it was "large", so it could not see the defect; it
+  now compares digits. The new property test's generator was shown to reach the boundary:
+  its minimal failing input under mutation is 21 digits long.
+- **Option failures name the option, and the key inside it, in the documented
+  `<feature>['<key>']: <message>` form.** The parsers under `src/parse/` take a value rather
+  than an option name, so naming the option is the caller's job, and 29 call sites across
+  `conditional_formats`, `charts`, `validations`, `header_format`, `column_formats`,
+  `rich_text`, `merged_ranges`, `comments`, `hyperlinks`, `images`, `checkboxes`,
+  `textboxes`, `sparklines`, `formula_columns`, `column_widths` and `cells` were not doing
+  it. A `conditional_formats` dict holding two entries answered `Unknown criteria 'bogus'`
+  with no indication which entry was meant; a `header_format` with three colour keys
+  answered `Unknown color: nope` for any of them. The existing sentence is unchanged and
+  only prefixed, so `except` clauses and message matching on the old text keep working.
+- **A failure opening a CSV input now names the path.** It read `Failed to open input file:
+  No such file or directory (os error 2)` — every word true, and none of it telling a caller
+  who built the path from parts what was actually opened. The save side has always named its
+  path. A failure setting a row height likewise names the row.
+- **A DataFrame with rows and no columns no longer writes a phantom one-column table.**
+  `pd.DataFrame(index=range(3))` with a `table_style` produced a table over `A1:A4` carrying
+  the writer's generated header `Column1` — a column nobody asked for in a sheet that holds
+  nothing else. The table gate checked the row count and not the column count.
+- **`df_to_xlsx`'s docstring documented 25 of its 26 parameters.** `header_format` was
+  absent entirely, and `table_name` sat six entries away from where `dfs_to_xlsx` lists it.
+  Found by a new parity guard, not by reading. The two `Args:` blocks now list the same
+  options in the same order, and `tests/test_api_surface.py` keeps them that way.
+- **`help(WorkbookValidationError)` named one of its two raise sites.** It still said "Its
+  one raise site is the pre-check that rejects two sheets claiming the same table name"
+  after 1.3.0 added the defined-name collision check, which `docs/errors.md` already
+  documented correctly — the second time this docstring has gone stale by counting raise
+  sites. It now names the subjects instead, and a test asserts both are named.
+- **The `Raises:` sections said `ValueError`.** `ConfigurationTypeError` is a `TypeError`,
+  so the line had been incomplete since 0.19.0; they now point at `XlsxTurboError` and its
+  subclasses, and at the errors page. Two "see README" pointers, for the validation type
+  aliases and the conditional-format icon names, point at the docs pages that carry those
+  lists — the README stopped carrying them in the 0.19.0 split. `docs/errors.md`'s
+  unknown-key example matches the message the code actually produces.
+- `docs/api-reference.md` said `df_to_xlsx` and `dfs_to_xlsx` return `None`. They return
+  the rows and columns written — `tuple[int, int]` and `list[tuple[int, int]]`, the header
+  row counted when `header=True`. The `ChartOptions` example on the same page used
+  unqualified ranges (`"B2:B10"`), which the library refuses; it now uses sheet-qualified
+  ones and says why. And the page documented "Six classes" and drew an exception tree
+  without `OptionError`: there are seven, and `OptionError` is the one most callers should
+  catch, since it is what makes `except OptionError` mean "anything wrong with what I
+  passed".
+- **`THIRD-PARTY-LICENSES.md` named the wrong version of five crates since 1.3.0, the
+  writer itself among them.** The release commit refreshed `Cargo.lock` (`rust_xlsxwriter`
+  0.98.2 -> 0.99.0, which was the release's subject; `cc` 1.4.3 -> 1.4.4, `log` 0.4.33 ->
+  0.4.34, `either` 1.17.0 -> 1.18.0, `crc32fast` 1.5.0 -> 1.5.1) without regenerating the notice,
+  and the guard in `tests/test_third_party_licenses.py` compared crate names only, so a
+  version bump was invisible to it; the generator's own `--check`, which would have seen
+  it, runs in no CI job. The notice is regenerated, the guard now compares versions against
+  what `Cargo.lock` resolves, and `AGENTS.md` says to regenerate after `cargo update`.
+- `docs/formatting.md` documented `border_*` as string-only (they take a bool too), omitted
+  `center_across` and `distributed` from the horizontal alignments and `justify` and
+  `distributed` from the vertical ones, and described merged-range formats as font-only
+  when they accept the whole `header_format` set. Every accepted value in the corrected
+  lists was measured against the library, not read off the source.
 
 ### Changed
 - **`df_to_xlsx` and `dfs_to_xlsx` release the GIL while writing the archive.** Serialising
   and compressing the workbook touches no Python object, and it measured as the larger half
   of a call — so holding the interpreter lock across it meant threaded exports did not run
   in parallel at all. Four threads now finish a batch in about 43% of single-threaded wall
-  time, against 98-102% before; single-threaded cost is unchanged. The gain plateaus near
-  2.3x because reading values out of the DataFrame still holds the GIL and cannot be
-  detached. `csv_to_xlsx` already released the GIL for its whole conversion and is
-  unaffected. No API change, and nothing to opt into.
+  time, against 98-102% before, measured on the 32-core machine `docs/performance.md`
+  describes; single-threaded cost is unchanged. The gain plateaus near 2.3x because reading
+  values out of the DataFrame still holds the GIL and cannot be detached. `csv_to_xlsx`
+  already released the GIL for its whole conversion and is unaffected. No API change, and
+  nothing to opt into.
 
   `tests/test_concurrency.py` pins both halves: that concurrent writes off one shared frame
   produce correct workbooks — including a failure raised from inside the GIL-free region —
   and that four threads beat one by a wide enough margin. The timing case runs once per
-  entry point, so removing either `py.detach` alone reddens exactly that entry point.
+  entry point.
 
   Output is unaffected: the same workbook built before and after the change is identical in
   13 of its 14 archive members, differing only in `docProps/core.xml`, which records the
   creation time and has never been reproducible between runs.
+- **`row_heights` validates its own keys and values, and its failures are in the exception
+  hierarchy.** It was the one dict option still typed straight into the PyO3 signature
+  (`HashMap<u32, f64>`), so the binding's conversion decided everything and none of the
+  validation its neighbours got in 1.2.0 applied. Measured through the shipped 1.3.0 wheel:
+  `{True: 40}` sized row 2 (`bool` subclasses `int`), `{0: True}` set a height of one point,
+  and `{-1: 20}` or `{2**40: 20}` raised `builtins.OverflowError` — an `ArithmeticError`, so
+  caught by neither `except XlsxTurboError` nor the `except (XlsxTurboError, TypeError)`
+  that `docs/errors.md` recommends for option mistakes. A bool key or value is now
+  `ConfigurationTypeError`, and an index outside `0..=1048575` is `ConfigurationError`, each
+  naming the entry (`row_heights['-1']: must be a non-negative row index`). The per-sheet
+  form goes through the same extractor, so a mistake reads identically wherever it is
+  written; its own wrong-type message used to read "must be a dict ..., got dict". This is
+  a defect fix rather than the exception change `docs/stability.md` counts as a 2.0.0 event:
+  the previous behaviour was a wrong result or an unclassified `ArithmeticError`, not a
+  promised value, and 1.2.0 reclassified `column_widths` bools on the same basis. The stub
+  annotation is unchanged.
+- **A negative, NaN or infinite `column_widths` or `row_heights` value now raises instead of
+  reaching the writer.** rust_xlsxwriter does `round() as u32` internally, so
+  `column_widths={0: -5}` wrote `<col min="1" max="1" width="0" hidden="1"
+  customWidth="1"/>` — an off-by-sign in a caller's width calculation made the column
+  *disappear*, silently. NaN and infinity gave widths of 0.71 and 0.57 characters, and
+  `row_heights={0: inf}` a row height of 3,221,225,471 points against Excel's 409-point
+  maximum. All of these are now `ConfigurationError: column_widths['0']: width must be a
+  finite, non-negative number, got -5`. Zero is still accepted, since that is how a column
+  is hidden on purpose.
+- **A list item of the wrong shape in `sheets`, `merged_ranges` or `hyperlinks` is now a
+  `ConfigurationTypeError` naming the index.** `len()` and `get_item(0)` propagated PyO3's
+  own error unclassified, so `dfs_to_xlsx([5], p)` raised `builtins.TypeError: object of
+  type 'int' has no len()` and `dfs_to_xlsx([{"a": 1, "b": 2}], p)` raised
+  `builtins.KeyError: 0` — and a `KeyError` escapes even the documented catch-all. The
+  message is now `sheets[0]: expected a (df, sheet_name[, options]) tuple, got int`. A
+  `list` is accepted where a tuple is, as before; a `str` is not, since a two-character
+  string would otherwise be read as a two-element spec.
+- **A table name the writer assigns itself is now visible to both name pre-checks.**
+  rust_xlsxwriter names every unnamed table `Table{id}` from a workbook-wide counter during
+  the save, and the pre-checks could not see those names — so
+  `df_to_xlsx(df, p, table_style="Medium9", defined_names={"Table1": "..."})` and a workbook
+  mixing an explicit `table_name="Table2"` with an auto-named sheet both still failed as
+  `FileError: Failed to save workbook to '...': Name 'Table1' has already been used in this
+  workbook`, naming neither the sheet nor the option. Both are now
+  `WorkbookValidationError` naming the sheet and both names, and the message explains where
+  a name the caller never wrote came from. The counter was measured against
+  `xl/tables/table*.xml` rather than reasoned about: it counts tables in sheet order, an
+  explicitly named table consumes an id without using the generated name, and a sheet that
+  creates no table consumes none. `docs/tables.md` says so.
+- **A symlink at `output_path` is written through again.** `persist` is a rename, so since
+  0.18.0's atomic save an export to `latest.xlsx -> archive/2026-09.xlsx` replaced the
+  *link* and left the archive byte-unchanged — a pipeline could stop updating its target
+  with nothing to see. The destination is resolved before the staging file is placed, so the
+  rename stays within one filesystem and stays atomic. A link whose target does not exist
+  falls back to creating a regular file at the link's own path. Documented under "Output
+  File Safety" in `docs/compatibility.md`.
+- **The CSV integer screens are behind a length gate, so ordinary cells do not pay for
+  them.** Every non-integer cell — every float, every word, every date — was attempting a
+  `u64` parse and a byte scan before reaching the float branch. Both screens now sit behind
+  `trimmed.len() >= 19`, which is exact rather than generous: `i64::MAX` is 19 digits, so
+  the shortest integer literal that can fail the `i64` parse above is 19 bytes, and a sign
+  or a leading zero only makes it longer. Behaviour is unchanged for every input the screens
+  exist for. Measured through two release wheels, interleaved ABBA over eight rounds of a
+  300k-row conversion: median pairwise ratio 1.0064, against an identical-binary control
+  whose own ratios span 0.9825 to 1.0250 — the two builds are indistinguishable, and the
+  saving is below this workload's floor because the xlsx write dominates it.
+- **Over-limit column widths and row heights stay accepted, and the decision is measured
+  and pinned.** Excel caps a column at 255 characters and a row at 409.5 points. Widths
+  above the cap never leave the writer (255, 300 and 1,000,000 all store the same width),
+  and Excel clamps an over-limit row height when it loads the file: with the recovery probe
+  on Excel for Mac 16, `row_heights={0: 500}` and `{0: 1e6}` drew no repair prompt and both
+  read back as 409.5, while a deliberately corrupted control in the same run did draw the
+  prompt. Refusing these values would therefore be a breaking change for no defect — unlike
+  the 1.2.0 name screens, which existed because Excel objected to the file. A test pins the
+  decision so a later tidy-up has to re-measure rather than assume, and `docs/formatting.md`
+  states the caps and the clamping.
+- `cargo update`: flate2 1.1.9 -> 1.1.10 (which drops its `miniz_oxide` backend and keeps
+  `zlib-rs`, taking `adler2` out of the tree with it), indexmap 2.14.0 -> 2.14.1, syn 3.0.3
+  -> 3.0.4. `THIRD-PARTY-LICENSES.md` regenerated; the MIT crate count falls from 95 to 92.
+- **`textboxes[...]['font']` reports a non-dict value with the type it received**, and its
+  nested errors use the same `'font'` quoting as every other nested dict.
+- **The CLI exits 2 for a usage error and 1 for a conversion failure.** An invalid
+  `--date-order` exited 1, the same code as an unreadable input or a malformed CSV, so a
+  caller could not tell "you typed the command wrong" from "the conversion failed" — and
+  the binary disagreed with its own argument parser, since clap already exits 2 for the
+  usage errors it rejects itself. `tests/cli.rs` pins both codes and carries a control
+  asserting clap's value, so the two halves cannot drift apart again. The CLI is outside
+  the stability promise (`docs/stability.md`) and is not shipped in the wheel;
+  `docs/csv-conversion.md` lists the codes.
+- The release SBOM job pins `cargo-cyclonedx@0.5.9` and the CI audit job pins
+  `cargo-audit@0.22.2`. `--locked` pins a tool's dependencies, not the tool, so both were
+  free to take a breaking upgrade — the release path being the worse of the two, since
+  `github-release` needs the SBOM artifact and PyPI publish has already happened by then.
+  The `cargo-audit` binary cache is now keyed on that version instead of a fixed `-bin-v1`,
+  which never missed: the cached binary was whatever the first run installed, and no bump
+  could reach the runner.
+
+### Added
+- `tests/test_build_is_current.py` fails when the built extension is older than the tracked
+  Rust sources, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`, naming the newer file and
+  the rebuild command. A stale extension produces confident wrong readings rather than an
+  error; on 2026-09-02 it cost two rounds of diagnosis aimed at source that was never the
+  problem. CI is unaffected — every job builds immediately before pytest.
+- `tests/test_error_context.py`: every option failure that goes through a `src/parse/`
+  helper is asserted to name its option and key, 33 cases with two controls; blanking
+  every context site reddens exactly the 33.
+- `tests/test_docs_site.py::TestApiReferenceMatchesTheLibrary`. `docs/api-reference.md`
+  calls itself authoritative and nothing read it — `tests/test_stability_policy.py`
+  deliberately exempts exception names from its surface check, so this was the one
+  documented surface with no mechanical reader. It asserts neither DataFrame entry point
+  is documented as returning `None`, that the exception section names every `*Error` in
+  `xlsxturbo.__all__` (derived, not listed), and that the stated class count matches. Each
+  has an emptiness control; all four were shown to go red.
+- `tests/test_ci_config.py::TestCargoInstalledToolsArePinned`. Every `cargo install` line
+  in a workflow must name a version, and where a cache key exists for the installed binary
+  it must carry that version — otherwise the pin cannot reach the runner even deliberately.
+- `tests/test_api_surface.py` compares the `Args:` blocks of the two entry-point docstrings;
+  it went red on its first run (see Fixed).
 
 ### Documentation
 - `docs/stability.md` said one `abi3` wheel per platform covers "every supported version".
@@ -32,6 +214,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wheel, so `pip` falls back to the source distribution and needs a Rust toolchain. The page
   now says so. Measured on 3.14.7t and 3.15.0rc1t, against the ordinary 3.14.7 as a control.
   No code change — the wheels, and what they support, are unchanged.
+- `CONTRIBUTING.md` and the pull-request template no longer restate the feature-wiring
+  checklist, the CI flags, or where option shapes live; they point at `AGENTS.md` and
+  `BUILD.md`. Restating is how all three drifted: the checklist still sent `TypedDict`s to
+  `xlsxturbo.pyi` two releases after they moved to `python/xlsxturbo/types.py`, both files
+  asked for a `README.md` update for new options (per-feature examples belong on the docs
+  page since 0.19.0), and the checks list was missing `--release` on `cargo test` — the
+  exact drift `BUILD.md` was corrected for.
+- The hand-maintained crate counts in `README.md`, `pyproject.toml`, `AGENTS.md` and
+  `scripts/gen_third_party_licenses.py` are gone. Four copies of one number had reached
+  three different values, none of them current; the generated notice counts them.
+  `docs/api-reference.md` likewise no longer states how many names `xlsxturbo.types.__all__`
+  exports — that count was correct and would have gone stale silently.
+- The `dfs_to_xlsx` `sheets` parameter is documented as accepting a `list` of the same
+  shape wherever a tuple is shown. Behaviour is unchanged — lists have always been
+  accepted, and refusing them now would be a breaking narrowing for no gain. The tuple
+  stays the recommended form and the one the type stubs describe.
+- `docs/compatibility.md` says why a dangling symlink at the output path gets a regular
+  file at the link's own path rather than a file at its missing target: following the link
+  would write to a path the caller never named, in a directory that need not exist.
+- `BUILD.md`'s Pre-Push Checklist gained step 12, `mkdocs build --strict`, copied verbatim
+  from the `Docs / Build site` job. Nothing ran the documentation build locally, so a
+  broken link or a page missing from the nav was found only after a push.
+- The dangling-symlink test could not fail: its assertions ran through `Path.exists()`,
+  which follows the link, so they were satisfied both by the pinned behaviour and by the
+  one it rules out. It now asserts the link path is a regular file and that the missing
+  target was not created; a mutation that follows the link leaves the three original
+  assertions green and is caught only by the new ones.
+
+### Internal
+- **The workbook lifecycle has one "finish" site.** `Workbook::new`, `apply_defined_names`
+  and the detached save were written out in both `convert.rs` and `lib.rs`, and the cost is
+  on record: the first draft of the GIL release wrapped only the `convert.rs` copy and the
+  whole suite stayed green. `convert::finish_workbook` now holds the defined names and the
+  save for both entry points, with one classification site; `convert_dataframe_to_xlsx`
+  takes a `&WriteConfig` instead of seven scalars. `ConvertError` still has exactly two
+  variants. `tests/test_concurrency.py` still measures the speedup per entry point.
+- **The thread-scaling test interleaves its two legs.** Best-of-3 per leg protects against a
+  hiccup inside a leg, not against machine load covering the whole serial block — which
+  inflates the serial time and produces a pass with the feature absent, the one outcome that
+  test exists to refuse. It was observed doing exactly that during a review, against a
+  build with no GIL release at all. The legs now alternate, and a passing run records its
+  ratio with `record_property` so the number reaches the junit output instead of vanishing.
+- `write_py_value_with_format` no longer carries three copies of the pre-1900 text fallback
+  or two of the year/month/day extraction. Output is unchanged, measured: over 35 value
+  types through both callers, every member of the archive is byte-identical except
+  `docProps/core.xml`. `apply_merged_ranges` resolves the cell format once instead of
+  calling `merge_range` in two arms that differed only in which format they passed; the
+  five `column_widths` call sites share one helper; the unreachable emptiness guard in
+  `apply_rich_text` is gone, since `extract_rich_text` has refused empty segment lists
+  since 1.2.0.
+- `tests/test_options.py` wrote its probe workbook into `tests/`, which `.gitignore`
+  un-ignores; it uses `tmp_path` now.
 
 ## [1.3.0] - 2026-08-23
 

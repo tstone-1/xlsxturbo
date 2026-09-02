@@ -128,6 +128,76 @@ class TestIntegerPrecisionBoundary:
         assert _cell(xlsx_path, "A2") == MAX_SAFE
         assert _cell(xlsx_path, "B2") == str(MAX_SAFE + 1)
 
+    @pytest.mark.parametrize(
+        "digits",
+        [
+            "12345678901234567890",  # 20 digits, the ordinary long identifier
+            "9223372036854775808",  # i64::MAX + 1
+            "9223372036854775807",  # i64::MAX: a control, see below
+            "-9223372036854775808",  # i64::MIN: a control, see below
+            "-9223372036854775809",  # i64::MIN - 1
+            "18446744073709551615",  # u64::MAX
+            "18446744073709551616",  # u64::MAX + 1, past every Rust integer
+            "1" * 400,  # long enough that f64 parses it as infinity
+        ],
+    )
+    def test_csv_integers_beyond_i64_are_written_as_text(
+        self, tmp_xlsx_factory: Callable[..., str], digits: str
+    ) -> None:
+        """A CSV integer too large for i64 keeps every digit.
+
+        The CSV path detects types by parsing text, and its integer attempt is
+        an ``i64``. Until 1.3.1 a failed ``i64`` fell straight through to
+        ``f64``, which parses any run of digits: ``12345678901234567890``
+        reached the workbook as 12345678901234567000, and a 400-digit run
+        parsed as infinity and reached it as an empty cell. Both contradict the
+        guarantee ``test_the_cutoff_is_at_two_to_the_53`` holds on the
+        DataFrame path.
+
+        The assertion is a literal digit comparison, not a tolerance: a
+        rounded value is still greater than 2^53, so any inequality against a
+        bound would pass on the broken output.
+
+        Two of the cases are controls rather than guards. ``i64::MAX`` and
+        ``i64::MIN`` are inside the integer branch, so they were already text
+        and stay green when the new screens are mutated out -- they are here to
+        say where the boundary is. Measured: mutating both screens away reddens
+        six of the eight.
+        """
+        csv_path = tmp_xlsx_factory(".csv")
+        xlsx_path = tmp_xlsx_factory()
+        Path(csv_path).write_text(f"v\n{digits}\n", encoding="utf-8")
+        xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+        assert _cell(xlsx_path, "A2") == digits
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("9007199254740992", 2**53),  # the cutoff itself stays a number
+            ("007", 7),  # leading zeros still normalise
+            ("+42", 42),
+            ("1e3", 1000.0),  # exponent notation stays on the float branch
+            ("1.5", 1.5),
+        ],
+    )
+    def test_the_csv_integer_screen_leaves_ordinary_numbers_alone(
+        self, tmp_xlsx_factory: Callable[..., str], text: str, expected: object
+    ) -> None:
+        """The control for the screen above.
+
+        Every case here was measured through the shipped 1.3.0 wheel before the
+        screen was added and must come back unchanged, so a screen that widened
+        into the float branch or into the i64 range fails here rather than
+        silently turning working numbers into text.
+        """
+        csv_path = tmp_xlsx_factory(".csv")
+        xlsx_path = tmp_xlsx_factory()
+        Path(csv_path).write_text(f"v\n{text}\n", encoding="utf-8")
+        xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
+        cell = _cell(xlsx_path, "A2")
+        assert not isinstance(cell, str), f"{text!r} became text"
+        assert cell == expected
+
     def test_a_float_is_not_subject_to_the_integer_cutoff(self, tmp_xlsx: str) -> None:
         """The control: a float past 2^53 stays a number.
 

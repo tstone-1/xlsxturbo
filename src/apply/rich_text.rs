@@ -1,6 +1,6 @@
 //! Rich text application helpers.
 
-use crate::parse::{parse_cell_ref, parse_rich_text_format};
+use crate::parse::{parse_cell_ref, parse_rich_text_format, WithOptionContext};
 use crate::types::RichTextSegment;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -13,8 +13,8 @@ pub(crate) fn apply_rich_text(
     rich_text: &IndexMap<String, Vec<RichTextSegment>>,
 ) -> Result<(), String> {
     for (cell_ref, segments) in rich_text {
-        let (row, col) = parse_cell_ref(cell_ref)?;
         let context = format!("rich_text['{}']", cell_ref);
+        let (row, col) = parse_cell_ref(cell_ref).in_option(&context)?;
 
         // Build formats and strings separately
         let mut formats: Vec<Format> = Vec::new();
@@ -37,11 +37,13 @@ pub(crate) fn apply_rich_text(
             .map(|(f, t)| (f, t.as_str()))
             .collect();
 
-        if !rich_segments.is_empty() {
-            worksheet
-                .write_rich_string(row, col, &rich_segments)
-                .map_err(|e| format!("Failed to write rich text at '{}': {}", cell_ref, e))?;
-        }
+        // No emptiness guard: `extract_rich_text` refuses an empty segment
+        // list, so every entry that reaches here has at least one segment and
+        // this vector has one entry per segment. The guard that used to sit
+        // here could not fire.
+        worksheet
+            .write_rich_string(row, col, &rich_segments)
+            .map_err(|e| format!("Failed to write rich text at '{}': {}", cell_ref, e))?;
     }
 
     Ok(())

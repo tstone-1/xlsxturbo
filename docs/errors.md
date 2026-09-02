@@ -57,7 +57,7 @@ they identify the offending entry rather than just the option family:
 
 ```python
 >>> df_to_xlsx(df, "out.xlsx", comments={"B2": {"txt": "note"}})
-xlsxturbo.ConfigurationError: comments['B2']: unknown key 'txt'
+xlsxturbo.ConfigurationError: comments['B2']: unknown option 'txt'. Valid: text, author
 ```
 
 ### Existing `except ValueError` and `except TypeError` still work
@@ -161,12 +161,25 @@ Argument conversion performed by the Python/Rust binding before xlsxturbo sees t
 raises a plain `TypeError`. Passing a non-string where the signature requires `str` is the
 usual way to hit this. Everything xlsxturbo itself validates is in the hierarchy.
 
-Two dict-valued options fall on the binding's side of that line, which is worth knowing
-because their neighbours do not: **`row_heights` and `defined_names`** are typed in the
-signature, so a wrong inner type is rejected by the conversion and arrives as a plain
-`TypeError`. `column_widths` looks identical from Python and is read by an extractor, so the
-same mistake there is a `ConfigurationTypeError`. Catch `(XlsxTurboError, TypeError)` if you
-need to treat all option-type mistakes alike.
+One dict-valued option falls on the binding's side of that line, which is worth knowing
+because its neighbours do not: **`defined_names`** is typed in the signature, so a wrong
+inner type is rejected by the conversion and arrives as a plain `TypeError`.
+`column_widths` and `row_heights` look identical from Python and are read by extractors,
+so the same mistake in either is a `ConfigurationTypeError`. Catch
+`(XlsxTurboError, TypeError)` if you need to treat all option-type mistakes alike.
+
+`row_heights` was on the binding's side of the line until 1.3.x, and moving it fixed
+more than the class name. The conversion accepted `{True: 40}` — `bool` subclasses `int`
+in Python — and silently sized row 2; it accepted `{0: True}` as a height of one point;
+and it answered a negative or out-of-range key with `OverflowError`, which is an
+`ArithmeticError` and so is caught by neither `except XlsxTurboError` nor the
+`except (XlsxTurboError, TypeError)` recommended above. Those are now
+`ConfigurationTypeError` and `ConfigurationError`, each naming the entry:
+
+```python
+>>> df_to_xlsx(df, "out.xlsx", row_heights={-1: 20})
+xlsxturbo.ConfigurationError: row_heights['-1']: must be a non-negative row index
+```
 
 A dtype problem discovered deep in the write pipeline surfaces as `ConfigurationError`
 rather than `InputDataError`: the pipeline reports it as a message without a category, and

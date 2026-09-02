@@ -57,6 +57,9 @@ xlsxturbo.dfs_to_xlsx([
 ], "mixed.xlsx", header=True, autofit=True)
 ```
 
+A `list` of the same shape is accepted wherever a tuple is shown; the tuple is the
+recommended form and the one the type stubs describe.
+
 Available per-sheet options:
 - `header` (bool): Include column names as header row
 - `autofit` (bool): Automatically adjust column widths

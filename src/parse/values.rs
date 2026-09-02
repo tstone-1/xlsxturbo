@@ -14,6 +14,43 @@ pub(crate) fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
         return CellValue::Integer(int_val);
     }
 
+    // An integer too large for `i64` must not reach the `f64` branch below.
+    // `f64` parses any run of digits and silently rounds it, which contradicts
+    // the guarantee the DataFrame path keeps (`write.rs::int_fits_f64`) and the
+    // documentation states: integers above 2^53 are written as text. Measured
+    // before this branch existed, a CSV cell `12345678901234567890` reached the
+    // workbook as 12345678901234567000, and a digit string long enough to parse
+    // as infinity reached it as an empty cell.
+    //
+    // There is no numeric arm to take here. Anything that fails `i64` and is
+    // still an integer exceeds `i64::MAX`, hence 2^53, so the shared
+    // overflow-to-string policy resolves to "text" for every value on this path.
+    //
+    // Both screens are behind a length gate so that ordinary cells -- every
+    // float, every word, every date -- do not pay for them. 19 is exact rather
+    // than generous: `i64::MAX` is 9223372036854775807, 19 digits, so the
+    // smallest integer literal that can fail the parse above is
+    // 9223372036854775808 (19 bytes). A sign or a leading zero only makes the
+    // literal longer, and the negative side needs 20 bytes (`i64::MIN` is
+    // -9223372036854775808, so the first failing negative is
+    // -9223372036854775809). Anything shorter than 19 bytes that reaches here
+    // is therefore not an integer literal at all, and both screens would
+    // decline it.
+    if trimmed.len() >= 19 {
+        if let Ok(uint_val) = trimmed.parse::<u64>() {
+            // Still inside a Rust integer type, so round-trip it: the written
+            // text is canonical the same way the `i64` arm turns "+42" into 42
+            // and "007" into 7.
+            return CellValue::String(uint_val.to_string());
+        }
+        if is_ascii_integer_literal(trimmed) {
+            // Beyond `u64` (or below `i64::MIN`) there is no integer type left
+            // to normalise against, so the caller's digits go through as given
+            // -- including any sign and any leading zeros.
+            return CellValue::String(trimmed.to_string());
+        }
+    }
+
     // Try float
     if let Ok(float_val) = trimmed.parse::<f64>() {
         if float_val.is_nan() || float_val.is_infinite() {
@@ -65,6 +102,17 @@ pub(crate) fn parse_value(value: &str, date_order: DateOrder) -> CellValue {
     // trailing whitespace on genuine string cells is preserved; `trimmed`
     // is only used above for type detection.
     CellValue::String(value.to_string())
+}
+
+/// Whether `text` is an ASCII integer literal, `[+-]?[0-9]+`.
+///
+/// Deliberately narrower than what `f64::from_str` accepts: no exponent, no
+/// decimal point, no non-ASCII digits. That keeps "1e3" and "1.0" on the float
+/// branch and leaves a non-ASCII digit string such as "٣٤" falling through to
+/// the string default, both exactly as before this screen existed.
+fn is_ascii_integer_literal(text: &str) -> bool {
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Convert NaiveDate to Excel serial date number.

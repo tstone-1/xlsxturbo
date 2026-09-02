@@ -1,6 +1,6 @@
 //! Native Excel chart application helpers.
 
-use crate::parse::parse_cell_ref;
+use crate::parse::{parse_cell_ref, WithOptionContext};
 use crate::types::{pydict_to_hashmap_str, ChartConfig, OptionMap};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -192,14 +192,15 @@ pub(crate) fn apply_charts(
     ];
 
     for (cell_ref, config) in charts {
-        let (row, col) = parse_cell_ref(cell_ref)?;
-        let view = OptionMap::new(py, config, format!("charts['{}']", cell_ref));
+        let context = format!("charts['{}']", cell_ref);
+        let (row, col) = parse_cell_ref(cell_ref).in_option(&context)?;
+        let view = OptionMap::new(py, config, context.clone());
         view.reject_unknown(CHART_KEYS)?;
 
         let chart_type = view
             .string("type")?
             .ok_or_else(|| format!("charts['{}']: missing 'type' key", cell_ref))?;
-        let mut chart = Chart::new(parse_chart_type(&chart_type)?);
+        let mut chart = Chart::new(parse_chart_type(&chart_type).in_field(&context, "type")?);
 
         if config
             .get("series")

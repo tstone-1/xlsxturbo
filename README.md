@@ -143,9 +143,10 @@ implementation detail you can ignore:
   author, and one of the things xlsxturbo is measured against.
 
 If you write Excel files from Rust, use rust_xlsxwriter directly; xlsxturbo exists to put
-it behind a Python DataFrame API. rust_xlsxwriter's notice, and those of the 91 other
-crates compiled into the wheel, are in
-[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+it behind a Python DataFrame API. rust_xlsxwriter's notice, and those of every other
+crate compiled into the wheel, are in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md), which is generated from the
+dependency tree rather than maintained by hand.
 
 ## Contributing
 

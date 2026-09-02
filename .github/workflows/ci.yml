@@ -372,16 +372,24 @@ jobs:
       # cargo-audit is installed rather than run through a third-party action:
       # a job whose whole purpose is deciding what to trust should not widen the
       # set of things being trusted to do it.
+      #
+      # The cache key carries the version on purpose. It used to be a fixed
+      # `-bin-v1`, which never missed, so the cached binary was whatever the
+      # first run happened to install and no bump could ever reach the runner --
+      # a pin with no version written down anywhere. Bumping the version below
+      # changes the key, misses the cache, and installs the new one.
+      # The advisory database is fetched at run time, so pinning the binary does
+      # not pin what it knows about.
       - name: Cache cargo-audit binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit-bin-v1
+          key: ${{ runner.os }}-cargo-audit-bin-0.22.2
 
-      - name: Install cargo-audit
+      - name: Install cargo-audit 0.22.2
         run: |
           if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
-            cargo install cargo-audit --locked
+            cargo install cargo-audit@0.22.2 --locked
           fi
 
       - name: Run cargo audit

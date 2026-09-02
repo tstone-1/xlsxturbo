@@ -5,7 +5,7 @@
 //! key (e.g. `"D2:D10"`) places a grouped sparkline — one per row of the data
 //! range — via [`Worksheet::add_sparkline_group`].
 
-use crate::parse::{parse_cell_range, parse_cell_ref, parse_color_enum};
+use crate::parse::{parse_cell_range, parse_cell_ref, parse_color_enum, WithOptionContext};
 use crate::types::{OptionMap, SparklineConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -160,7 +160,8 @@ pub(crate) fn apply_sparklines(
         let sparkline = build_sparkline(py, loc, config)?;
 
         if loc.contains(':') {
-            let (first_row, first_col, last_row, last_col) = parse_cell_range(loc)?;
+            let (first_row, first_col, last_row, last_col) =
+                parse_cell_range(loc).in_option(&format!("sparklines['{}']", loc))?;
             // A grouped sparkline location must be a single row or single column
             // (one sparkline per cell). A 2D block is ambiguous, so reject it
             // rather than let rust_xlsxwriter place sparklines unexpectedly.
@@ -174,7 +175,7 @@ pub(crate) fn apply_sparklines(
                 .add_sparkline_group(first_row, first_col, last_row, last_col, &sparkline)
                 .map_err(|e| format!("sparklines['{}']: {}", loc, e))?;
         } else {
-            let (row, col) = parse_cell_ref(loc)?;
+            let (row, col) = parse_cell_ref(loc).in_option(&format!("sparklines['{}']", loc))?;
             worksheet
                 .add_sparkline(row, col, &sparkline)
                 .map_err(|e| format!("sparklines['{}']: {}", loc, e))?;

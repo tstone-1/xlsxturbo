@@ -68,6 +68,18 @@ macro_rules! extract_typed {
     }};
 }
 
+// The three `extract_*_field!` macros below share a six-line skeleton -- look up
+// the key, swallow only the `KeyError` that means "not given", propagate every
+// other lookup failure -- and are deliberately not folded into one.
+//
+// Two reasons, and the first is the hard one: that skeleton's `return Err(e)`
+// returns from the *enclosing function*, which only a macro can do, so the
+// common part cannot become a closure or a helper `fn`. Folding it means a
+// macro whose body is another macro's body, with the metavariable escaping that
+// entails, to save twelve duplicated lines. Second, each form's doc comment
+// documents a different policy for an explicitly-passed empty value, and those
+// three explanations do not merge into one.
+
 /// Helper: extract an optional scalar field from a Python dict into a SheetConfig field.
 ///
 /// `$opts` is a `Bound<PyAny>`, so `.get_item($key)` goes through the mapping
@@ -201,12 +213,50 @@ fn reject_unknown_dict_keys(
         .map_err(crate::errors::configuration)
 }
 
+/// Refuse a list item that is not a tuple before `len()` and `get_item(0)`
+/// reach it.
+///
+/// Those two calls propagate PyO3's own error unclassified, so an item of the
+/// wrong shape escaped the hierarchy entirely: measured through the shipped
+/// 1.3.0 wheel, `dfs_to_xlsx([5], p)` raised
+/// `builtins.TypeError: object of type 'int' has no len()` and
+/// `dfs_to_xlsx([{"a": 1, "b": 2}], p)` raised `builtins.KeyError: 0` -- and a
+/// `KeyError` is not caught by the `except (XlsxTurboError, TypeError)` that
+/// `docs/errors.md` recommends, so it escapes even the documented catch. The
+/// same pair of calls sits in `extract_merged_ranges` and `extract_hyperlinks`.
+///
+/// A `list` is accepted beside a `tuple` because both index the same way and
+/// callers write either; a `str` is refused although it has `len()` and
+/// indexes, since a two-character string would otherwise be silently read as a
+/// two-element spec. `PyTuple` covers `namedtuple`, which is a subclass.
+fn require_tuple_item(item: &Bound<'_, PyAny>, context: &str, shape: &str) -> PyResult<()> {
+    if item.is_instance_of::<pyo3::types::PyTuple>() || item.is_instance_of::<pyo3::types::PyList>()
+    {
+        return Ok(());
+    }
+    Err(crate::errors::configuration_type(format!(
+        "{}: expected {}, got {}",
+        context,
+        shape,
+        pytype_name(item)
+    )))
+}
+
 /// Extract sheet info from a Python tuple (supports both 2-tuple and 3-tuple formats)
 /// 2-tuple: (df, sheet_name)
 /// 3-tuple: (df, sheet_name, options_dict)
+///
+/// `index` is the item's position in the caller's `sheets` list, so a
+/// wrong-shaped item can be pointed at rather than merely described.
 pub(crate) fn extract_sheet_info<'py>(
     sheet_tuple: &Bound<'py, PyAny>,
+    index: usize,
 ) -> PyResult<(Bound<'py, PyAny>, String, SheetConfig)> {
+    require_tuple_item(
+        sheet_tuple,
+        &format!("sheets[{}]", index),
+        "a (df, sheet_name[, options]) tuple",
+    )?;
     let len: usize = sheet_tuple.len()?;
 
     if !(2..=3).contains(&len) {
@@ -243,13 +293,6 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_scalar!(opts, config, "header", header, "a bool");
         extract_scalar!(opts, config, "autofit", autofit, "a bool");
         extract_scalar!(opts, config, "freeze_panes", freeze_panes, "a bool");
-        extract_scalar!(
-            opts,
-            config,
-            "row_heights",
-            row_heights,
-            "a dict mapping row index (int) to height (number)"
-        );
         extract_scalar!(opts, config, "table_name", table_name, "a string");
 
         // table_style needs special handling: None means "explicitly no style".
@@ -277,6 +320,18 @@ pub(crate) fn extract_sheet_info<'py>(
             "column_widths",
             column_widths,
             extract_column_widths
+        );
+        // Through the same extractor as the top-level kwarg, so a bool key, a
+        // negative index or a non-finite height is refused identically wherever
+        // it is written. Before this it went through `extract_scalar!`, which
+        // let PyO3's `HashMap<u32, f64>` conversion decide -- and whose
+        // wrong-type message read "must be a dict ..., got dict".
+        extract_dict_field!(
+            opts,
+            config,
+            "row_heights",
+            row_heights,
+            extract_row_heights
         );
         extract_dict_field!(
             opts,
@@ -343,6 +398,59 @@ pub(crate) fn extract_sheet_info<'py>(
 
 /// Excel's maximum column index (zero-based; column XFD is the 16384th column).
 const MAX_COLUMN_INDEX: i64 = 16_383;
+
+/// Excel's maximum row index (zero-based; the grid holds 1,048,576 rows).
+const MAX_ROW_INDEX: i64 = 1_048_575;
+
+/// Extract a `column_widths` or `row_heights` value: a real number, never a
+/// `bool`, and finite and non-negative.
+///
+/// Three defects in one place, all measured through the shipped 1.3.0 wheel:
+///
+/// * `bool` subclasses `int` in Python, so `{0: True}` extracted as `1.0` and
+///   silently sized a column or row -- the same shape 1.2.0 closed for
+///   `column_widths` *keys*.
+/// * A negative value reached rust_xlsxwriter, which does `round() as u32`
+///   internally: `column_widths={0: -5}` wrote
+///   `<col min="1" max="1" width="0" hidden="1" customWidth="1"/>`, so an
+///   off-by-sign in a caller's width calculation made the column *disappear*
+///   rather than raising.
+/// * NaN and infinity produced arbitrary output: widths of 0.7109375 and
+///   0.5703125 characters, and `row_heights={0: inf}` a row height of
+///   3,221,225,471.25 points against Excel's 409.5-point maximum.
+///
+/// `noun` is "width" or "height", so the two options read naturally; `label` is
+/// the key as the caller wrote it, so the message points at one entry.
+fn extract_dimension_value(
+    value: &Bound<'_, PyAny>,
+    option: &str,
+    label: &str,
+    noun: &str,
+) -> PyResult<f64> {
+    if value.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(crate::errors::configuration_type(format!(
+            "{}['{}']: expected a number, got {}",
+            option,
+            label,
+            pytype_name(value)
+        )));
+    }
+    let number: f64 = value.extract().map_err(|_| {
+        crate::errors::configuration_type(format!(
+            "{}['{}']: expected a number, got {}",
+            option,
+            label,
+            pytype_name(value)
+        ))
+    })?;
+    if !number.is_finite() || number < 0.0 {
+        return Err(crate::errors::configuration(format!(
+            "{}['{}']: {} must be a finite, non-negative number, got {}",
+            option, label, noun, number
+        )));
+    }
+    Ok(number)
+}
 
 /// Validate a resolved column_widths integer key against Excel's column range
 /// (0..=16383). `label` is the key's original representation — the int
@@ -419,10 +527,69 @@ pub(crate) fn extract_column_widths(
                 pytype_name(&k)
             )));
         };
-        let width = extract_typed!(v, "a number", "column_widths['{}']", key_str);
+        let width = extract_dimension_value(&v, "column_widths", &key_str, "width")?;
         widths.insert(key_str, width);
     }
     Ok(widths)
+}
+
+/// Extract row_heights from a Python dict of row index (int) to height (points).
+///
+/// Mirrors `extract_column_widths`, and exists because until this extractor was
+/// written `row_heights` was the one dict option typed straight into the PyO3
+/// signature as `HashMap<u32, f64>`, so the binding's conversion decided
+/// everything and none of the validation its neighbours got in 1.2.0 applied.
+/// Measured through the shipped 1.3.0 wheel: `{True: 40}` sized row 2
+/// (`ht="39.75"`), `{0: True}` set a height of one point, and `{-1: 20}` or
+/// `{2**40: 20}` raised `builtins.OverflowError` -- an `ArithmeticError`, so
+/// outside the exception hierarchy *and* outside the
+/// `except (XlsxTurboError, TypeError)` that `docs/errors.md` recommends for
+/// option mistakes.
+///
+/// Narrower than `extract_column_widths` in one deliberate way: there is no
+/// `"_all"` equivalent and no numeric-string key form, because the stub
+/// declares `dict[int, int | float]` and the backend takes a `u32`. A string
+/// key is a `ConfigurationTypeError` naming the option.
+pub(crate) fn extract_row_heights(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<u32, f64>> {
+    let mut heights: HashMap<u32, f64> = HashMap::new();
+    for (k, v) in py_dict.iter() {
+        let key_repr = k
+            .str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| "?".to_string());
+        if k.is_instance_of::<pyo3::types::PyBool>() {
+            return Err(crate::errors::configuration_type(format!(
+                "row_heights['{}']: must be an integer row index, got {}",
+                key_repr,
+                pytype_name(&k)
+            )));
+        }
+        let Ok(index) = k.extract::<i64>() else {
+            return Err(crate::errors::configuration_type(format!(
+                "row_heights['{}']: must be an integer row index, got {}",
+                key_repr,
+                pytype_name(&k)
+            )));
+        };
+        if index < 0 {
+            return Err(crate::errors::configuration(format!(
+                "row_heights['{}']: must be a non-negative row index",
+                index
+            )));
+        }
+        if index > MAX_ROW_INDEX {
+            return Err(crate::errors::configuration(format!(
+                "row_heights['{}']: exceeds Excel's maximum row index ({})",
+                index, MAX_ROW_INDEX
+            )));
+        }
+        let height = extract_dimension_value(&v, "row_heights", &index.to_string(), "height")?;
+        // Safe: `index` is bounded above by MAX_ROW_INDEX and below by zero.
+        heights.insert(index as u32, height);
+    }
+    Ok(heights)
 }
 
 /// Extract header_format from Python dict
@@ -526,7 +693,12 @@ pub(crate) fn extract_merged_ranges(
 ) -> PyResult<Vec<MergedRange>> {
     let mut ranges = Vec::new();
 
-    for item in py_list.iter() {
+    for (index, item) in py_list.iter().enumerate() {
+        require_tuple_item(
+            &item,
+            &format!("merged_ranges[{}]", index),
+            "a (range, text[, format]) tuple",
+        )?;
         let tuple_len = item.len()?;
         if !(2..=3).contains(&tuple_len) {
             return Err(crate::errors::configuration(format!(
@@ -581,7 +753,12 @@ pub(crate) fn extract_hyperlinks(
 ) -> PyResult<Vec<Hyperlink>> {
     let mut links = Vec::new();
 
-    for item in py_list.iter() {
+    for (index, item) in py_list.iter().enumerate() {
+        require_tuple_item(
+            &item,
+            &format!("hyperlinks[{}]", index),
+            "a (cell_ref, url[, display_text]) tuple",
+        )?;
         let tuple_len = item.len()?;
         if !(2..=3).contains(&tuple_len) {
             return Err(crate::errors::configuration(format!(
@@ -1075,12 +1252,27 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
             })?;
             let num_fmt = cell_string_field(d, &cell_ref, "num_format")?;
             let align_h = cell_string_field(d, &cell_ref, "align_horizontal")?;
+            // The two alignment parsers take a value, not an option, so the
+            // cell and key go in front here -- the same `option['key']: 'field':`
+            // form the apply layer uses. Without it a `cells` dict with two
+            // entries answered `Unknown horizontal alignment 'bogus'` and
+            // nothing said which cell.
             if let Some(ref ah) = align_h {
-                parse_horizontal_alignment(ah).map_err(crate::errors::configuration)?;
+                parse_horizontal_alignment(ah).map_err(|e| {
+                    crate::errors::configuration(format!(
+                        "cells['{}']: 'align_horizontal': {}",
+                        cell_ref, e
+                    ))
+                })?;
             }
             let align_v = cell_string_field(d, &cell_ref, "align_vertical")?;
             if let Some(ref av) = align_v {
-                parse_vertical_alignment(av).map_err(crate::errors::configuration)?;
+                parse_vertical_alignment(av).map_err(|e| {
+                    crate::errors::configuration(format!(
+                        "cells['{}']: 'align_vertical': {}",
+                        cell_ref, e
+                    ))
+                })?;
             }
             let wrap: bool = match present_cell_field(d, "wrap_text")? {
                 Some(v) => v.extract::<bool>().map_err(|_| {

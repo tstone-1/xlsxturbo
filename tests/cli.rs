@@ -71,8 +71,13 @@ fn missing_input_file_exits_nonzero() {
     let _ = fs::remove_file(&xlsx);
 }
 
+/// A bad `--date-order` is a usage error, so it exits 2 — the value clap
+/// already uses for the usage errors it rejects itself. It exited 1 until
+/// 1.3.x, which made it indistinguishable from a conversion that was asked for
+/// correctly and failed, and left the binary disagreeing with its own argument
+/// parser about which kind of mistake had been made.
 #[test]
-fn invalid_date_order_exits_nonzero_with_message() {
+fn invalid_date_order_is_a_usage_error() {
     let csv = temp_path("baddate", "csv");
     let xlsx = temp_path("baddate", "xlsx");
     fs::write(&csv, "a\n1\n").unwrap();
@@ -85,7 +90,11 @@ fn invalid_date_order_exits_nonzero_with_message() {
         .output()
         .expect("failed to run xlsxturbo binary");
 
-    assert_eq!(output.status.code(), Some(1), "expected exit code 1");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit code 2 (usage)"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Invalid date_order"),
@@ -95,6 +104,26 @@ fn invalid_date_order_exits_nonzero_with_message() {
 
     let _ = fs::remove_file(&csv);
     let _ = fs::remove_file(&xlsx);
+}
+
+/// The control for the test above, and the reason 2 is the right number: clap
+/// picks it for an argument *it* rejects. Without this, "our usage errors exit
+/// 2" is a value chosen by taste rather than one that agrees with the parser
+/// sitting in front of it — and a clap major that changed the convention would
+/// silently leave the two halves disagreeing again.
+#[test]
+fn clap_rejects_an_unknown_flag_with_the_same_usage_code() {
+    let output = Command::new(bin())
+        .arg("--no-such-flag")
+        .output()
+        .expect("failed to run xlsxturbo binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "clap's own usage exit code moved; the hand-rolled one in src/main.rs \
+         was chosen to match it, so the two now disagree"
+    );
 }
 
 #[test]

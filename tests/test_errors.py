@@ -325,6 +325,27 @@ class TestHierarchyShape:
         assert caught.value.errno == errno.ENOENT
         assert "Failed to open input file" in str(caught.value)
 
+    def test_csv_input_failure_names_the_path(self, tmp_path: Path) -> None:
+        """The read path names the file, the way the save path names the output.
+
+        Mirrors ``test_df_to_xlsx_save_error_includes_output_path`` in
+        ``tests/test_error_paths.py``. The message used to be
+        ``Failed to open input file: No such file or directory (os error 2)`` --
+        every word of which is true and none of which tells a caller who built
+        the path from several parts what path was actually opened. Asserted on
+        the *whole* path, not a suffix, since the interesting failure is a
+        wrong directory.
+
+        Args:
+            tmp_path: pytest's per-test temporary directory.
+        """
+        missing = tmp_path / "no_such_dir" / "absent.csv"
+        with pytest.raises(xlsxturbo.FileError) as caught:
+            xlsxturbo.csv_to_xlsx(missing, tmp_path / "o.xlsx")
+        assert str(missing) in str(caught.value), (
+            f"message does not name the input path: {caught.value!r}"
+        )
+
 
 class TestExports:
     """The names are importable from the package, and are one object each."""
@@ -374,6 +395,22 @@ class TestExports:
         assert doc is not None
         assert len(doc.strip()) > 40
 
+    def test_workbook_validation_docstring_names_both_pre_checks(self) -> None:
+        """``help(WorkbookValidationError)`` covers both things that raise it.
+
+        The docstring said "Its one raise site is the pre-check that rejects two
+        sheets claiming the same table name" while
+        ``reject_table_name_collisions`` had been raising it since 1.3.0 --
+        drift that ``docs/errors.md`` did not share, and the second time this
+        same docstring has gone stale (1.1.x fixed the first). Counting raise
+        sites is what makes it fragile, so the wording no longer does; this
+        asserts the two *subjects* instead, which is what a reader needs.
+        """
+        doc = xlsxturbo.WorkbookValidationError.__doc__
+        assert doc is not None
+        assert "table name" in doc, f"docstring omits the duplicate-table case: {doc!r}"
+        assert "defined_names" in doc, f"docstring omits the defined-name case: {doc!r}"
+
 
 # Options whose value the PyO3 signature converts before xlsxturbo sees it. A
 # wrong type here raises a plain `TypeError` by design -- see "What is not in the
@@ -390,14 +427,18 @@ SIGNATURE_CONVERTED = frozenset(
         "freeze_panes",
         "table_name",
         "constant_memory",
-        # Typed in the PyO3 signature as `HashMap<u32, f64>` / `HashMap<String,
-        # String>`, so a wrong inner type is converted -- and rejected -- by the
-        # binding before any xlsxturbo code runs. Verified, not assumed: they are
-        # the only two dict options declared with a concrete Rust map type rather
-        # than `&Bound<PyAny>`, which is why `column_widths` classifies and
-        # `row_heights` does not. Recorded as a 1.0 consistency question in
-        # docs/roadmap-1.0.md D8.
-        "row_heights",
+        # Typed in the PyO3 signature as `HashMap<String, String>`, so a wrong
+        # inner type is converted -- and rejected -- by the binding before any
+        # xlsxturbo code runs. Verified, not assumed: it is the only dict option
+        # still declared with a concrete Rust map type rather than
+        # `&Bound<PyAny>`.
+        #
+        # `row_heights` used to be listed here beside it, for the same reason,
+        # and is not any more: it now has `extract_row_heights` and appears in
+        # the probe table below. Recorded as a 1.0 consistency question in
+        # docs/roadmap-1.0.md D8, answered by giving it an extractor -- the
+        # binding's conversion accepted a `bool` key and raised `OverflowError`,
+        # an `ArithmeticError`, for a negative or oversized one.
         "defined_names",
     }
 )
@@ -410,6 +451,7 @@ NESTED_TYPE_PROBES: dict[str, dict[str, Any]] = {
     "column_formats": {"column_formats": {1: {"bold": True}}},
     "conditional_formats": {"conditional_formats": {1: {"type": "data_bar"}}},
     "formula_columns": {"formula_columns": {"X": 123}},
+    "row_heights": {"row_heights": {0: "tall"}},
     "merged_ranges": {"merged_ranges": [(1, "text")]},
     "hyperlinks": {"hyperlinks": [(1, "https://example.com")]},
     "comments": {"comments": {"D1": 123}},

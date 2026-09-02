@@ -1,6 +1,6 @@
 //! Cell annotations, hyperlinks, and merged ranges.
 
-use crate::parse::{parse_cell_range, parse_cell_ref, parse_header_format};
+use crate::parse::{parse_cell_range, parse_cell_ref, parse_header_format, WithOptionContext};
 use crate::types::{Comment, Hyperlink, MergedRange};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -13,29 +13,21 @@ pub(crate) fn apply_merged_ranges(
     merged_ranges: &[MergedRange],
 ) -> Result<(), String> {
     for (range_str, text, format_dict) in merged_ranges {
-        let (first_row, first_col, last_row, last_col) = parse_cell_range(range_str)?;
+        let context = format!("merged_ranges['{}']", range_str);
+        let (first_row, first_col, last_row, last_col) =
+            parse_cell_range(range_str).in_option(&context)?;
 
-        // Build format if provided
-        let format = if let Some(fmt_dict) = format_dict {
-            let parsed =
-                parse_header_format(py, fmt_dict, &format!("merged_ranges['{}']", range_str))?;
-            Some(parsed)
-        } else {
-            None
+        // Center-aligned unless the caller gave a format. Resolved to one value
+        // before the merge rather than in two arms of an if/else, which differed
+        // only in which format they passed.
+        let format = match format_dict {
+            Some(fmt_dict) => parse_header_format(py, fmt_dict, &context)?,
+            None => Format::new().set_align(rust_xlsxwriter::FormatAlign::Center),
         };
 
-        // Apply merge with or without format
-        if let Some(ref fmt) = format {
-            worksheet
-                .merge_range(first_row, first_col, last_row, last_col, text, fmt)
-                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
-        } else {
-            // Create default center-aligned format for merged cells
-            let default_fmt = Format::new().set_align(rust_xlsxwriter::FormatAlign::Center);
-            worksheet
-                .merge_range(first_row, first_col, last_row, last_col, text, &default_fmt)
-                .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
-        }
+        worksheet
+            .merge_range(first_row, first_col, last_row, last_col, text, &format)
+            .map_err(|e| format!("Failed to merge range '{}': {}", range_str, e))?;
     }
 
     Ok(())
@@ -47,7 +39,8 @@ pub(crate) fn apply_hyperlinks(
     hyperlinks: &[Hyperlink],
 ) -> Result<(), String> {
     for (cell_ref, url, display_text) in hyperlinks {
-        let (row, col) = parse_cell_ref(cell_ref)?;
+        let (row, col) =
+            parse_cell_ref(cell_ref).in_option(&format!("hyperlinks['{}']", cell_ref))?;
 
         if let Some(text) = display_text {
             worksheet
@@ -69,7 +62,8 @@ pub(crate) fn apply_comments(
     comments: &IndexMap<String, Comment>,
 ) -> Result<(), String> {
     for (cell_ref, (text, author)) in comments {
-        let (row, col) = parse_cell_ref(cell_ref)?;
+        let (row, col) =
+            parse_cell_ref(cell_ref).in_option(&format!("comments['{}']", cell_ref))?;
 
         let mut note = Note::new(text);
         if let Some(auth) = author {

@@ -1,6 +1,8 @@
 //! Conditional formatting application helpers.
 
-use crate::parse::{matches_pattern, parse_color, parse_column_format, parse_icon_type};
+use crate::parse::{
+    matches_pattern, parse_color, parse_column_format, parse_icon_type, WithOptionContext,
+};
 use crate::types::{ConditionalFormatConfigs, OptionMap};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
@@ -38,7 +40,9 @@ fn cf_optional_color(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<u32>,
     let Some(color_str) = view.string(key)? else {
         return Ok(None);
     };
-    parse_color(&color_str).map(Some)
+    parse_color(&color_str)
+        .in_field(view.context(), key)
+        .map(Some)
 }
 
 /// Parse the optional `format` dict on a cell-rule conditional format config.
@@ -129,7 +133,9 @@ fn apply_data_bar(
             "context" | "" => ConditionalFormatDataBarDirection::Context,
             _ => {
                 return Err(format!(
-                    "Unknown direction '{}'. Valid: left_to_right, right_to_left, context",
+                    "{}: 'direction': Unknown direction '{}'. \
+                     Valid: left_to_right, right_to_left, context",
+                    view.context(),
                     s
                 ));
             }
@@ -157,7 +163,7 @@ fn apply_icon_set(
 ) -> Result<(), String> {
     let mut cf = ConditionalFormatIconSet::new();
     if let Some(s) = view.string("icon_type")? {
-        cf = cf.set_icon_type(parse_icon_type(&s)?);
+        cf = cf.set_icon_type(parse_icon_type(&s).in_field(view.context(), "icon_type")?);
     }
     if view.bool("reverse")?.unwrap_or(false) {
         cf = cf.reverse_icons(true);
@@ -319,11 +325,12 @@ fn apply_cell_conditional(
         }
         _ => {
             return Err(format!(
-                "Unknown criteria '{}'. Valid: equal_to, not_equal_to, \
+                "{}: 'criteria': Unknown criteria '{}'. Valid: equal_to, not_equal_to, \
                  greater_than, less_than, greater_than_or_equal_to, \
                  less_than_or_equal_to, between, not_between, \
                  containing, not_containing, begins_with, ends_with, \
                  blanks, no_blanks",
+                view.context(),
                 criteria
             ));
         }
@@ -416,8 +423,9 @@ fn apply_single_conditional_format(
             )
         }
         _ => Err(format!(
-            "Unknown conditional format type '{}'. Valid types: \
+            "{}: 'type': Unknown conditional format type '{}'. Valid types: \
              2_color_scale, 3_color_scale, data_bar, icon_set, cell",
+            view.context(),
             format_type
         )),
     }
