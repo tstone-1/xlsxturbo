@@ -14,7 +14,7 @@
 #
 # `tests/test_ci_config.py` fails if a workflow goes back to inlining the list.
 pandas>=2.3.3,<4
-polars>=1.43.2,<2
+polars>=1.44.1,<2
 openpyxl>=3.1.5,<4
 pytest>=9.1.1,<10
 pyyaml>=6.0.3,<7
