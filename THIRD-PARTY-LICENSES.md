@@ -618,9 +618,9 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.4.4](https://github.com/rust-lang/cc-rs)
+- [cc 1.4.5](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
-- [find-msvc-tools 0.1.11](https://github.com/rust-lang/cc-rs)
+- [find-msvc-tools 0.1.12](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.104](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - [wasm-bindgen-macro-support 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support)
 - [wasm-bindgen-macro 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
@@ -1520,7 +1520,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [tinyvec 1.12.0](https://github.com/Lokathor/tinyvec)
+- [tinyvec 1.13.2](https://github.com/Lokathor/tinyvec)
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
