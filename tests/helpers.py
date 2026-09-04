@@ -25,6 +25,7 @@ else:
 __all__ = [
     "HAS_OPENPYXL",
     "REPO_ROOT",
+    "TIMESTAMPED_PART",
     "TINY_PNG_B64",
     "active_ws",
     "get_temp_path",
@@ -34,6 +35,13 @@ __all__ = [
 
 # Where the repository root would be, if these tests are running from a checkout.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The one archive member that legitimately differs between two runs: it records
+# the creation time at one-second resolution. Any test comparing two exports
+# byte for byte has to exclude it, or it fails whenever the two writes land on
+# opposite sides of a second boundary. `tests/test_stability_policy.py` owns the
+# assertion that this is the ONLY such part.
+TIMESTAMPED_PART = "docProps/core.xml"
 
 
 def repo_checkout_available() -> bool:

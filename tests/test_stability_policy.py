@@ -25,7 +25,7 @@ import pytest
 import xlsxturbo
 import yaml
 
-from tests.helpers import REPO_ROOT, repo_checkout_available
+from tests.helpers import REPO_ROOT, TIMESTAMPED_PART, repo_checkout_available
 
 # Applied per class, not to the module: the table comparisons read repository
 # files and cannot run against an installed wheel, but the determinism tests are
@@ -39,10 +39,6 @@ STABILITY = REPO_ROOT / "docs" / "stability.md"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
-
-# The part of the archive that legitimately differs between two runs. The page
-# names it explicitly; so does the test that measures it.
-TIMESTAMPED_PART = "docProps/core.xml"
 
 
 def _markdown_table(heading: str) -> list[list[str]]:

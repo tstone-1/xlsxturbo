@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A test compared two exports byte for byte including the timestamped archive part, so it
+  failed whenever the two writes straddled a second boundary.**
+  `test_bundle_and_keywords_produce_identical_bytes` iterated every member of both archives,
+  and `docProps/core.xml` records the creation time at one-second resolution — the one part
+  `docs/stability.md` and `TestGeneratedFileDeterminism` already name as non-reproducible.
+  Two exports take about 2 ms, so the flake fired rarely; it failed both Windows CI legs of
+  a Dependabot PR on 2026-09-03, where the exports landed at `:20` and `:21`. The part is
+  now excluded, with a guard that fails if it ever leaves the archive so the exclusion
+  cannot quietly stop comparing anything. `TIMESTAMPED_PART` moved to `tests/helpers.py`,
+  so the two tests that care about it share one definition. Test-only; no library behaviour
+  changed.
+
 ## [1.4.0] - 2026-09-02
 
 ### Fixed

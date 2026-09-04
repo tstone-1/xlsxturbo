@@ -23,7 +23,7 @@ import xlsxturbo
 from xlsxturbo.options import ExportOptions
 from xlsxturbo.types import SheetOptions, SparklineOptions
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
+from tests.helpers import HAS_OPENPYXL, TIMESTAMPED_PART, active_ws, load_workbook
 
 # `df_to_xlsx` parameters that are not options: the data, where it goes, and the
 # name of the single sheet it goes to.
@@ -191,6 +191,10 @@ class TestEquivalence:
 
         Byte equality over the archive members rather than the file, because a
         zip carries per-entry timestamps that say nothing about the content.
+        `docProps/core.xml` is excluded for the same reason: it records the
+        creation time at one-second resolution, so comparing it fails whenever
+        the two writes straddle a second boundary. Measured on Windows CI
+        2026-09-03, where the two exports landed at :20 and :21.
         """
         opts = ExportOptions(
             freeze_panes=True, autofit=True, header_format={"bold": True}, table_style="Medium9"
@@ -207,7 +211,12 @@ class TestEquivalence:
         )
         with zipfile.ZipFile(via_bundle) as a, zipfile.ZipFile(via_kwargs) as b:
             assert a.namelist() == b.namelist()
-            for name in a.namelist():
+            compared = [name for name in a.namelist() if name != TIMESTAMPED_PART]
+            assert TIMESTAMPED_PART in a.namelist(), (
+                f"{TIMESTAMPED_PART} is no longer in the archive, so excluding it below "
+                "silently compares nothing it used to"
+            )
+            for name in compared:
                 assert a.read(name) == b.read(name), f"{name} differs between the two spellings"
 
     def test_a_bundle_actually_applies_per_sheet(self, tmp_path: Path) -> None:
