@@ -621,11 +621,11 @@ Applies to:
 - [cc 1.4.5](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.12](https://github.com/rust-lang/cc-rs)
-- [js-sys 0.3.104](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
-- [wasm-bindgen-macro-support 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support)
-- [wasm-bindgen-macro 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
-- [wasm-bindgen-shared 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
-- [wasm-bindgen 0.2.127](https://github.com/wasm-bindgen/wasm-bindgen)
+- [js-sys 0.3.105](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
+- [wasm-bindgen-macro-support 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
+- [wasm-bindgen-macro 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
+- [wasm-bindgen-shared 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
+- [wasm-bindgen 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen)
 
 ```text
 Copyright (c) 2014 Alex Crichton
@@ -981,7 +981,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [indexmap 2.14.1](https://github.com/indexmap-rs/indexmap)
+- [indexmap 2.14.2](https://github.com/indexmap-rs/indexmap)
 
 ```text
 Copyright (c) 2016--2017
@@ -1485,7 +1485,7 @@ Applies to:
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.4](https://github.com/dtolnay/syn)
+- [syn 3.0.5](https://github.com/dtolnay/syn)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
 
@@ -1693,9 +1693,9 @@ THE SOFTWARE.
 
 Applies to:
 
-- [crossbeam-deque 0.8.7](https://github.com/crossbeam-rs/crossbeam)
-- [crossbeam-epoch 0.9.20](https://github.com/crossbeam-rs/crossbeam)
-- [crossbeam-utils 0.8.22](https://github.com/crossbeam-rs/crossbeam)
+- [crossbeam-deque 0.8.8](https://github.com/crossbeam-rs/crossbeam)
+- [crossbeam-epoch 0.9.21](https://github.com/crossbeam-rs/crossbeam)
+- [crossbeam-utils 0.8.23](https://github.com/crossbeam-rs/crossbeam)
 
 ```text
 The MIT License (MIT)

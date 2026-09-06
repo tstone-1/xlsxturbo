@@ -149,11 +149,17 @@ enforces it.
 The version bump is a code change, and several tests are coupled to it: `uv.lock`
 pins this project itself, `SECURITY.md`'s support table has to name the new minor
 line, and `CHANGELOG.md`'s heading must carry a version and a date. Running the
-suite before the edit and not after it hides all three.
+suite before the edit and not after it hides all three. Rebuild first: the
+build-currency and version tests must exercise the new extension, and the license
+notice must match the refreshed Rust dependency versions. Run the remaining
+Pre-Push Checklist gates once the release changes are complete.
 
 ```bash
 uv lock                                   # uv.lock pins this project's own version
-.venv/bin/python -m pytest tests/ -q      # Windows: .venv\Scripts\python.exe
+cargo update                              # refresh Cargo.lock, including the root version
+uv run python scripts/gen_third_party_licenses.py --write
+uv run maturin develop --release           # rebuild the extension after the version bump
+.venv/bin/python -m pytest tests/ -q        # Windows: .venv\Scripts\python.exe
 ```
 
 1.3.0 is why this step is written down. The suite was green before the bump, only
@@ -164,7 +170,7 @@ after the push rather than before it.
 ### 4. Commit Version Bump
 
 ```bash
-git add Cargo.toml pyproject.toml CHANGELOG.md uv.lock SECURITY.md
+git add Cargo.toml Cargo.lock pyproject.toml CHANGELOG.md uv.lock SECURITY.md THIRD-PARTY-LICENSES.md
 git commit -m "Release X.Y.Z: <one-line summary of what ships>"
 git push origin main
 ```

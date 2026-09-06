@@ -10,7 +10,9 @@ another one.
 
 from __future__ import annotations
 
+import copy
 import inspect
+import pickle
 import zipfile
 from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
@@ -252,6 +254,32 @@ class TestBundleSemantics:
         opts = ExportOptions(freeze_panes=True)
         with pytest.raises(FrozenInstanceError):
             opts.freeze_panes = False  # type: ignore[misc]
+
+    @pytest.mark.parametrize("operation", ["copy", "deepcopy", "pickle"])
+    def test_copy_and_pickle_keep_sparse_options(
+        self, operation: str, tmp_path: Path
+    ) -> None:
+        """Copying or transporting a sparse bundle preserves omission and None."""
+        original = ExportOptions(freeze_panes=True, table_style=None, constant_memory=False)
+        if operation == "pickle":
+            restored = pickle.loads(pickle.dumps(original))  # noqa: S301 - trusted local object
+        elif operation == "deepcopy":
+            restored = copy.deepcopy(original)
+        else:
+            restored = copy.copy(original)
+        assert restored.as_kwargs() == {
+            "freeze_panes": True, "table_style": None, "constant_memory": False,
+        }
+        assert restored.as_sheet_options() == {"freeze_panes": True, "table_style": None}
+        assert xlsxturbo.df_to_xlsx(_frame(), tmp_path / "copy.xlsx", **restored.as_kwargs()) == (3, 2)
+
+    def test_deepcopy_separates_nested_options(self) -> None:
+        """Callers can copy a shared bundle before changing nested dictionaries."""
+        original = ExportOptions(header_format={"bold": True})
+        independent = copy.deepcopy(original)
+        independent.as_kwargs()["header_format"]["bold"] = False
+        assert original.as_kwargs() == {"header_format": {"bold": True}}
+        assert independent.as_kwargs() == {"header_format": {"bold": False}}
 
     def test_replace_derives_a_variant(self) -> None:
         """``dataclasses.replace`` works, and leaves the original alone."""

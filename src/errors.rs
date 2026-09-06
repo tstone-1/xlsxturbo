@@ -152,7 +152,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         &[base_ty.clone(), os_error, value_error],
         "A filesystem read or write failed.\n\n\
          Raised when the output workbook cannot be written (missing directory, \
-         permissions, no space) or when a CSV input cannot be opened. It also \
+         permissions, no space) or when a CSV input cannot be opened or read. It also \
          carries every workbook rule the underlying writer checks only while \
          serialising -- a duplicate sheet name, a chart range naming a sheet that \
          does not exist -- because those failures are reported by the save. Also an \

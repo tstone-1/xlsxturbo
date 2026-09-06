@@ -68,42 +68,45 @@ def generate_test_csv(filepath: str, rows: int, cols: int, seed: int = 42) -> st
 
 def benchmark_conversion(
     csv_path: str,
-    parallel: bool,
     runs: int = 3,
     warmup: bool = True,
-) -> tuple[float, float]:
-    """Benchmark CSV to XLSX conversion."""
+) -> dict[bool, tuple[float, float]]:
+    """Measure both modes in pairs, alternating which mode runs first.
+
+    Warm up each mode once before collecting samples. Pairing prevents a
+    sustained load or thermal change from favouring one entire measurement block.
+    """
     import xlsxturbo
 
-    mode = "parallel" if parallel else "single-threaded"
-    times: list[float] = []
-
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
+    times: dict[bool, list[float]] = {False: [], True: []}
     total_runs = runs + (1 if warmup else 0)
     for run in range(total_runs):
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-            xlsx_path = tmp.name
+        is_warmup = warmup and run == 0
+        modes = (False, True) if run % 2 == 0 else (True, False)
+        for parallel in modes:
+            mode = "parallel" if parallel else "single-threaded"
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                xlsx_path = tmp.name
+            try:
+                if is_warmup:
+                    print(f"  warmup ({mode})...", flush=True)
+                start = time.perf_counter()
+                rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, parallel=parallel)
+                elapsed = time.perf_counter() - start
+                if not is_warmup:
+                    times[parallel].append(elapsed)
+                if run == 0:
+                    xlsx_size = Path(xlsx_path).stat().st_size / (1024 * 1024)
+                    print(f"  {mode}: {rows:,} rows x {cols} cols -> {xlsx_size:.1f} MB")
+            finally:
+                Path(xlsx_path).unlink(missing_ok=True)
 
-        try:
-            is_warmup = warmup and run == 0
-            if is_warmup:
-                print(f"  warmup ({mode})...", flush=True)
-
-            start = time.perf_counter()
-            rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, parallel=parallel)
-            elapsed = time.perf_counter() - start
-
-            if not is_warmup:
-                times.append(elapsed)
-
-            if run == 0:
-                xlsx_size = Path(xlsx_path).stat().st_size / (1024 * 1024)
-                print(f"  {mode}: {rows:,} rows x {cols} cols -> {xlsx_size:.1f} MB")
-        finally:
-            Path(xlsx_path).unlink(missing_ok=True)
-
-    median_time = statistics.median(times)
-    stdev_time = statistics.stdev(times) if len(times) > 1 else 0.0
-    return median_time, stdev_time
+    return {
+        mode: (statistics.median(samples), statistics.stdev(samples) if len(samples) > 1 else 0.0)
+        for mode, samples in times.items()
+    }
 
 
 def main() -> None:
@@ -133,16 +136,10 @@ def main() -> None:
         generate_test_csv(csv_path, args.rows, args.cols)
         print()
 
-        # Benchmark single-threaded (warmup + runs)
-        print(f"Benchmarking single-threaded ({args.runs} runs + warmup)...")
-        single_med, single_std = benchmark_conversion(csv_path, parallel=False, runs=args.runs)
-        print(f"  Median: {single_med:.2f}s (stdev {single_std:.2f}s)")
-        print()
-
-        # Benchmark parallel (warmup + runs)
-        print(f"Benchmarking parallel ({args.runs} runs + warmup)...")
-        parallel_med, parallel_std = benchmark_conversion(csv_path, parallel=True, runs=args.runs)
-        print(f"  Median: {parallel_med:.2f}s (stdev {parallel_std:.2f}s)")
+        print(f"Benchmarking paired modes ({args.runs} runs each + warmup)...")
+        results = benchmark_conversion(csv_path, runs=args.runs)
+        single_med, single_std = results[False]
+        parallel_med, parallel_std = results[True]
         print()
 
         # Results

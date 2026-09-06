@@ -55,6 +55,7 @@ an addition, not a replacement, and nothing here is deprecated.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from enum import Enum
 from typing import Any
 
 from xlsxturbo.types import (
@@ -81,7 +82,13 @@ __all__ = ["ExportOptions"]
 # The alternative -- widening every annotation to include a sentinel type --
 # would put an implementation detail into the signature users read, which is the
 # one thing this module exists to keep clean.
-_UNSET: Any = object()
+class _Unset(Enum):
+    """Keep omitted fields omitted when a bundle is copied or pickled."""
+
+    TOKEN = 0
+
+
+_UNSET: Any = _Unset.TOKEN
 
 # Options the workbook accepts but a per-sheet dict does not. Kept as the
 # difference from the field list rather than as a second copy of it, so
@@ -98,8 +105,9 @@ class ExportOptions:
     Any field left unset is omitted when lowering, so the library's own defaults
     apply.
 
-    Frozen, so a bundle can be shared as a module-level constant without a caller
-    mutating it for everyone else. Use :func:`dataclasses.replace` to derive a
+    Frozen prevents field reassignment; nested dictionaries and lists remain
+    mutable and are shared by the lowerings and derived variants. Use
+    :func:`copy.deepcopy` when independent nested values are needed. Use :func:`dataclasses.replace` to derive a
     variant::
 
         from dataclasses import replace

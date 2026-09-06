@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from collections.abc import Callable
@@ -584,3 +585,30 @@ class TestAtomicSave:
         wb.close()
         assert not link.is_symlink(), "the export left a link rather than a regular file"
         assert not target.exists(), "the export created the link's missing target"
+
+
+class TestCsvReadFailures:
+    """Reading can fail after File::open has already succeeded."""
+
+    @pytest.mark.skipif(os.name != "posix", reason="directory reads fail after open on Unix")
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_directory_input_retains_io_category(self, tmp_path: Path, parallel: bool) -> None:
+        """A read failure keeps its errno and does not replace an existing export."""
+        output = tmp_path / "existing.xlsx"
+        original = b"synthetic existing export"
+        output.write_bytes(original)
+        with pytest.raises(xlsxturbo.FileError) as caught:
+            xlsxturbo.csv_to_xlsx(tmp_path, output, parallel=parallel)
+        assert caught.value.errno == errno.EISDIR
+        assert str(tmp_path) in str(caught.value)
+        assert output.read_bytes() == original
+
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_invalid_utf8_is_still_configuration_error(
+        self, tmp_path: Path, parallel: bool
+    ) -> None:
+        """Malformed text is not classified as a filesystem failure."""
+        source = tmp_path / "invalid.csv"
+        source.write_bytes(b"header\n\xff\n")
+        with pytest.raises(xlsxturbo.ConfigurationError, match="CSV parse error at row 2"):
+            xlsxturbo.csv_to_xlsx(source, tmp_path / "out.xlsx", parallel=parallel)

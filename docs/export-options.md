@@ -55,8 +55,11 @@ whole. Everything else passes through.
 
 ## Deriving variants
 
-The bundle is frozen, so it is safe as a module-level constant: no caller can
-mutate it for everyone else. Build variants instead of editing.
+The bundle is frozen: its fields cannot be reassigned. Nested dictionaries and
+lists remain mutable and are shared by `as_kwargs()`, `as_sheet_options()`,
+`dataclasses.replace()` and `merged_with()`. Treat those values as read-only when
+sharing a bundle. Use `copy.deepcopy(bundle)` before editing nested values that
+must be independent. Copying and pickling preserve which options were left unset.
 
 `dataclasses.replace` overrides named fields:
 

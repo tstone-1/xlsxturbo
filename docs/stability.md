@@ -35,7 +35,8 @@ of the wheel: `cargo build --release` produces it, but a `pip install` does not.
 
 ## What counts as a breaking change
 
-Breaking — 2.0.0 only, and never without a deprecation period:
+Breaking — 2.0.0 only, and never without a deprecation period, except for the
+documented-contract bug fixes described below:
 
 - Removing or renaming any name in the table above
 - Removing a keyword argument, or narrowing the values one accepts
@@ -55,9 +56,22 @@ Not breaking — these can land in a minor or a patch:
 - Performance, in either direction, and memory use.
 - Dropping a Python version that upstream has already end-of-lifed (see below).
 
-That last one is the only genuine judgement call on the list, and it is stated because
-leaving it unstated is how a project ends up either never dropping a version or dropping one
-in a patch release.
+### Fixing violations of the documented contract
+
+A minor or patch may correct behavior that demonstrably contradicts the contract
+documented before the fix. This includes preventing silent data loss and restoring
+the documented exception classification. It is not permission to redesign working
+behavior or rewrite the contract to justify a change.
+
+Such fixes require a reproducer, a regression test and release notes naming the
+old and new behavior, including any effect on exception handlers. They may ship
+without the deprecation period below; removing public names or parameters still
+requires that period and a major release.
+
+For example, 1.4.1 changes CSV stream I/O failures from `ConfigurationError` to
+the documented `FileError`. Handlers catching only `ConfigurationError` or
+`OptionError` must catch `FileError` for these failures. Both the old and new
+exceptions remain `ValueError` subclasses.
 
 ## Deprecation policy
 

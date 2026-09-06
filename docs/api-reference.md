@@ -1,6 +1,6 @@
 # API reference
 
-The public API is four names, re-exported from the compiled extension:
+The four public functions are re-exported from the compiled extension:
 
 ```python
 from xlsxturbo import csv_to_xlsx, df_to_xlsx, dfs_to_xlsx, version
@@ -84,8 +84,8 @@ rather than quietly plotting the wrong thing (a values range without a `!` produ
 misleading error from the writer, and a categories range without one is ignored
 altogether). See [Charts and media](charts-and-media.md).
 
-The module imports nothing beyond the standard library, so importing it costs nothing and
-works before the extension is built. `SheetOptions` is the shape of a `dfs_to_xlsx`
+The type definitions use only the standard library. Importing `xlsxturbo.types`
+also initialises the package, so the compiled extension must be installed. `SheetOptions` is the shape of a `dfs_to_xlsx`
 per-sheet dict, and `PathArg` is what the path parameters accept. `__all__` names the option
 shapes and aliases and nothing else, so `import *` brings those in without the typing
 helpers they are built from.
@@ -134,7 +134,8 @@ usually answers the question faster than the stub does:
 |-------|-----------------|----------|
 | Scalar flag or name | `header`, `autofit`, `table_style`, `freeze_panes` | — |
 | Column-keyed mapping | `column_widths`, `column_formats`, `formula_columns` | Column index, name, or wildcard pattern |
-| Cell-keyed mapping | `cells`, `comments`, `hyperlinks`, `images`, `charts` | An A1-style reference such as `"B7"` |
+| Cell-keyed mapping | `cells`, `comments`, `images`, `charts` | An A1-style reference such as `"B7"` |
+| List of cell/link tuples | `hyperlinks` | Each tuple starts with a cell reference |
 | Row-keyed mapping | `row_heights` | Row index |
 | Format dictionary | `header_format`, and the nested `format` key in many options | Format property names |
 
@@ -143,7 +144,9 @@ Two rules hold across all of them:
 - **Unknown keys are rejected.** Every option dictionary validates its keys and raises on
   one it does not know, rather than ignoring it. See [Errors](errors.md).
 - **Iteration order is preserved.** Cell- and column-keyed options are applied in the
-  order you supplied them, and identical input produces byte-identical output.
+  order you supplied them. Identical input produces identical archive members except
+  for `docProps/core.xml`, which records the creation time. See
+  [Generated files](stability.md#generated-files).
 
 ## Ordering guarantees
 

@@ -3,7 +3,7 @@
 ## Shared Memory Policy
 
 - `AGENTS.md` is the canonical shared memory for Codex and other coding agents in this repository.
-- Claude Code loads this file through `.claude/CLAUDE.md`.
+- Claude Code loads this file through the root `CLAUDE.md`.
 - Durable project knowledge, workflows, commands, architecture notes, and recurring pitfalls belong here.
 - Do not store durable project knowledge only in Claude auto memory.
 - Keep entries concise, specific, and verifiable. Prefer updating existing sections over appending duplicate notes.
@@ -428,7 +428,11 @@ where a reader can see it.
 `docs/stability.md` is the public contract: which names are covered, what counts as a
 breaking change, the deprecation terms, and the supported Python and platform matrices.
 Read it before changing anything user-visible — from 1.0.0 a rename, a narrowed option
-value, or a different exception for an existing failure is a 2.0.0 event, not a minor.
+value, or a different exception for an existing failure is a 2.0.0 event, except
+for the documented-contract bug-fix exception in that page. A patch may repair a
+verified violation of the pre-existing contract with a reproducer, regression test
+and explicit old/new behavior in its release notes; it may not redefine the contract
+to justify a redesign. Approved for the CSV I/O classification repair in 1.4.1.
 
 It is **checked, not maintained by hand**. `tests/test_stability_policy.py` compares the
 page against the four places that actually decide its contents — the trove classifiers and

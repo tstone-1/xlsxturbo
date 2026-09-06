@@ -656,6 +656,63 @@ class TestUnicodeAndSpecialData:
         assert ws["A2"].value == str(value)
         wb.close()
 
+    @pytest.mark.parametrize("dtype", ["int64", "uint64", "Int64", "UInt64"])
+    @pytest.mark.parametrize("multi_sheet", [False, True])
+    @pytest.mark.parametrize("constant_memory", [False, True])
+    def test_mixed_numeric_columns_preserve_integer_precision(
+        self, tmp_xlsx: str, dtype: str, multi_sheet: bool, constant_memory: bool
+    ) -> None:
+        """A float column must not coerce a neighbouring integer to a rounded float."""
+        large = 2**53 + 1
+        df = pd.DataFrame({
+            "id": pd.Series([large, 42], dtype=dtype),
+            "measurement": [1.25, 2.5],
+        })
+        if multi_sheet:
+            xlsxturbo.dfs_to_xlsx(
+                [(df, "Data")], tmp_xlsx, constant_memory=constant_memory
+            )
+        else:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, constant_memory=constant_memory)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].value == str(large)
+        assert ws["A2"].data_type == "s"
+        assert ws["A3"].value == 42
+        assert ws["A3"].data_type == "n"
+        assert ws["B2"].value == 1.25
+        assert ws["B3"].value == 2.5
+        wb.close()
+
+    def test_complex_column_does_not_coerce_integer_column(self, tmp_xlsx: str) -> None:
+        """A complex neighbour must not turn integers into lossy complex strings."""
+        large = 2**53 + 1
+        df = pd.DataFrame({"id": [large, 42], "complex": [1 + 2j, 3 + 4j]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].value == str(large)
+        assert ws["A3"].value == 42
+        assert ws["B2"].value == "(1+2j)"
+        wb.close()
+
+    def test_mixed_signed_unsigned_columns_preserve_integer_precision(
+        self, tmp_xlsx: str
+    ) -> None:
+        """Signed and unsigned integers also share a lossy floating array dtype."""
+        unsigned = 2**63 + 1
+        df = pd.DataFrame({
+            "signed": pd.Series([-1], dtype="int64"),
+            "unsigned": pd.Series([unsigned], dtype="uint64"),
+        })
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].value == -1
+        assert ws["B2"].value == str(unsigned)
+        assert ws["B2"].data_type == "s"
+        wb.close()
+
     def test_dataframe_pre_1900_datetime_writes_as_string(self, tmp_xlsx: str) -> None:
         """DataFrame datetime paths match CSV behavior for Excel-unsupported dates."""
         from datetime import datetime

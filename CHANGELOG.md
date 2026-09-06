@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.1] - 2026-09-06
 
 ### Fixed
+- Preserve pandas integer values when a DataFrame mixes integer columns with
+  floating-point or complex columns, or signed and unsigned integer columns. Shared
+  array conversion could previously round large integers before the Excel precision
+  safeguard saw them.
+- Report filesystem errors encountered while reading CSV records as `FileError`
+  with an available `errno`, instead of classifying them as configuration errors.
+  **Handler compatibility:** these failures previously raised `ConfigurationError`.
+  Handlers catching only `ConfigurationError` or `OptionError` must now catch
+  `FileError`; existing `ValueError` handlers continue to work. Malformed CSV text
+  still raises `ConfigurationError`.
+- Interleave sequential and parallel CSV benchmark measurements to reduce timing
+  bias from running each mode in a separate block.
+- Sparse `ExportOptions` bundles now preserve omitted fields through `deepcopy`
+  and pickle round trips, including transport to worker processes. Previously these
+  operations caused every unset field to be forwarded as an invalid option value.
+- Clarified that frozen option bundles share mutable nested values, that importing
+  option types requires the installed extension, and that output creation timestamps
+  prevent whole-file byte reproducibility. Corrected the hyperlink option shape
+  and the release checklist to refresh, rebuild and stage the versioned artifacts.
 - **A test compared two exports byte for byte including the timestamped archive part, so it
   failed whenever the two writes straddled a second boundary.**
   `test_bundle_and_keywords_produce_identical_bytes` iterated every member of both archives,
@@ -19,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot quietly stop comparing anything. `TIMESTAMPED_PART` moved to `tests/helpers.py`,
   so the two tests that care about it share one definition. Test-only; no library behaviour
   changed.
+
+### Changed
+- Clarified the stability policy's narrow exception for fixes that restore the
+  pre-existing documented contract, with regression tests and explicit release notes.
+- Refreshed compatible Rust and development dependencies and regenerated the
+  bundled third-party license notice.
 
 ## [1.4.0] - 2026-09-02
 

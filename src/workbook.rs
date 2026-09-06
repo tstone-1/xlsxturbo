@@ -50,8 +50,9 @@ fn set_output_permissions(_tmp: &NamedTempFile, _dest: &Path) {}
 ///
 /// Returns `None` when the path is not a symlink (the ordinary case, where
 /// nothing should change) and also when it is a *dangling* one, whose target
-/// cannot be canonicalized: creating the target through the link is what the
-/// old behaviour did too, and refusing the export would be worse than either.
+/// cannot be canonicalized. For a dangling link the save replaces the link with
+/// a regular file at the requested path; it does not create the missing target.
+/// This fallback is deliberate and differs from the former `File::create` path.
 ///
 /// Resolving before the staging directory is chosen is load-bearing: the
 /// temporary file has to be created beside the resolved target, or the rename

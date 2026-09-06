@@ -148,14 +148,24 @@ fn convert_csv(
 /// so is the fact that its row number is **1-based**. Both paths used to report
 /// a 0-based index, from two different expressions (`row_count` here,
 /// `row_count + chunk.len()` there) that happened to agree and were coupled by
-/// nothing. 1-based means "row 3" is the third record, the line a text editor
-/// shows, and the worksheet row it would have become — Excel counts from 1 too.
+/// nothing. 1-based means "row 3" is the third record and its worksheet row.
+/// A quoted field may span physical lines, so this is not a text-editor line number.
 fn checked_csv_record(
     result: Result<csv::StringRecord, csv::Error>,
     row_number: usize,
+    input_path: &str,
 ) -> Result<(csv::StringRecord, u16), ConvertError> {
-    let record = result.map_err(|e| {
-        ConvertError::Config(format!("CSV parse error at row {}: {}", row_number, e))
+    let record = result.map_err(|e| match e.kind() {
+        // Opening succeeds before the reader performs any I/O. A later read
+        // failure must retain its errno, just like a failure to open the file.
+        csv::ErrorKind::Io(io) => ConvertError::File(FileFailure::from_io(
+            format!(
+                "Failed to read input file '{}' at row {}",
+                input_path, row_number
+            ),
+            io,
+        )),
+        _ => ConvertError::Config(format!("CSV parse error at row {}: {}", row_number, e)),
     })?;
     let num_cols = u16::try_from(record.len()).map_err(|_| {
         ConvertError::Config(format!("Column count {} exceeds u16 limit", record.len()))
@@ -193,7 +203,7 @@ pub fn convert_csv_to_xlsx(
             // from the chunked path below, and the reason this one is not
             // expressed as a chunk of size one.
             for (index, result) in csv_reader.records().enumerate() {
-                let (record, num_cols) = checked_csv_record(result, index + 1)?;
+                let (record, num_cols) = checked_csv_record(result, index + 1, input_path)?;
                 if num_cols > col_count {
                     col_count = num_cols;
                 }
@@ -255,7 +265,7 @@ pub fn convert_csv_to_xlsx_parallel(
             let mut chunk: Vec<Vec<String>> = Vec::with_capacity(PARALLEL_CHUNK_ROWS);
 
             for (index, result) in csv_reader.records().enumerate() {
-                let (record, num_cols) = checked_csv_record(result, index + 1)?;
+                let (record, num_cols) = checked_csv_record(result, index + 1, input_path)?;
                 if num_cols > col_count {
                     col_count = num_cols;
                 }
@@ -528,73 +538,75 @@ pub(crate) fn write_sheet_data(
     // Get row count
     let row_count: usize = dataframe_row_count(df)?;
 
-    if is_polars {
-        // Polars: iterate using rows()
-        let rows = df
-            .call_method0("iter_rows")
-            .map_err(|e| format!("Failed to iterate polars rows: {}", e))?;
-        let iter = rows
-            .try_iter()
-            .map_err(|e| format!("Failed to create polars row iterator: {}", e))?;
-        for row_result in iter {
-            let row = row_result.map_err(|e| format!("Failed to read polars row: {}", e))?;
-            let row_iter = row
-                .try_iter()
-                .map_err(|e| format!("Failed to iterate polars row values: {}", e))?;
-            let row_tuple: Vec<Bound<'_, PyAny>> = row_iter
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect polars row values: {}", e))?;
-
-            for (col_idx, value) in row_tuple.iter().enumerate() {
-                write_row_cell(
-                    worksheet,
-                    row_idx,
-                    col_idx,
-                    value,
-                    &date_format,
-                    &datetime_format,
-                    &col_formats,
-                    track_widths,
-                    &mut max_lens,
-                )?;
-            }
-            row_idx = row_idx
-                .checked_add(1)
-                .ok_or("Row count exceeds u32 limit")?;
-        }
+    let rows = if is_polars {
+        df.call_method0("iter_rows")
     } else {
-        // Pandas: use .values for faster access
+        // Mixed numeric columns can be coerced to floats or complex by `values`, before
+        // the integer precision guard sees them. Use plain tuples only for
+        // this case: keeping ndarray scalars elsewhere also preserves the
+        // established datetime64 fallback text for dates before March 1900.
         let values = df
             .getattr("values")
             .map_err(|e| format!("Failed to access DataFrame.values: {}", e))?;
-
-        for i in 0..row_count {
-            let row = values
-                .get_item(i)
-                .map_err(|e| format!("Failed to get row {}: {}", i, e))?;
-
-            #[allow(clippy::needless_range_loop)]
-            for col_idx in 0..columns.len() {
-                let value = row
-                    .get_item(col_idx)
-                    .map_err(|e| format!("Failed to get value at ({}, {}): {}", i, col_idx, e))?;
-
-                write_row_cell(
-                    worksheet,
-                    row_idx,
-                    col_idx,
-                    &value,
-                    &date_format,
-                    &datetime_format,
-                    &col_formats,
-                    track_widths,
-                    &mut max_lens,
-                )?;
+        let common_kind: String = values
+            .getattr("dtype")
+            .and_then(|v| v.getattr("kind"))
+            .and_then(|v| v.extract())
+            .map_err(|e| format!("Failed to read DataFrame array dtype: {}", e))?;
+        let mut coerced_integer = false;
+        if common_kind == "f" || common_kind == "c" {
+            let dtypes = df
+                .getattr("dtypes")
+                .and_then(|v| v.try_iter())
+                .map_err(|e| format!("Failed to iterate DataFrame dtypes: {}", e))?;
+            for dtype in dtypes {
+                let kind: String = dtype
+                    .and_then(|v| v.getattr("kind"))
+                    .and_then(|v| v.extract())
+                    .map_err(|e| format!("Failed to read DataFrame column dtype: {}", e))?;
+                if kind == "i" || kind == "u" {
+                    coerced_integer = true;
+                    break;
+                }
             }
-            row_idx = row_idx
-                .checked_add(1)
-                .ok_or("Row count exceeds u32 limit")?;
         }
+        if coerced_integer {
+            let kwargs = pyo3::types::PyDict::new(py);
+            kwargs.set_item("index", false).map_err(|e| e.to_string())?;
+            kwargs
+                .set_item("name", py.None())
+                .map_err(|e| e.to_string())?;
+            df.call_method("itertuples", (), Some(&kwargs))
+        } else {
+            Ok(values)
+        }
+    }
+    .map_err(|e| format!("Failed to iterate DataFrame rows: {}", e))?;
+    let iter = rows
+        .try_iter()
+        .map_err(|e| format!("Failed to create DataFrame row iterator: {}", e))?;
+    for row_result in iter {
+        let row = row_result.map_err(|e| format!("Failed to read DataFrame row: {}", e))?;
+        let row_iter = row
+            .try_iter()
+            .map_err(|e| format!("Failed to iterate DataFrame row values: {}", e))?;
+        for (col_idx, value) in row_iter.enumerate() {
+            let value = value.map_err(|e| format!("Failed to read DataFrame cell: {}", e))?;
+            write_row_cell(
+                worksheet,
+                row_idx,
+                col_idx,
+                &value,
+                &date_format,
+                &datetime_format,
+                &col_formats,
+                track_widths,
+                &mut max_lens,
+            )?;
+        }
+        row_idx = row_idx
+            .checked_add(1)
+            .ok_or("Row count exceeds u32 limit")?;
     }
 
     // Convert tracked content lengths to approximate Excel column widths
@@ -1032,5 +1044,57 @@ mod constant_memory_tests {
             "every complex option must be accounted for exactly once across the \
              safe and skipped sets"
         );
+    }
+}
+
+#[cfg(test)]
+mod csv_read_error_tests {
+    use super::{checked_csv_record, ConvertError};
+    use std::io::{self, Read};
+
+    struct FailingReader;
+
+    impl Read for FailingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        }
+    }
+
+    #[test]
+    fn reader_io_errors_keep_the_file_category_and_errno() {
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(FailingReader);
+        let result = reader.records().next().expect("reader must attempt a read");
+        let error = checked_csv_record(result, 3, "synthetic.csv").unwrap_err();
+        let ConvertError::File(failure) = error else {
+            panic!("a read failure must not become a configuration error");
+        };
+        assert_eq!(failure.errno, Some(crate::errors::errno::EACCES));
+        assert!(failure.message.contains("synthetic.csv"));
+        assert!(failure.message.contains("row 3"));
+    }
+
+    #[test]
+    fn invalid_utf8_remains_a_parse_error() {
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(&b"\xff\n"[..]);
+        let result = reader.records().next().expect("one invalid record");
+        let error = checked_csv_record(result, 1, "synthetic.csv").unwrap_err();
+        assert!(
+            matches!(error, ConvertError::Config(message) if message.contains("CSV parse error at row 1"))
+        );
+    }
+
+    #[test]
+    fn readable_records_still_succeed() {
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(&b"synthetic,1\n"[..]);
+        let result = reader.records().next().expect("one valid record");
+        let (record, width) = checked_csv_record(result, 1, "synthetic.csv").unwrap();
+        assert_eq!(width, 2);
+        assert_eq!(record.get(0), Some("synthetic"));
     }
 }
