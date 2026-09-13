@@ -1257,6 +1257,7 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 &format!("cells['{}']", cell_ref),
                 &[
                     "value",
+                    "format",
                     "num_format",
                     "font_name",
                     "quote_prefix",
@@ -1298,10 +1299,39 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 })?;
             }
             let wrap = cell_bool_field(d, &cell_ref, "wrap_text")?;
+            let format = present_cell_field(d, "format")?
+                .map(|obj| {
+                    let dict = obj.cast::<pyo3::types::PyDict>().map_err(|_| {
+                        crate::errors::configuration_type(format!(
+                            "cells['{}']: 'format' must be a dict, got {}",
+                            cell_ref,
+                            pytype_name(&obj)
+                        ))
+                    })?;
+                    let mut fields =
+                        pydict_to_hashmap(dict, &format!("cells['{}']['format']", cell_ref))?;
+                    // Non-None shorthand fields override the reusable format,
+                    // including explicit false. Keep the caller's dict untouched.
+                    for key in [
+                        "num_format",
+                        "font_name",
+                        "quote_prefix",
+                        "align_horizontal",
+                        "align_vertical",
+                        "wrap_text",
+                    ] {
+                        if let Some(value) = present_cell_field(d, key)? {
+                            fields.insert(key.to_string(), value.unbind());
+                        }
+                    }
+                    Ok::<_, PyErr>(fields)
+                })
+                .transpose()?;
             cells.push(CellWrite {
                 row,
                 col,
                 value: val.unbind(),
+                format,
                 num_format: num_fmt,
                 font_name,
                 quote_prefix,
@@ -1314,6 +1344,7 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 row,
                 col,
                 value: value.unbind(),
+                format: None,
                 num_format: None,
                 font_name: None,
                 quote_prefix: false,

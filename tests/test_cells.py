@@ -180,6 +180,90 @@ class TestCellsFormatting:
     """Tests for cells with formatting options beyond num_format (item 7)."""
 
     @pytest.mark.parametrize("multi_sheet", [False, True])
+    def test_reusable_full_format(self, tmp_xlsx: str, multi_sheet: bool) -> None:
+        """Full cell styles survive writing, including borders and blank cells."""
+        style: Any = {
+            "font_name": "Arial", "font_size": 14, "bold": True,
+            "italic": True, "underline": True, "font_color": "#FFFFFF",
+            "bg_color": "#336699", "border": "thin", "border_top": "thick",
+            "border_bottom": "double", "border_left": "dashed", "border_color": "#FF0000",
+            "align_horizontal": "right", "align_vertical": "top",
+            "wrap_text": True, "quote_prefix": True, "num_format": "@",
+        }
+        before = style.copy()
+        cells: Any = {
+            "C1": {"value": "000123", "format": style},
+            "C2": {"value": None, "format": style},
+            "C3": {"value": "override", "format": style, "font_name": "Courier New",
+                   "quote_prefix": False, "wrap_text": False, "num_format": "General",
+                   "align_horizontal": "left", "align_vertical": "center"},
+            "C4": {"value": "defaults", "format": None, "font_name": "Arial"},
+            "C5": {"value": "inherit", "format": style, "font_name": None,
+                   "quote_prefix": None, "wrap_text": None},
+        }
+        df = pl.DataFrame({"Example": [1]})
+        if multi_sheet:
+            xlsxturbo.dfs_to_xlsx([(df, "Example", {"cells": cells})], tmp_xlsx)
+        else:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells=cells)
+        assert style == before
+        wb = load_workbook(tmp_xlsx)
+        try:
+            ws = active_ws(wb)
+            for ref in ("C1", "C2", "C5"):
+                cell = ws[ref]
+                assert cell.font.name == "Arial"
+                assert cell.font.sz == 14
+                assert cell.font.b
+                assert cell.font.i
+                assert cell.font.u == "single"
+                assert cell.font.color is not None
+                assert cell.font.color.rgb == "FFFFFFFF"
+                assert cell.fill.patternType == "solid"
+                assert cell.fill.fgColor.rgb == "FF336699"
+                for side, expected in (("top", "thick"), ("bottom", "double"),
+                                       ("left", "dashed"), ("right", "thin")):
+                    border = getattr(cell.border, side)
+                    assert border.style == expected
+                    assert border.color.rgb == "FFFF0000"
+                assert cell.alignment.horizontal == "right"
+                assert cell.alignment.vertical == "top"
+                assert cell.alignment.wrap_text
+                assert cell.quotePrefix
+                assert cell.number_format == "@"
+            assert ws["C1"].value == "000123"
+            assert ws["C1"].data_type == "s"
+            assert ws["C2"].value is None
+            override = ws["C3"]
+            assert override.font.name == "Courier New"
+            assert override.font.b
+            assert not override.quotePrefix
+            assert not override.alignment.wrap_text
+            assert override.number_format == "General"
+            assert override.alignment.horizontal == "left"
+            assert override.alignment.vertical == "center"
+            assert ws["C4"].font.name == "Arial"
+            assert not ws["C4"].font.b
+        finally:
+            wb.close()
+
+    @pytest.mark.parametrize(("style", "error_class", "field"), [
+        ("bold", xlsxturbo.ConfigurationTypeError, "format"),
+        ({1: True}, xlsxturbo.ConfigurationTypeError, "keys"),
+        ({"typo": True}, xlsxturbo.ConfigurationError, "typo"),
+        ({"bold": "yes"}, xlsxturbo.ConfigurationError, "bold"),
+        ({"font_color": "not-a-color"}, xlsxturbo.ConfigurationError, "font_color"),
+        ({"border_bottom": "not-a-border"}, xlsxturbo.ConfigurationError, "border_bottom"),
+    ])
+    def test_invalid_full_format(self, tmp_xlsx: str, style: Any,
+                                 error_class: type[Exception], field: str) -> None:
+        """Invalid nested formats identify the cell and the failing field."""
+        cells: Any = {"C7": {"value": "example", "format": style}}
+        with pytest.raises(error_class, match=field) as error:
+            xlsxturbo.df_to_xlsx(pl.DataFrame({"Example": [1]}), tmp_xlsx, cells=cells)
+        assert "C7" in str(error.value)
+
+    @pytest.mark.parametrize("multi_sheet", [False, True])
     def test_font_name_and_quote_prefix(self, tmp_xlsx: str, multi_sheet: bool) -> None:
         """Cell formatting preserves leading zeros without inserting an apostrophe."""
         df = pd.DataFrame({"Example": [1]})

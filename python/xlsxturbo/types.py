@@ -436,6 +436,7 @@ class _CellValueRequired(TypedDict):
 class CellValueOptions(_CellValueRequired, total=False):
     """Options for a cell write with custom formatting."""
 
+    format: ColumnFormat | None  # Reusable full format; non-None shorthand fields override it
     num_format: str  # Excel number format string, e.g. '@' for text, '0.00' for decimal
     font_name: str  # Font family, e.g. 'Arial'
     quote_prefix: bool  # Excel quote marker; does not change the cell value or type

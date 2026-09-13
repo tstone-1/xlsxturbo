@@ -1,6 +1,6 @@
 //! Arbitrary cell write application helpers.
 
-use crate::parse::{parse_horizontal_alignment, parse_vertical_alignment};
+use crate::parse::{parse_column_format, parse_horizontal_alignment, parse_vertical_alignment};
 use crate::types::CellWrite;
 use crate::write::{write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
 use pyo3::prelude::*;
@@ -23,7 +23,14 @@ pub(crate) fn apply_cells(
             || cell.align_horizontal.is_some()
             || cell.align_vertical.is_some()
             || cell.wrap_text;
-        let fmt = if has_formatting {
+        let fmt = if let Some(format) = &cell.format {
+            let cell_ref = rust_xlsxwriter::utility::row_col_to_cell(cell.row, cell.col);
+            Some(parse_column_format(
+                py,
+                format,
+                &format!("cells['{}']['format']", cell_ref),
+            )?)
+        } else if has_formatting {
             let mut f = Format::new();
             if let Some(nf) = &cell.num_format {
                 f = f.set_num_format(nf);

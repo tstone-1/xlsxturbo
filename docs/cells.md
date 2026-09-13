@@ -58,6 +58,28 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 
+For full styling, pass a `format` dictionary using the same keys as
+[`column_formats`](formatting.md): fonts, fills, borders, alignment and number formats.
+For example:
+
+```python
+xlsxturbo.df_to_xlsx(df, "report.xlsx", cells={
+    "D1": {"value": "Summary", "format": {
+        "bold": True, "font_size": 14, "font_color": "#FFFFFF",
+        "bg_color": "#336699", "border_bottom": "thick",
+    }},
+    "D2": {"value": "000123", "format": {
+        "font_name": "Arial", "num_format": "@", "quote_prefix": True,
+    }},
+})
+```
+
+Existing shorthand fields (`num_format`, `font_name`, `quote_prefix`,
+`align_horizontal`, `align_vertical`, `wrap_text`) override the corresponding
+`format` fields when supplied with a non-`None` value, including explicit `False`.
+An omitted or `None` format leaves the existing shorthand behavior unchanged.
+The format dictionary is never modified, so it can be shared between cells.
+
 ## Hyperlinks
 
 Add clickable links to cells:

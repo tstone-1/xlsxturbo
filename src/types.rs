@@ -136,6 +136,7 @@ pub(crate) struct CellWrite {
     pub(crate) row: u32,
     pub(crate) col: u16,
     pub(crate) value: Py<PyAny>,
+    pub(crate) format: Option<HashMap<String, Py<PyAny>>>,
     pub(crate) num_format: Option<String>,
     pub(crate) font_name: Option<String>,
     pub(crate) quote_prefix: bool,
