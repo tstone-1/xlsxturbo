@@ -137,6 +137,8 @@ pub(crate) struct CellWrite {
     pub(crate) col: u16,
     pub(crate) value: Py<PyAny>,
     pub(crate) num_format: Option<String>,
+    pub(crate) font_name: Option<String>,
+    pub(crate) quote_prefix: bool,
     pub(crate) align_horizontal: Option<String>,
     pub(crate) align_vertical: Option<String>,
     pub(crate) wrap_text: bool,

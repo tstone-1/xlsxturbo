@@ -18,6 +18,8 @@ pub(crate) fn apply_cells(
     for cell in cells {
         let value = cell.value.bind(py);
         let has_formatting = cell.num_format.is_some()
+            || cell.font_name.is_some()
+            || cell.quote_prefix
             || cell.align_horizontal.is_some()
             || cell.align_vertical.is_some()
             || cell.wrap_text;
@@ -25,6 +27,12 @@ pub(crate) fn apply_cells(
             let mut f = Format::new();
             if let Some(nf) = &cell.num_format {
                 f = f.set_num_format(nf);
+            }
+            if let Some(name) = &cell.font_name {
+                f = f.set_font_name(name);
+            }
+            if cell.quote_prefix {
+                f = f.set_quote_prefix();
             }
             // These two cannot fail here: `extract_cells` parses both
             // alignment strings at extract time and refuses the call, so a bad

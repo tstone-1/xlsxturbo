@@ -1224,6 +1224,25 @@ fn cell_string_field(
     }
 }
 
+/// Extract an optional boolean cell option with a contextual type error.
+fn cell_bool_field(
+    d: &Bound<'_, pyo3::types::PyDict>,
+    cell_ref: &str,
+    key: &str,
+) -> PyResult<bool> {
+    match present_cell_field(d, key)? {
+        Some(v) => v.extract::<bool>().map_err(|_| {
+            crate::errors::configuration_type(format!(
+                "cells['{}']: '{}' must be a bool, got {}",
+                cell_ref,
+                key,
+                pytype_name(&v)
+            ))
+        }),
+        None => Ok(false),
+    }
+}
+
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})
 pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Vec<CellWrite>> {
     let mut cells = Vec::new();
@@ -1239,6 +1258,8 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 &[
                     "value",
                     "num_format",
+                    "font_name",
+                    "quote_prefix",
                     "align_horizontal",
                     "align_vertical",
                     "wrap_text",
@@ -1251,6 +1272,8 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 ))
             })?;
             let num_fmt = cell_string_field(d, &cell_ref, "num_format")?;
+            let font_name = cell_string_field(d, &cell_ref, "font_name")?;
+            let quote_prefix = cell_bool_field(d, &cell_ref, "quote_prefix")?;
             let align_h = cell_string_field(d, &cell_ref, "align_horizontal")?;
             // The two alignment parsers take a value, not an option, so the
             // cell and key go in front here -- the same `option['key']: 'field':`
@@ -1274,21 +1297,14 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                     ))
                 })?;
             }
-            let wrap: bool = match present_cell_field(d, "wrap_text")? {
-                Some(v) => v.extract::<bool>().map_err(|_| {
-                    crate::errors::configuration_type(format!(
-                        "cells['{}']: 'wrap_text' must be a bool, got {}",
-                        cell_ref,
-                        pytype_name(&v)
-                    ))
-                })?,
-                None => false,
-            };
+            let wrap = cell_bool_field(d, &cell_ref, "wrap_text")?;
             cells.push(CellWrite {
                 row,
                 col,
                 value: val.unbind(),
                 num_format: num_fmt,
+                font_name,
+                quote_prefix,
                 align_horizontal: align_h,
                 align_vertical: align_v,
                 wrap_text: wrap,
@@ -1299,6 +1315,8 @@ pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResul
                 col,
                 value: value.unbind(),
                 num_format: None,
+                font_name: None,
+                quote_prefix: false,
                 align_horizontal: None,
                 align_vertical: None,
                 wrap_text: false,

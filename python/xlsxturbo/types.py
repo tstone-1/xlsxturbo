@@ -79,8 +79,8 @@ ValidationType = Literal[
 ]
 
 
-class HeaderFormat(TypedDict, total=False):
-    """Header cell formatting options. All fields are optional."""
+class _CellFormat(TypedDict, total=False):
+    """Formatting keys shared by base-cell and conditional formats."""
 
     bold: bool
     italic: bool
@@ -99,25 +99,23 @@ class HeaderFormat(TypedDict, total=False):
     wrap_text: bool  # Enable text wrapping within cell
 
 
-class ColumnFormat(TypedDict, total=False):
+class HeaderFormat(_CellFormat, total=False):
+    """Header cell formatting options. All fields are optional."""
+
+    font_name: str  # Font family, e.g. 'Arial'
+    quote_prefix: bool  # Excel quote marker; does not change the cell value or type
+
+
+class ColumnFormat(HeaderFormat, total=False):
     """Column cell formatting options. All fields are optional."""
 
-    bold: bool
-    italic: bool
-    font_color: str  # '#RRGGBB' or named color (white, black, red, blue, etc.)
-    bg_color: str  # '#RRGGBB' or named color
-    font_size: float
-    underline: bool
     num_format: str  # Excel number format string, e.g. '0.00', '#,##0', '0.00%'
-    border: bool | str  # True = thin all sides (backward compat), str = named style all sides
-    border_left: bool | str  # True = thin, or a named style (thin, medium, thick, dashed, ...)
-    border_right: bool | str  # True = thin, or named style for right side only
-    border_top: bool | str  # True = thin, or named style for top side only
-    border_bottom: bool | str  # True = thin, or named style for bottom side only
-    border_color: str  # Color for all borders. Requires a border to be set for a visible effect
-    align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
-    align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
-    wrap_text: bool  # Enable text wrapping within cell
+
+
+class _ConditionalCellFormat(_CellFormat, total=False):
+    """Conditional styles exclude base-cell font names and quote markers."""
+
+    num_format: str
 
 
 class _ConditionalRequired(TypedDict):
@@ -165,7 +163,7 @@ class ConditionalFormat(_ConditionalRequired, total=False):
     value: str | int | float  # Target value for comparison criteria
     min_value: int | float  # Min value for 'between'/'not_between' criteria
     max_value: int | float  # Max value for 'between'/'not_between' criteria
-    format: ColumnFormat  # Format to apply when condition is met (bg_color, font_color, bold, etc.)
+    format: _ConditionalCellFormat  # Format to apply when condition is met (bg_color, font_color, bold, etc.)
 
 
 class _CommentRequired(TypedDict):
@@ -232,6 +230,7 @@ class RichTextFormat(TypedDict, total=False):
     font_color: str  # '#RRGGBB' or named color
     bg_color: str  # '#RRGGBB' or named color
     font_size: float
+    font_name: str  # Font family for this run
     underline: bool
 
 
@@ -438,6 +437,8 @@ class CellValueOptions(_CellValueRequired, total=False):
     """Options for a cell write with custom formatting."""
 
     num_format: str  # Excel number format string, e.g. '@' for text, '0.00' for decimal
+    font_name: str  # Font family, e.g. 'Arial'
+    quote_prefix: bool  # Excel quote marker; does not change the cell value or type
     align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
     align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
     wrap_text: bool  # Enable text wrapping within cell

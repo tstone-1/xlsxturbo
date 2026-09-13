@@ -48,6 +48,10 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 - Simple: `{'A1': 'text'}`, `{'B2': 42}`, `{'C3': True}`
 - With formatting: `{'A1': {'value': '...', 'num_format': '@'}}`
 - Additional format options: `align_horizontal`, `align_vertical`, `wrap_text`
+- `font_name` selects a font family, for example `'Arial'`.
+- `quote_prefix=True` sets Excel's quote marker without inserting an apostrophe into
+  the stored value. To keep leading zeros, pass a string value; use `num_format='@'`
+  for text formatting. The marker itself does not convert numbers to strings.
 
 **Notes:**
 - Cells are written after all DataFrame data, so they can overwrite existing values

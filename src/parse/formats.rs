@@ -171,6 +171,7 @@ const FORMAT_KEYS_FONT: &[&str] = &[
     "bg_color",
     "font_color",
     "font_size",
+    "font_name",
 ];
 
 /// Cell geometry — what `Cell` scope and above add to the font keys. The font
@@ -185,6 +186,7 @@ const FORMAT_KEYS_CELL: &[&str] = &[
     "align_horizontal",
     "align_vertical",
     "wrap_text",
+    "quote_prefix",
 ];
 
 /// Keys accepted only at `Column` scope.
@@ -267,6 +269,14 @@ fn parse_format_dict(
 
     if let Some(size) = view.f64("font_size")? {
         format = format.set_font_size(size);
+    }
+
+    if let Some(name) = view.string("font_name")? {
+        format = format.set_font_name(&name);
+    }
+
+    if view.bool("quote_prefix")?.unwrap_or(false) {
+        format = format.set_quote_prefix();
     }
 
     if scope == FormatScope::Column {

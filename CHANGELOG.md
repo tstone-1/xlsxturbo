@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-13
+
+### Added
+- `font_name` in header, column, merged-range and rich-text formats, and individual
+  cell writes.
+- `quote_prefix` in header, column and merged-range formats, and individual cell
+  writes. It sets Excel's quote marker without changing the stored value or type.
+
 ## [1.4.1] - 2026-09-06
 
 ### Fixed

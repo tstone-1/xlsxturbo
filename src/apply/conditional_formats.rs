@@ -48,7 +48,18 @@ fn cf_optional_color(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<u32>,
 /// Parse the optional `format` dict on a cell-rule conditional format config.
 fn parse_cf_format(view: &OptionMap<'_, '_>) -> Result<Option<Format>, String> {
     match view.dict("format")? {
-        Some(map) => Ok(Some(parse_column_format(view.py(), &map, view.context())?)),
+        Some(map) => {
+            // Differential styles cannot carry these base-cell properties.
+            for key in ["font_name", "quote_prefix"] {
+                if map.contains_key(key) {
+                    return Err(format!(
+                        "{}: '{}' is not supported in conditional formats; use column_formats instead",
+                        view.context(), key
+                    ));
+                }
+            }
+            Ok(Some(parse_column_format(view.py(), &map, view.context())?))
+        }
         None => Ok(None),
     }
 }

@@ -32,6 +32,8 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - font_color (str): '#RRGGBB' or named color (white, black, red, blue, etc.)
 # - bg_color (str): Background color
 # - font_size (float): Font size in points
+# - font_name (str): Font family, e.g. 'Arial'
+# - quote_prefix (bool): Excel quote marker; leaves the value and type unchanged
 # - underline (bool): Underlined text
 # - border (bool|str): True = thin all sides, or a style name
 # - border_left/right/top/bottom (bool|str): Per-side border, same values
@@ -44,11 +46,16 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 
 > **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, `sparklines`, and `rich_text` segment formats.
 >
-> `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `bg_color`, `font_size`). A segment is an inline run inside one cell, so cell-level keys — borders, `align_horizontal`/`align_vertical`, `wrap_text` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.
+> `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `bg_color`, `font_size`, `font_name`). A segment is an inline run inside one cell, so cell-level keys — borders, `align_horizontal`/`align_vertical`, `wrap_text`, `quote_prefix` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.
 >
 > Column patterns in `column_formats`, `conditional_formats`, and `validations` must match at least one DataFrame column. A zero-match exact name or wildcard raises `ValueError` instead of silently omitting the requested behavior.
 
 ## Column Formatting
+
+`font_name` and `quote_prefix` also work in merged-range formats. They are not
+supported in conditional-format rules; set them through `column_formats` instead.
+`quote_prefix` changes Excel's quote marker, not the stored value or type. Pass
+identifiers as strings and use `num_format='@'` when text formatting is needed.
 
 Apply formatting to data columns using pattern matching. Unknown keys raise errors (see [Header Styling](#header-styling)).
 
@@ -79,6 +86,8 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
 # Available format options:
 # - bg_color (str): Background color ('#RRGGBB' or named)
 # - font_color (str): Text color
+# - font_name (str): Font family, e.g. 'Arial'
+# - quote_prefix (bool): Excel quote marker; leaves the value and type unchanged
 # - num_format (str): Excel number format ('0.00', '#,##0', '0.00%', etc.)
 # - bold (bool): Bold text
 # - italic (bool): Italic text

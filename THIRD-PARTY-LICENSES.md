@@ -618,7 +618,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.4.5](https://github.com/rust-lang/cc-rs)
+- [cc 1.4.6](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.12](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.105](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -695,7 +695,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [bitflags 2.13.1](https://github.com/bitflags/bitflags)
+- [bitflags 2.13.2](https://github.com/bitflags/bitflags)
 - [log 0.4.34](https://github.com/rust-lang/log)
 - [num-traits 0.2.19](https://github.com/rust-num/num-traits)
 
@@ -1343,7 +1343,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [crc32fast 1.5.1](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.2](https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License

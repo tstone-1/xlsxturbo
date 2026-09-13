@@ -732,6 +732,69 @@ class TestBoolRejectedWhereANumberIsExpected:
         wb.close()
 
 
+class TestFontNameAndQuotePrefix:
+    """Font family and quote markers survive every supported format scope."""
+
+    @pytest.mark.parametrize("multi_sheet", [False, True])
+    @pytest.mark.parametrize("quote_prefix", [False, True])
+    def test_cell_format_scopes(self, tmp_xlsx: str, multi_sheet: bool, quote_prefix: bool) -> None:
+        """Header, column and merged formats preserve text and their own font."""
+        df = pd.DataFrame({"Code": ["000123"]})
+        options: Any = {
+            "header_format": {"font_name": "Arial", "quote_prefix": quote_prefix},
+            "column_formats": {
+                "Code": {"font_name": "Verdana", "quote_prefix": quote_prefix, "num_format": "@"}
+            },
+            "merged_ranges": [("C1:D1", "Example title", {"font_name": "Courier New", "quote_prefix": quote_prefix})],
+        }
+        if multi_sheet:
+            xlsxturbo.dfs_to_xlsx([(df, "Example", options)], tmp_xlsx)
+        else:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, **options)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        for address, font_name in [("A1", "Arial"), ("A2", "Verdana"), ("C1", "Courier New")]:
+            assert ws[address].font.name == font_name
+            assert ws[address].quotePrefix is quote_prefix
+        assert ws["A2"].value == "000123"
+        assert ws["A2"].data_type == "s"
+        assert ws["A2"].number_format == "@"
+        wb.close()
+
+    def test_rich_text_font_name(self, tmp_xlsx: str) -> None:
+        """Font names belong to individual rich-text runs."""
+        df = pd.DataFrame({"Code": ["example"]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, rich_text={
+            "C1": [("First", {"font_name": "Arial"}), ("Second", {"font_name": "Courier New"})]
+        })
+        with zipfile.ZipFile(tmp_xlsx) as archive:
+            shared = archive.read("xl/sharedStrings.xml").decode("utf-8")
+        assert '<rFont val="Arial"/>' in shared
+        assert '<rFont val="Courier New"/>' in shared
+
+    @pytest.mark.parametrize(("field", "value"), [("font_name", "Arial"), ("quote_prefix", True)])
+    def test_conditional_format_rejects_base_cell_properties(self, tmp_xlsx: str, field: str, value: Any) -> None:
+        """Differential formats must not silently drop the new cell properties."""
+        df = pd.DataFrame({"Score": [1]})
+        options: Any = {"Score": {
+            "type": "cell", "criteria": "greater_than", "value": 0, "format": {field: value}
+        }}
+        with pytest.raises(xlsxturbo.ConfigurationError, match="not supported in conditional formats") as error:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, conditional_formats=options)
+        assert field in str(error.value)
+        assert "Score" in str(error.value)
+
+    @pytest.mark.parametrize(("field", "value"), [("font_name", 123), ("quote_prefix", "yes"), ("quote_prefix", 1)])
+    def test_invalid_format_types(self, tmp_xlsx: str, field: str, value: Any) -> None:
+        """Shared formats reject mistyped options with the owning context."""
+        df = pd.DataFrame({"Code": ["example"]})
+        options: Any = {field: value}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=field) as error:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format=options)
+        assert "header_format" in str(error.value)
+        assert "must be" in str(error.value)
+
+
 class TestHeaderFormat:
     """Tests for header_format parameter."""
 
@@ -823,6 +886,7 @@ class TestRichText:
             ("align_horizontal", "center"),
             ("align_vertical", "top"),
             ("wrap_text", True),
+            ("quote_prefix", True),
             ("border", True),
             ("border_left", "thin"),
             ("border_color", "#FF0000"),

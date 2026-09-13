@@ -107,6 +107,17 @@ class TestStubAndRuntimeAgree:
 class TestRuntimeUsability:
     """The shapes work as runtime objects, which is the point of the module."""
 
+    def test_conditional_format_shape_excludes_base_cell_properties(self) -> None:
+        """Conditional-style annotations do not advertise rejected properties."""
+        conditional_style = typing.get_type_hints(types_module.ConditionalFormat)["format"]
+        conditional_keys = typing.get_type_hints(conditional_style)
+        column_keys = typing.get_type_hints(types_module.ColumnFormat)
+        assert "num_format" in conditional_keys
+        assert "font_color" in conditional_keys
+        for key in ("font_name", "quote_prefix"):
+            assert key in column_keys
+            assert key not in conditional_keys
+
     def test_typeddicts_expose_their_fields(self) -> None:
         """A representative ``TypedDict`` has the fields it documents."""
         assert "bold" in types_module.HeaderFormat.__annotations__

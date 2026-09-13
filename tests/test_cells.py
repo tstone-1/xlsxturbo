@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 import polars as pl
 import pytest
@@ -176,6 +178,49 @@ class TestCellsPerSheet:
 
 class TestCellsFormatting:
     """Tests for cells with formatting options beyond num_format (item 7)."""
+
+    @pytest.mark.parametrize("multi_sheet", [False, True])
+    def test_font_name_and_quote_prefix(self, tmp_xlsx: str, multi_sheet: bool) -> None:
+        """Cell formatting preserves leading zeros without inserting an apostrophe."""
+        df = pd.DataFrame({"Example": [1]})
+        cells: Any = {
+            "C1": {"value": "000123", "num_format": "@", "font_name": "Verdana", "quote_prefix": True},
+            "C2": {"value": "font only", "font_name": "Courier New"},
+            "C3": {"value": "quote only", "quote_prefix": True},
+            "C4": {"value": "no quote", "quote_prefix": False},
+            "C5": {"value": "defaults", "font_name": None, "quote_prefix": None},
+            "C6": {"value": 123, "quote_prefix": True},
+        }
+        if multi_sheet:
+            xlsxturbo.dfs_to_xlsx([(df, "Example", {"cells": cells})], tmp_xlsx)
+        else:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells=cells)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["C1"].value == "000123"
+        assert ws["C1"].data_type == "s"
+        assert ws["C1"].number_format == "@"
+        assert ws["C1"].font.name == "Verdana"
+        assert ws["C1"].quotePrefix is True
+        assert ws["C2"].font.name == "Courier New"
+        assert ws["C2"].quotePrefix is False
+        assert ws["C3"].quotePrefix is True
+        assert ws["C4"].quotePrefix is False
+        assert ws["C5"].quotePrefix is False
+        assert ws["C6"].value == 123
+        assert ws["C6"].data_type == "n"
+        assert ws["C6"].quotePrefix is True
+        wb.close()
+
+    @pytest.mark.parametrize(("field", "value"), [("font_name", 123), ("quote_prefix", "yes"), ("quote_prefix", 1)])
+    def test_invalid_font_and_quote_types(self, tmp_xlsx: str, field: str, value: Any) -> None:
+        """Mistyped new cell options retain the cell-specific type error category."""
+        df = pd.DataFrame({"Example": [1]})
+        cells: Any = {"C1": {"value": "example", field: value}}
+        with pytest.raises(xlsxturbo.ConfigurationTypeError, match=field) as error:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells=cells)
+        assert "C1" in str(error.value)
+        assert "must be" in str(error.value)
 
     def test_cells_with_horizontal_alignment(self, tmp_xlsx: str) -> None:
         """Write cells with align_horizontal."""
