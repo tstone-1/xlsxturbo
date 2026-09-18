@@ -1407,7 +1407,7 @@ Applies to:
 
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.99.0](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.99.1](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1805,5 +1805,4 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 
 ```
-
 
