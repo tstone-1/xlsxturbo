@@ -31,6 +31,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -71,16 +72,21 @@ def _render() -> str:
     Raises:
         RuntimeError: If cargo-about fails or produces something implausible.
     """
-    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, developer tool
-        [_cargo_about(), "generate", str(TEMPLATE), "--config", str(CONFIG)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"cargo-about failed ({result.returncode}):\n{result.stderr}")
-    rendered = result.stdout
+    # --output-file, not stdout: on Windows cargo-about 0.9 refuses to write to a
+    # redirected stdout whenever a PowerShell process is among its ancestors, and
+    # exits 1 with an ERROR telling you to use -o.
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "notice.md"
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, developer tool
+            [_cargo_about(), "generate", str(TEMPLATE), "--config", str(CONFIG), "--output-file", str(out)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"cargo-about failed ({result.returncode}):\n{result.stderr}")
+        rendered = out.read_text(encoding="utf-8") if out.is_file() else ""
     # An empty or near-empty render is the failure mode that reads like success:
     # a notice file listing nothing looks tidy and satisfies nobody's license.
     if rendered.count(SECTION_MARK) < 4:
