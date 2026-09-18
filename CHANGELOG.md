@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-09-18
+
+### Changed
+- Update rust_xlsxwriter to 0.99.1. Its fix for formats dropped from dynamic-array
+  formulas does not change xlsxturbo output: `formula_columns` writes formulas
+  without a cell format.
+- Raise the polars floor in the test requirements to 1.44.2.
+
+### Fixed
+- `scripts/gen_third_party_licenses.py` now reads cargo-about's output through
+  `--output-file`. cargo-about 0.9 on Windows refuses to write to a redirected stdout
+  when PowerShell is a parent process, which stopped the license notice from being
+  regenerated there.
+
 ## [1.5.0] - 2026-09-13
 
 ### Added

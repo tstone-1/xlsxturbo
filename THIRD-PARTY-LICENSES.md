@@ -12,7 +12,7 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 | License | Crates |
 | --- | ---: |
-| MIT License | 92 |
+| MIT License | 91 |
 | Apache License 2.0 | 3 |
 | Unicode License v3 | 1 |
 | zlib License | 1 |
@@ -618,9 +618,9 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.4.6](https://github.com/rust-lang/cc-rs)
-- [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
-- [find-msvc-tools 0.1.12](https://github.com/rust-lang/cc-rs)
+- [cc 1.4.7](https://github.com/rust-lang/cc-rs)
+- [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
+- [find-msvc-tools 0.1.13](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.105](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - [wasm-bindgen-macro-support 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
 - [wasm-bindgen-macro 0.2.128](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
@@ -1273,10 +1273,10 @@ Applies to:
 - [anstyle-query 1.1.5](https://github.com/rust-cli/anstyle.git)
 - [anstyle-wincon 3.0.11](https://github.com/rust-cli/anstyle.git)
 - [anstyle 1.0.14](https://github.com/rust-cli/anstyle.git)
-- [clap 4.6.6](https://github.com/clap-rs/clap)
-- [clap_builder 4.6.6](https://github.com/clap-rs/clap)
-- [clap_derive 4.6.4](https://github.com/clap-rs/clap)
-- [clap_lex 1.1.0](https://github.com/clap-rs/clap)
+- [clap 4.6.7](https://github.com/clap-rs/clap)
+- [clap_builder 4.6.7](https://github.com/clap-rs/clap)
+- [clap_derive 4.6.7](https://github.com/clap-rs/clap)
+- [clap_lex 1.1.1](https://github.com/clap-rs/clap)
 - [colorchoice 1.0.5](https://github.com/rust-cli/anstyle.git)
 - [is_terminal_polyfill 1.70.2](https://github.com/polyfill-rs/is_terminal_polyfill)
 - [once_cell_polyfill 1.70.2](https://github.com/polyfill-rs/once_cell_polyfill)
@@ -1349,37 +1349,6 @@ Applies to:
 MIT License
 
 Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-```
-
-### MIT License
-
-Applies to:
-
-- [tinyvec_macros 0.1.1](https://github.com/Soveu/tinyvec_macros)
-
-```text
-MIT License
-
-Copyright (c) 2020 Soveu
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1481,13 +1450,13 @@ Applies to:
 - [portable-atomic 1.15.0](https://github.com/taiki-e/portable-atomic)
 - [proc-macro2 1.0.107](https://github.com/dtolnay/proc-macro2)
 - [quote 1.0.47](https://github.com/dtolnay/quote)
-- [rustix 1.1.4](https://github.com/bytecodealliance/rustix)
+- [rustix 1.1.5](https://github.com/bytecodealliance/rustix)
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.5](https://github.com/dtolnay/syn)
+- [syn 3.0.6](https://github.com/dtolnay/syn)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
-- [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -1520,7 +1489,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [tinyvec 1.13.2](https://github.com/Lokathor/tinyvec)
+- [tinyvec 1.13.3](https://github.com/Lokathor/tinyvec)
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -1732,7 +1701,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
 
 ```text
 UNICODE LICENSE V3
@@ -1781,7 +1750,7 @@ authorization of the copyright holder.
 
 Applies to:
 
-- [zlib-rs 0.6.7](https://github.com/trifectatechfoundation/zlib-rs)
+- [zlib-rs 0.6.8](https://github.com/trifectatechfoundation/zlib-rs)
 
 ```text
 (C) 2024 Trifecta Tech Foundation 
