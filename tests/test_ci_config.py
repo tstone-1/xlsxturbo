@@ -717,3 +717,55 @@ class TestCargoInstalledToolsArePinned:
             f"version, so a cached older binary is used instead and the pin never "
             f"reaches the runner"
         )
+
+
+UV_RUN_DOCS = ("BUILD.md", "AGENTS.md", "CONTRIBUTING.md")
+# `uv run` followed by whatever comes before the closing backtick or end of line.
+# A bare mention with nothing after it (prose saying "a plain `uv run`") is not a
+# command and is skipped.
+_UV_RUN = re.compile(r"\buv run\b(?P<args>[^`\n]*)")
+# The two flags that stop `uv run` from syncing the project venv first.
+_NO_RESYNC_FLAGS = ("--no-sync", "--no-project")
+
+
+def _uv_run_commands() -> list[tuple[str, int, str]]:
+    """Every `uv run` command in the contributor docs, as (file, line number, text)."""
+    found = []
+    for name in UV_RUN_DOCS:
+        for number, line in enumerate((REPO_ROOT / name).read_text(encoding="utf-8").splitlines(), 1):
+            for match in _UV_RUN.finditer(line):
+                if match.group("args").strip():
+                    found.append((name, number, match.group(0).strip()))
+    return found
+
+
+class TestUvRunDoesNotResyncTheVenv:
+    """Every documented `uv run` must carry `--no-sync` or `--no-project`.
+
+    A plain `uv run` first syncs `.venv` exactly to `uv.lock` with no extras.
+    Measured with `uv sync --dry-run`: 54 packages removed, including pytest,
+    ruff, pyright, maturin, pandas, polars and mkdocs, and the `maturin develop`
+    build replaced. During the 1.5.1 release BUILD.md's rebuild step did exactly
+    that, one line before the suite it was preparing for.
+    """
+
+    def test_the_docs_contain_uv_run_commands_to_check(self) -> None:
+        """The emptiness control: a pattern that matches nothing passes everything."""
+        in_build = [c for c in _uv_run_commands() if c[0] == "BUILD.md"]
+        assert len(in_build) >= 5, (
+            f"only {len(in_build)} `uv run` commands found in BUILD.md; the pattern has "
+            f"stopped matching and the check below is inert"
+        )
+
+    def test_no_documented_uv_run_resyncs_the_venv(self) -> None:
+        """The failure this class exists for."""
+        bare = [
+            f"{name}:{number}: {text}"
+            for name, number, text in _uv_run_commands()
+            if not any(flag in text.split() for flag in _NO_RESYNC_FLAGS)
+        ]
+        assert not bare, (
+            "these `uv run` commands would sync .venv to uv.lock and uninstall the dev "
+            "tools and test dependencies; add `--no-sync` (or `--no-project` for a "
+            "throwaway `--with` environment):\n" + "\n".join(bare)
+        )

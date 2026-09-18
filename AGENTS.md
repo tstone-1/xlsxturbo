@@ -31,7 +31,8 @@
 ## Build, Test, and Release
 
 - Use `uv` for Python dependency and command execution.
-- This repo uses a project-local `.venv` (an exception to any central-venv convention). Test deps (`pytest pandas polars openpyxl`) must be installed there; if they are missing, `uv run pytest` silently falls back to a system Python with a stale extension and reports bogus signature mismatches. Verify the interpreter in the pytest header is `.venv\Scripts\python.exe`; recover with `uv pip install pytest pandas polars openpyxl` and rebuild via `maturin develop --release`.
+- This repo uses a project-local `.venv` (an exception to any central-venv convention). Test deps (`pytest pandas polars openpyxl`) must be installed there; if they are missing, `pytest` can resolve to a system Python with a stale extension and report bogus signature mismatches. Verify the interpreter in the pytest header is `.venv\Scripts\python.exe`; recover with `uv pip install -e ".[dev]" -r requirements-test.txt -r requirements-docs.txt` and rebuild via `maturin develop --release`.
+- **Never run a bare `uv run` here; always `uv run --no-sync`** (or `--no-project` for a throwaway `--with` environment). A plain `uv run` first syncs `.venv` exactly to `uv.lock` with no extras, which uninstalls pytest, ruff, pyright, maturin, pandas, polars and mkdocs (54 packages by `uv sync --dry-run`) and replaces the `maturin develop` build. That is the usual way the test deps go missing: during the 1.5.1 release, BUILD.md's own rebuild step (then without `--no-sync`) removed pytest one line before the suite was due to run. `tests/test_ci_config.py::TestUvRunDoesNotResyncTheVenv` fails on a bare `uv run` in `BUILD.md`, `AGENTS.md` or `CONTRIBUTING.md`.
 - **A new third-party import in a test cannot be validated locally — add it to `requirements-test.txt`.** The local `.venv` holds the whole `dev` extras, but the CI test jobs and the release smoke test install only `requirements-test.txt`, so the local environment is a strict superset of CI and a test importing anything outside that file passes locally and fails only in CI. Declaring it in `[project.optional-dependencies] dev` does **not** fix it; those jobs never install `dev`. `tests/test_ci_config.py` fails if an import is undeclared or if a workflow re-inlines the list.
 
   **A declared version range is only supported at the end CI installs.** pip resolves to the
@@ -277,8 +278,13 @@ with a binary. `LICENSE` covers xlsxturbo's own code and nothing else. **maturin
 CycloneDX SBOM is not a substitute** — it records which license applies to each crate,
 which is not the notice the license asks for.
 
-Four things that cost time to find:
+Five things that cost time to find:
 
+- **cargo-about 0.9 on Windows refuses to write to a redirected stdout when PowerShell is a
+  parent process** (`ERROR ... please use the -o, --output-file option`), and an agent shell
+  always has one. The generator therefore passes `--output-file`; do not switch it back to
+  capturing stdout. Found during the 1.5.1 release, when Dependabot's rust_xlsxwriter bump
+  (#42) needed the notice regenerated and the script could not run on the desktop.
 - **`cargo install cargo-about` installs nothing and exits 0.** Its binary is behind a
   feature: `cargo install cargo-about --features cli`. Without it you get a warning, a
   clean exit, and no `cargo-about` on PATH.

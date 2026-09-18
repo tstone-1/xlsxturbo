@@ -17,8 +17,15 @@ cd xlsxturbo
 
 # Create/sync the pinned environment and build the extension
 uv sync --extra dev
-uv run maturin develop --release
+uv run --no-sync maturin develop --release
 ```
+
+**Every `uv run` in this repo needs `--no-sync`.** A plain `uv run` first syncs `.venv`
+exactly to `uv.lock` with no extras: it uninstalls the `dev` extras (pytest, ruff,
+pyright, maturin), the test and docs requirements, and replaces the `maturin develop`
+build with its own. Measured with `uv sync --dry-run`: 54 packages removed. The 1.5.1
+release hit this at step 3 of the release process, when pytest disappeared between
+the rebuild and the test run.
 
 ### Running Tests
 
@@ -28,7 +35,7 @@ uv run maturin develop --release
 cargo test --release
 
 # Python integration tests
-uv run pytest tests/
+uv run --no-sync pytest tests/
 ```
 
 ### Code Quality Checks
@@ -157,8 +164,8 @@ Pre-Push Checklist gates once the release changes are complete.
 ```bash
 uv lock                                   # uv.lock pins this project's own version
 cargo update                              # refresh Cargo.lock, including the root version
-uv run python scripts/gen_third_party_licenses.py --write
-uv run maturin develop --release           # rebuild the extension after the version bump
+uv run --no-sync python scripts/gen_third_party_licenses.py --write
+uv run --no-sync maturin develop --release # rebuild the extension after the version bump
 .venv/bin/python -m pytest tests/ -q        # Windows: .venv\Scripts\python.exe
 ```
 
@@ -254,7 +261,7 @@ After pushing the tag:
 
 1. Go to: https://pypi.org/project/xlsxturbo/
 2. Verify new version appears
-3. Test installation in a disposable environment: `uv run --with xlsxturbo==X.Y.Z python -c "import xlsxturbo; print(xlsxturbo.__version__)"`
+3. Test installation in a disposable environment: `uv run --no-project --with xlsxturbo==X.Y.Z python -c "import xlsxturbo; print(xlsxturbo.__version__)"`
 
 ## Troubleshooting
 
@@ -286,7 +293,7 @@ If changes aren't reflected after `maturin develop`:
 ```bash
 # Resync and rebuild the editable extension
 uv sync --extra dev
-uv run maturin develop --release
+uv run --no-sync maturin develop --release
 ```
 
 ## GitHub Actions Summary
