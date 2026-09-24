@@ -719,7 +719,13 @@ class TestCargoInstalledToolsArePinned:
         )
 
 
-UV_RUN_DOCS = ("BUILD.md", "AGENTS.md", "CONTRIBUTING.md")
+# dev-docs/ holds sections moved out of AGENTS.md, so it gets the same check.
+UV_RUN_DOCS = (
+    "BUILD.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    *sorted(p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "dev-docs").glob("*.md")),
+)
 # `uv run` followed by whatever comes before the closing backtick or end of line.
 # A bare mention with nothing after it (prose saying "a plain `uv run`") is not a
 # command and is skipped.

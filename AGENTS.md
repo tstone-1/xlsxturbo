@@ -35,23 +35,7 @@
 - **Never run a bare `uv run` here; always `uv run --no-sync`** (or `--no-project` for a throwaway `--with` environment). A plain `uv run` first syncs `.venv` exactly to `uv.lock` with no extras, which uninstalls pytest, ruff, pyright, maturin, pandas, polars and mkdocs (54 packages by `uv sync --dry-run`) and replaces the `maturin develop` build. That is the usual way the test deps go missing: during the 1.5.1 release, BUILD.md's own rebuild step (then without `--no-sync`) removed pytest one line before the suite was due to run. `tests/test_ci_config.py::TestUvRunDoesNotResyncTheVenv` fails on a bare `uv run` in `BUILD.md`, `AGENTS.md` or `CONTRIBUTING.md`.
 - **A new third-party import in a test cannot be validated locally — add it to `requirements-test.txt`.** The local `.venv` holds the whole `dev` extras, but the CI test jobs and the release smoke test install only `requirements-test.txt`, so the local environment is a strict superset of CI and a test importing anything outside that file passes locally and fails only in CI. Declaring it in `[project.optional-dependencies] dev` does **not** fix it; those jobs never install `dev`. `tests/test_ci_config.py` fails if an import is undeclared or if a workflow re-inlines the list.
 
-  **A declared version range is only supported at the end CI installs.** pip resolves to the
-  newest allowed, so `pandas>=2.3.3,<4` means pandas 3 on every leg and pandas 2 never. Since
-  1.1.0 a fourth `python-test` leg installs `requirements-test-pandas2.txt`, which **layers**
-  the main file (`-r requirements-test.txt`) and overrides only the pandas ceiling — never
-  restates the list, which would be a fifth copy of it. `tests/test_ci_config.py` fails if
-  that file stops layering, gains a package, stops being referenced by a workflow, or outlives
-  its reason (the pandas range narrowing back to one major). Scoped to pandas because it is
-  the only dependency whose range currently spans two majors; a second one needs its own leg
-  and nothing will notice on its own.
-
-  How the gap was found is the transferable part: the local `.venv` had pandas 3 while
-  `requirements-test.txt` said `<3`, so **local runs and CI had not been testing the same
-  library for weeks** and everything was green on both. The usual assumption here — that the
-  local environment is a strict superset of CI — was simply false, in the direction nothing
-  checks.
-
-  That guard exists because the same bug landed three times in two days: `tests/test_docs_site.py` imported `yaml` (declared in `dev`, broke three CI jobs); fixing those three left a **fourth** copy of the list in `release.yml`'s smoke-test job, which failed the v0.19.0 release after every wheel had already built; and the guard's first run found `numpy` imported by `tests/test_core.py` and never declared anywhere — working only because pandas pulls it in. A comment saying "remember the other copies" was the fix after the first, and it did not survive a day.
+  *A declared version range is only supported at the end CI installs* -- pandas 2 is covered only by the `requirements-test-pandas2.txt` leg, which layers the main file; a second two-major dependency needs its own leg. Full text: [dev-docs/testing.md](dev-docs/testing.md).
 
 - **The release smoke test runs `pytest tests/` against an installed wheel from outside the checkout, with only `tests/` copied.** So a test module that reads *repository* files — `mkdocs.yml`, the capability matrix, the generator script, the workflows — has nothing to read there and must skip via `tests.helpers.repo_checkout_available()`, not fail. This is invisible in ordinary CI and surfaces only when a tag is pushed: `test_docs_site.py` and `test_capability_matrix.py` were both added after v0.18.0, so v0.19.0 was the first release to run them and all 16 failed. Inside a checkout a missing file stays a hard failure — the guard distinguishes "no repository here" from "the repository is broken". Reproduce the job locally before tagging: `cp -r tests "$TMP/smoke" && cd "$TMP/smoke" && python -m pytest tests/ -q`.
 - Standard local checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release`, `maturin develop --release`, then `pytest tests/`, then `mkdocs build --strict` when anything under `docs/` moved (needs `uv pip install -r requirements-docs.txt` into the venv once; the `dev` extras deliberately do not carry it). `BUILD.md`'s Pre-Push Checklist is the CI-verbatim list; this line is the short form.
@@ -61,7 +45,7 @@
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
 - If multiple version-bump commits are awaiting release, tag each released version at its own commit; do not collapse distinct versions into one tag.
 - Linux release wheels intentionally use `manylinux_2_28` with maturin's `--find-interpreter` and PyO3 `abi3-py310`. Do not switch back to automatic manylinux selection without verifying Python 3.10+ abi3 wheels. (`abi3-py39` until 1.1.0 dropped Python 3.9.)
-- **The release workflow must smoke-test every published wheel on a runner of its own architecture, not a representative subset.** All five legs install the wheel and run the full suite before the publish job. Two of them existed only from 1.1.0 onward: Linux `aarch64` and macOS `x86_64` are cross-compiled and had no hosted runner when the pipeline was written, so they shipped untested for every release before that. The runners are `ubuntu-24.04-arm` and `macos-15-intel` — note `macos-13`, the old Intel image, has been retired, so check the current label before assuming. Each leg asserts the platform tag of the wheel it downloaded; without that a mistyped `wheel-artifact` installs some other wheel twice and two green legs read as coverage. `tests/test_stability_policy.py` compares the build matrix and the smoke-test matrix in both directions and ties them to the table in `docs/stability.md`, so a new build target cannot be published untested and a leg naming a non-existent artifact fails locally rather than after every wheel has built.
+- *The release workflow smoke-tests every published wheel on a runner of its own architecture* -- each leg asserts its wheel's platform tag; `tests/test_stability_policy.py` ties the build and smoke matrices to `docs/stability.md`. Full text: [dev-docs/testing.md](dev-docs/testing.md).
 - To confirm a release on PyPI, query the version-specific endpoint `https://pypi.org/pypi/xlsxturbo/<version>/json` (authoritative within seconds). The aggregate `https://pypi.org/pypi/xlsxturbo/json` `info.version` field lags several minutes behind (CDN cache) and can still show the previous version; trust the publish job's green status over it.
 - For multi-phase implementation work, run a deep diff review after each completed, verified phase before building the next phase on top of it.
 
@@ -89,278 +73,35 @@ Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py 
 
 ## Upstream defects belong upstream — file them
 
-**When rust_xlsxwriter is what is wrong, report it to jmcnamara/rust_xlsxwriter.** Not
-instead of the local workaround, but alongside it: work around the defect so users are not
-holding a corrupt file, then file the report so the workaround has an end. This is the
-standing rule for this repository, and it was learned the expensive way.
-
-The case that established it: a `data_bar` conditional format beside a sparkline on one
-worksheet made rust_xlsxwriter emit unbalanced `<ext>` elements, and Excel reported the
-workbook as damaged. xlsxturbo refused the combination from 1.0.0 and **carried that guard
-across two upstream releases without anyone filing an issue.** When it was finally reported
-as [#185](https://github.com/jmcnamara/rust_xlsxwriter/issues/185) on 2026-08-15, jmcnamara
-acknowledged it within two hours, fixed it the same evening and released 0.98.1 the next
-morning. The whole cost of the workaround was the cost of not asking. He also said outright
-in that thread: report anything else you hit here so it gets fixed.
-
-What makes a report land, from the one that worked:
-
-- **A reproducer that needs no Excel.** Counting `<ext>` opens against closes in the
-  generated XML shows the defect in a `println!`, so the maintainer can see it without
-  opening a workbook or trusting your description of what Excel said.
-- **Controls in the same program.** Each feature alone was printed beside the broken pair.
-  That is what establishes the defect is in the combination rather than in either feature,
-  and it is the difference between a report and a complaint.
-- **Say what you measured and stop there.** The report proposed the sibling-`<ext>`
-  structure as what it took the intent to be, and said the maintainer would know better.
-  Do not assert a cause in his code you have not read.
-
-**Pin the defect in a test that fails when it is fixed**, if the workaround makes it
-unreachable from Python. That was `tests/upstream_defect.rs` — driving rust_xlsxwriter
-directly, asserting the bug was *still present*, with a control so a worse regression could
-not be misread as the known one. It went red on the 0.98.1 bump exactly as designed, which
-is what triggered the guard's removal in 1.1.2. Delete such a file with the workaround; its
-whole job is to be the thing that notices.
-
-**The second workaround is also gone, one day after it was filed:**
-[#186](https://github.com/jmcnamara/rust_xlsxwriter/issues/186) (2026-08-16) —
-`Workbook::define_name` panicked on a name whose local part is empty (`""` or `"Sheet1!"`),
-at `defined_name.name.chars().next().unwrap()`, `workbook.rs:1578` in 0.98.1 — was fixed in
-0.98.2 (2026-08-17), which returned
-`ParameterError("Name '' cannot be empty in Excel")` — 0.99.0 says `Name cannot be blank`
-instead, so do not quote that string from here. The screen in `apply_defined_names` is gone,
-and `Cargo.toml` carries an exact floor rather than `0.98`, because the guard's absence is
-what makes the floor load-bearing.
-
-That check — whether the crate's message is as good as the guard's — is worth keeping as
-the removal criterion, and here the answer had two halves. The crate reports the **local**
-part, so it says `Name ''` for both `""` and `"Sheet1!"` and cannot identify which
-`defined_names` key a caller got wrong. What saves it is the `map_err` already wrapping the
-call, which puts the caller's own key back in front:
-`Failed to define name 'Sheet1!': Parameter error: 'Name '' cannot be empty in Excel'.`
-`test_empty_defined_name_error_names_the_offending_key` pins that half specifically, because
-it comes from xlsxturbo and not from the crate.
-
-An independent review of that draft before filing caught three over-claims and asked for
-two controls, and every one of them was right: **the controls decide whether a report is
-about the thing you say it is about.** `"Sheet1!1abc"` (invalid but non-empty local part →
-proper error) is what turns "empty names panic" from an assertion into a measurement, and
-`"!MyName"` separates an empty local part from an empty sheet qualifier. The cut claims were
-"the one input that falls through to a panic" (never measured to be the only one) and a
-statement about pyo3 panic handling made from memory rather than from a test. Review the
-draft against the packet of what you actually ran, not against what you believe.
+- *When rust_xlsxwriter is what is wrong, file it at jmcnamara/rust_xlsxwriter alongside the local workaround* -- #185 and #186 were each fixed within a day of filing. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#upstream-defects-belong-upstream--file-them).
+- *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
+- *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
 
 ## Name validation is ours now — upstream has drawn its line
 
-On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of
-[#189](https://github.com/jmcnamara/rust_xlsxwriter/issues/189#issuecomment-5368521583): he cannot
-replicate Excel's name rules maintainably, so the crate reverted to a simple rule set plus a "keep
-names simple, test in Excel if in doubt" note, and said so directly — *"Other libraries that wrap
-`rust_xlsxwriter` may need a stricter validation but I think that is up to them."* Duplicate-name
-comparison got the same answer: no case folding, out of scope.
+Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#name-validation-is-ours-now--upstream-has-drawn-its-line). Read it before touching `reject_reference_shaped_name`, `sanitize_table_name`, `claimed_table_name` or a rust_xlsxwriter bump.
 
-**So the crate's checks are a foot-gun guard, not a specification, and they are not going to move
-closer to Excel.** The two screens below stop being temporary workarounds waiting for an upstream
-fix and become the layer xlsxturbo owns. That is a change of intent, not of code — read the removal
-criteria in their doc comments with this in mind.
-
-**What exists today is asymmetric on purpose.** `reject_reference_shaped_name`
-(`src/workbook.rs`) **refuses** a defined name Excel would read as a cell reference, because
-silently renaming one leaves every formula pointing at a name the workbook no longer defines.
-`sanitize_table_name` (`src/parse/tables.rs`) **rewrites** a table name instead, since nothing
-references it. Preserve that split in anything new: rename what nobody points at, refuse what
-somebody might.
-
-**Taken: `Cargo.toml` pins `0.99.0` (2026-08-23), the release of every #189 fix.** The rename
-`XlsxError::TableNameReused` -> `NameReused` cost nothing, as predicted — we name neither variant.
-Three things the bump did change, and only the last needed code:
-
-- The crate now refuses cell-reference-shaped *defined* names itself.
-  `reject_reference_shaped_name` was kept anyway, on the criterion in its doc comment: the crate
-  reports the unqualified name only (`Name error for 'Q1'` for both `"Q1"` and `"Sheet1!Q1"`),
-  while ours names the `defined_names` key the caller wrote and suggests a replacement.
-- Calls that used to succeed now raise — a `defined_names` key holding a character Excel forbids
-  (`My-Name`, `Total$`), a logical constant, a reserved `_xlnm.*` name. Every one of them wrote a
-  workbook Excel objects to, so the change is a fix, but it is still a behaviour change and the
-  CHANGELOG says so.
-- **The crate's message for an empty defined name moved** (`Name '' cannot be empty in Excel` ->
-  `Name cannot be blank`), reddening the three tests that pin it. That is the standing cost of
-  having deleted our own screen for #186: those assertions are pinned to a message no test here
-  controls. Re-pin them on a bump; do not reinstate the screen.
-
-**A collision between a table name and a defined name is now a pre-check, not a save failure.**
-0.99.0 enforces Excel's rule that the two kinds must be unique against each other, but from inside
-`Workbook::save` — and `save_workbook` maps everything from there to `FileFailure`, so the caller
-was told their *file* had failed, in a message naming neither the sheet nor the option. Measured,
-with the pre-check disabled: `FileError: Failed to save workbook to '...': Name 'Sales' has already
-been used in this workbook.` The general shape is worth carrying: **a library that validates at
-save time will have its errors classified by whatever the save layer assumes**, so every new
-save-time rule upstream adds is a candidate for a pre-check here.
-
-**`claimed_table_name` (`src/convert.rs`) owns the gate that decides whether a sheet claims a name
-at all** — a style requested, a header row, at least one data row, `constant_memory` off. Both
-pre-checks call it, because a pre-check that guessed the gate differently would refuse workbooks
-that save cleanly. It sits beside `apply_worksheet_features`, the code it mirrors.
-
-⚠ **`sanitize_table_name` silently mangled names Excel accepts — measured 2026-08-21 end to end
-through the shipped 1.2.0 wheel, half fixed the same day.** It branches on `is_alphanumeric()`,
-which is the predicate upstream abandoned for exactly this reason: a combining mark is not
-alphanumeric, so it became `_`.
-
-| `table_name=` | written into the workbook |
-|---|---|
-| `Verkäufe` in NFD (`Verka` + U+0308) | `Verka_ufe` |
-| `ไม่` Thai, tone mark U+0E48 | `ไม_` |
-| `हिन्दी` Hindi, virama U+094D | `हिन_दी` |
-| `がくせい` in NFD (U+3099) | `か_くせい` |
-
-Controls in the same run behaved: ASCII `Sales`, NFC `Verkäufe`, `日本語` and NFC `がくせい` all
-survived byte for byte, and `Q1` became `_Q1` as designed. Excel accepts every one of the mangled
-inputs, there was no warning, and NFD text reaches a caller routinely.
-
-**The fix taken was NFC normalisation before the screen** — the smallest of the three candidates,
-because it repairs the mangling without widening what is *accepted*. It closes the first and
-fourth rows of that table and not the second or third: Thai and Hindi marks have no precomposed
-form, so those names are still rewritten. `marks_without_a_composed_form_are_still_rewritten` pins
-that, deliberately, so the remaining gap is a decision on record rather than a surprise — and so
-that widening the allowlist later goes red instead of passing silently. **NFC and not NFKC**:
-NFKC folds `U+FF21` FULLWIDTH A to ASCII `A`, which would turn a name Excel treats as distinct
-into the cell reference `A1` and then into `_A1`. `compatibility_forms_are_not_folded` is that
-control.
-
-**Closing the rest means inverting the allowlist to a denylist, and that direction needs the
-mirror audit** — not "does it still catch the bad names" but "what does it now accept that it used
-to rewrite?". Upstream's own flip in that direction moved 962,590 code points from rejected to
-accepted, which only an enumeration against a real validator could size. Do not take that step from
-reading.
-
-**The proptest cannot see this, and the reason is worth transplanting.**
-`sanitized_table_names_are_always_valid` asserts
-`sanitized.chars().all(|c| c.is_alphanumeric() || c == '_')` — the same predicate
-`sanitize_table_name` branches on. It is the writer agreeing with its own reader, so it holds by
-construction for every input `".*"` can generate and would keep holding if the predicate were
-wrong in any direction. A property that restates the implementation is not a test of it. The
-oracle a name check needs is external: Excel, or a fixed table of names measured against Excel.
-
-**A crate bump will not fix this either**, because the mangling happens in xlsxturbo before
-rust_xlsxwriter is called. `sanitize_table_name` is an allowlist, and therefore *stricter* than the
-crate's new denylist for exactly the characters at issue — the crate would accept every input in
-that table. Confirmed by the 0.99.0 bump, which changed none of it.
-
-⚠ **The mirror of that gap: the allowlist must stay at least as WIDE as the crate's denylist, or a
-name we rewrite is still refused.** A sanitized name goes straight to `Table::set_name`, so
-anything the crate rejects that we do not repair becomes a hard error on a name the caller expected
-us to fix. Two were found that way against 0.99.0 and are now screened —
-Excel's logical constants, and a reference with trailing text (`R2D2`) — and the check is
-mechanical: read `utility::check_name` in the crate version being pinned and account for each of
-its rules. `.` and `?` and the invalid-character list already become `_`; a backslash likewise; the
-reserved `_xlnm.*` names cannot survive, since the `.` is rewritten; the 255-character cap and the
-empty name are handled by the sanitizer's own tail.
-
-**If a stricter layer is built, do not derive the rules from Excel's documentation** — it is wrong
-about several common characters, `?` and `€` among them. Excel's own name validator is scriptable
-and answers in a fraction of a second per name, and it rejects names that a clean file load
-accepts, so it is the better of the two oracles. The measured character surveys behind that claim
-are in the #189 thread.
+- *The crate's name checks are a foot-gun guard, not a specification* -- the two screens here are the layer xlsxturbo owns, not temporary workarounds.
+- *Rename what nobody points at, refuse what somebody might* -- `reject_reference_shaped_name` refuses defined names; `sanitize_table_name` rewrites table names.
+- *A table/defined-name collision is a pre-check, not a save failure* -- `claimed_table_name` (`src/convert.rs`) owns the gate both pre-checks use; any new save-time rule upstream is a pre-check candidate.
+- *`sanitize_table_name` normalises to NFC, never NFKC, before the screen* -- Thai/Hindi marks are still rewritten on purpose; a denylist flip needs the mirror audit, not reading.
+- *The allowlist must stay at least as wide as the crate's denylist* -- on every bump, account for each rule in `utility::check_name`; re-pin the empty-name message tests, do not reinstate the screen.
 
 ## The bundled license notice
 
-`THIRD-PARTY-LICENSES.md` is generated — `python scripts/gen_third_party_licenses.py --write`
-(cargo-about, config `about.toml`, template `scripts/third-party-licenses.hbs`). Never edit
-it by hand; `tests/test_third_party_licenses.py` compares it against `cargo metadata` in
-both directions and will say so.
-
-Why it exists at all: the wheel is a binary containing compiled code from every crate in
-the dependency tree (the notice itself is the count; a hand-written number here disagreed
-with three others within two releases), and
-MIT, Apache-2.0, Zlib and Unicode-3.0 all require the copyright notice to be distributed
-with a binary. `LICENSE` covers xlsxturbo's own code and nothing else. **maturin's
-CycloneDX SBOM is not a substitute** — it records which license applies to each crate,
-which is not the notice the license asks for.
-
-Five things that cost time to find:
-
-- **cargo-about 0.9 on Windows refuses to write to a redirected stdout when PowerShell is a
-  parent process** (`ERROR ... please use the -o, --output-file option`), and an agent shell
-  always has one. The generator therefore passes `--output-file`; do not switch it back to
-  capturing stdout. Found during the 1.5.1 release, when Dependabot's rust_xlsxwriter bump
-  (#42) needed the notice regenerated and the script could not run on the desktop.
-- **`cargo install cargo-about` installs nothing and exits 0.** Its binary is behind a
-  feature: `cargo install cargo-about --features cli`. Without it you get a warning, a
-  clean exit, and no `cargo-about` on PATH.
-- **PEP 639 `license-files` is what puts the notice in the wheel**, at
-  `.dist-info/licenses/`. maturin gained it in **1.9.0**, so `[build-system] requires` says
-  `maturin>=1.9`. An older backend ignores the key and builds a wheel with neither notice
-  and no error. The two are asserted together in the test for that reason. `[tool.maturin]
-  include` also works but drops the file at the *site-packages root*, which is worse.
-- **cargo-about lists the root crate and has no flag to exclude it**, so the generator drops
-  that section structurally and refuses if it is missing, duplicated, or shared with a real
-  dependency.
-- **`serde_core → serde_derive` is declared under `target = "cfg(any())"`** — false for
-  every target, the idiom for "declared but never compiled". cargo-about omits it correctly;
-  the test has to skip that edge or it reports a missing notice for a crate we do not ship.
-  Every other `cfg(...)` edge is kept, so a Windows-only crate is still covered in a
-  macOS-built wheel's notice.
+- *`THIRD-PARTY-LICENSES.md` is generated; never edit it* -- `python scripts/gen_third_party_licenses.py --write`; `tests/test_third_party_licenses.py` checks it both ways.
+- *`cargo install cargo-about` installs nothing and exits 0* -- use `--features cli`; the generator passes `--output-file` on purpose.
+- *PEP 639 `license-files` puts the notice in the wheel only with `maturin>=1.9`* -- an older backend silently drops it. Full text: [dev-docs/license-notice.md](dev-docs/license-notice.md).
 
 ## The Exception Hierarchy (0.19.0+)
 
-`src/errors.rs` owns the public exception classes and is the only place in `src/` that may
-construct a `PyErr` from scratch. Raise with `errors::configuration`,
-`errors::configuration_type`, `errors::input_data`, `errors::file` or
-`errors::workbook_validation`. The classes are built by calling the `type` metaclass rather
-than with `create_exception!`, because that macro takes a single base and every class here
-needs two or three.
+`src/errors.rs` is the only place in `src/` that constructs a `PyErr`; raise through the `errors::*` helpers. Full text: [dev-docs/exceptions.md](dev-docs/exceptions.md). User-facing contract: `docs/errors.md`.
 
-Facts that are expensive to rediscover:
-
-- **`OptionError` is never raised, and that is not an oversight.** It exists so
-  `except OptionError` catches both configuration classes and nothing else. The guard that
-  every exported class needs a working trigger still applies to it, in a different form:
-  `ABSTRACT` in `tests/test_errors.py` maps it to exactly the triggered classes it must
-  catch, checked in both directions. Declaring a class abstract is otherwise a way to walk
-  straight past the rule that killed `UnsupportedFeatureError`.
-- **`OptionError` must not take a builtin base.** A builtin there lands on *both* children,
-  so a `ConfigurationTypeError` would silently also be a `ValueError` and the value/type
-  split would stop meaning anything to `except`. `FORBIDDEN_BASES` pins it.
-- **The second base is a compatibility contract, not decoration.** Each class inherits the
-  builtin its failures raised in 0.18. Pick a new class's builtin by **grepping what the site
-  raises today**, not by what the failure morally is. Getting this from taste produced a
-  breaking change twice during the original implementation — once for I/O (`OSError` alone
-  would have broken `except ValueError`) and once for `InputDataError` (which is a
-  `ValueError`, because frame detection has always reached the boundary through the pipeline).
-- **The 93 `pytest.raises(ValueError|TypeError)` assertions across `tests/` are the
-  behaviour record for pre-0.19.** They are the compatibility gate. A change to this area that
-  needs one of them edited to stay green is a breaking change, whatever the changelog claims.
-- **A class no site raises is dead API that can never be removed.**
-  `tests/test_errors.py` asserts the exported set equals the set with a working trigger, which
-  is what kept `UnsupportedFeatureError` from shipping (a `constant_memory` conflict is a
-  `RuntimeWarning` and the call succeeds — nothing would have raised it).
-- **The boundary is `src/lib.rs` *and* `src/extract.rs`,** 50 sites, not the dozen the plan
-  assumed. Everything below `extract.rs` is uniformly `Result<_, String>`.
-- **`ConvertError` in `src/convert.rs` is the one seam, and it has no `From<String>`.** Two
-  variants, `Config` and `File`, because `save_workbook` runs inside the pipeline and its
-  failure would otherwise be indistinguishable from a bad option at the boundary.
-
-  Until 0.21.0 a blanket `From<String>` mapped untagged failures to `Config`, so `?` compiled
-  everywhere and **a new filesystem call silently blamed the caller's options.** That
-  conversion is gone: every site now names its variant, and a new failure site *does not
-  compile* until it chooses. Prefer that over the `Internal` fallback variant the review
-  proposed — a fallback that still exists is still a default, and the default was the bug.
-  `TestConvertErrorHasNoDefaultCategory` watches for it coming back, with a control asserting
-  both variants are still constructed.
-
-  Frame detection needed the same treatment and got a boundary call
-  (`require_supported_dataframe`) instead, since tagging it would have pushed `ConvertError`
-  down into the write layer.
-- **`FileError.errno` is populated; `strerror` and `filename` must stay `None`.** Setting
-  `filename` makes `OSError.__str__` switch to `[Errno n] strerror: 'filename'` and **discard
-  the message**, which is where this library puts the path and the context. `errno` alone
-  leaves `str()` untouched. On Windows `raw_os_error()` is a Win32 code, not an errno —
-  `ERROR_PATH_NOT_FOUND` is 3, which as POSIX means "no such process" — so `errors::posix_errno`
-  passes the number through on Unix and classifies via `io::ErrorKind` elsewhere.
-
-Full reasoning, including the shapes considered and rejected: `docs/roadmap-1.0.md`
-decision D6. User-facing contract: `docs/errors.md`.
+- *A new class's builtin base is what the site raises today, found by grepping* -- the second base is a compatibility contract; `OptionError` must take no builtin base and is never raised.
+- *The 93 `pytest.raises(ValueError|TypeError)` assertions are the pre-0.19 compatibility gate* -- editing one to stay green is a breaking change.
+- *Every exported class needs a working trigger* -- a class no site raises is dead API that can never be removed.
+- *`ConvertError` has no `From<String>`* -- every failure site names `Config` or `File`; do not add a fallback variant.
+- *`FileError.errno` is set; `strerror` and `filename` stay `None`* -- `filename` makes `str()` discard the message.
 
 ## Python Lint, Type, and Security Gates
 
@@ -386,48 +127,12 @@ Scoping notes (intentional, do not "fix" by widening):
 
 ## Coverage, and why the obvious command lies
 
-`python scripts/coverage_report.py` (add `--html` for a browsable report). It needs
-`rustup component add llvm-tools-preview`; everything else is in the dev extras.
-
-**Do not use `cargo llvm-cov` on its own to judge this codebase.** It reports **26%** and
-shows every `src/apply/*.rs` file at 0%, which reads as an untested library and is false —
-those paths are covered thoroughly from the Python suite, on the other side of the FFI
-boundary. The script instruments both the Rust test binaries *and* the extension module,
-runs both suites, and merges the profiles: 92.96% of lines in the Rust core, 100% of the
-Python layer. `cargo-llvm-cov` is deliberately not a dependency, because its `report`
-subcommand takes no extra `--object` and the extension module is exactly that; the script
-drives `llvm-profdata`/`llvm-cov` directly instead.
-
-**There is no threshold, in CI or out, and adding one would be a regression.** A coverage
-target gets met by tests that execute lines without asserting anything. The CI job is
-informational: it publishes the table to the job summary and uploads HTML. It can still fail,
-and a failure means the measurement broke, never that coverage fell.
-
-Two filtering caveats the numbers depend on: `tests/`, `src/parse/proptests.rs` and
-`src/parse/boundaries.rs` are excluded as test code, but the `#[cfg(test)] mod tests` *inside*
-`src/parse/mod.rs` cannot be — `llvm-cov` has no sub-file filter — so that row means "the
-tests in this file all ran", not anything about the parsers.
+- *`cargo llvm-cov` alone reports 26% and is wrong here* -- use `python scripts/coverage_report.py`, which merges the Rust and Python-driven profiles.
+- *There is no coverage threshold, and adding one would be a regression* -- a Coverage job failure means the measurement broke. Full text: [dev-docs/testing.md](dev-docs/testing.md#coverage-and-why-the-obvious-command-lies).
 
 ## Property tests
 
-`src/parse/proptests.rs`. Three rules that are the difference between a property and a
-decoration, each learned by writing one that failed the test:
-
-- **State it as an equivalence, not an implication.** "A prefix pattern matches a string
-  starting with the prefix" is satisfied by an implementation matching *everything*. Each
-  pattern property asserts equality with the `str` method it claims to implement.
-- **Check the generator can reach the failing case, by mutating the code.** A property over
-  all printable ASCII stayed green when the guard it defends was deleted: the discriminating
-  inputs were one in seventy thousand of that space. Narrow the alphabet until a near-miss is
-  common, and where the case is nameable, write a second property whose generator *is* the
-  case.
-- **`".*"` generates short strings.** A property asserting a 255-character cap never entered
-  the truncation branch. Anything about a length boundary needs a generator that straddles it.
-
-`proptest-regressions/` is gitignored, against the usual advice: mutation-testing the suite
-makes proptest save a seed for every property that correctly went red, describing code that no
-longer exists. Promote a genuine failing case to a named test instead — it states the input
-where a reader can see it.
+- *State a property as an equivalence, and mutate the code to prove the generator reaches the failing case* -- `".*"` generates short strings; `proptest-regressions/` is gitignored, promote a real failure to a named test. Full text: [dev-docs/testing.md](dev-docs/testing.md#property-tests).
 
 ## The stability promise (1.0.0+)
 
@@ -459,135 +164,16 @@ in `release.yml`, and `xlsxturbo.__all__` — in both directions. Consequences:
 
 ### A new CPython needs no code change — and the `abi3` promise has one hole
 
-Checked against 3.15.0rc1 on 2026-08-26, Windows x86_64. **The published wheel works on a
-Python released after it was built, which is the whole point of `abi3-py310`**: pip resolves
-`cp310-abi3-win_amd64` on 3.15rc1, the extension imports, and a pass over `df_to_xlsx`
-(header format, column widths, table style, freeze panes, column formats, a `data_bar`
-conditional format, formula columns, comments, a chart), `dfs_to_xlsx`, `csv_to_xlsx`,
-`ExportOptions` and the whole exception hierarchy all behave. The sdist also builds from
-source under 3.15rc1 with pyo3 0.29 — no `PYO3_USE_ABI3_FORWARD_COMPATIBILITY` needed.
+Full text: [dev-docs/python-versions.md](dev-docs/python-versions.md#a-new-cpython-needs-no-code-change--and-the-abi3-promise-has-one-hole).
 
-⚠ **The `abi3` wheel does not cover free-threaded builds, and `docs/stability.md` promised
-that it covered "every supported version".** On `python3.14t` — a version that page lists as
-supported — `pip install xlsxturbo` finds **no usable wheel** and falls back to the sdist,
-which needs a Rust toolchain. **The control is what makes this a fact about free threading
-rather than about the machine**: the identical command on the ordinary 3.14.7 installs
-`cp310-abi3-win_amd64` in a second. Both were measured, on 3.14.7t and 3.15.0rc1t; the sdist
-builds and runs correctly on both, in about a minute. The page now says so. Whether
-free-threaded builds are *supported* is a promise nobody has made yet — do not add one to
-that page without asking.
-
-**The code is ready for free threading; the ecosystem is not, and the interesting number is
-on the ordinary build.** Measured on 3.14.7t, 32 cores:
-
-- **pyo3 declares the module free-threading-safe by default, and nobody here opted in.**
-  `#[pymodule]` with no `gil_used` argument compiles to `Py_MOD_GIL_NOT_USED` —
-  `pyo3-macros-backend/src/module.rs` reads `options.gil_used.is_some_and(...)`, so *absent*
-  means `false` means "does not need the GIL". Confirmed at runtime: `sys._is_gil_enabled()`
-  stays `False` after `import xlsxturbo`. Know this before assuming a `t` build silently
-  re-enables the GIL — it does not, and the assertion is the macro's, not ours.
-- **It survives the assertion.** 502 passed, 2 skipped on 3.14t (the 4 collection errors are
-  polars, below). Eight threads exporting one *shared* DataFrame produce 40 files that all
-  verify. `PyOnceLock<ErrorTypes>` is the only `static` in `src/` — no `static mut`, no
-  `RefCell`, no `unsafe` — and it is the type pyo3 provides for exactly this. ⚠ **Nothing can
-  race its initialisation, so do not write a test claiming to**: `errors::register` calls
-  `get_or_init` during module import, so it is filled before any Python code can run. A test
-  doing this covers concurrent *reads* and that `except` still matches by identity, which is
-  worth having under a docstring that says so.
-- ⚠ **polars ships no free-threaded wheels, for the same `abi3` reason as ours.** pandas 3.0.5
-  and numpy 2.5.2 do. So a `cp3XXt` wheel would put users on an interpreter where one of the
-  two supported frame libraries cannot be installed from a wheel at all. That, not any defect
-  here, is the argument against shipping one today.
-- **`df_to_xlsx` holds the GIL for the whole call.** The single `py.detach` in the crate is
-  `csv_to_xlsx` (`src/lib.rs:257`). Threaded `df_to_xlsx` measures **1.03x on an ordinary
-  build and 6.0x free-threaded** at 8 threads; `csv_to_xlsx` measures **~5.9x on both**. That
-  control is what makes this a statement about the detach and not about the interpreter.
-
-**That measurement is why `df_to_xlsx` and `dfs_to_xlsx` now detach for the save**, at
-`convert.rs` and `lib.rs` (the third `save_workbook` call, in `convert_csv`, already runs
-inside `csv_to_xlsx`'s detach — do not wrap it again). Threaded exports on an **ordinary**
-build went from 1.06x to **2.36x** at 4 and 8 threads, single-thread cost unchanged,
-reproduced over two interleaved A/B passes. The plateau is Amdahl on the extraction half,
-which reads Python objects and cannot be detached; it puts the save at ~58% of the call.
-
-Two things about testing it, because a GIL release is only observable through timing:
-
-- **The correctness tests do not cover the change and are not meant to.**
-  `TestConcurrentWrites` stays green with both `py.detach` wrappers deleted — verified. It
-  covers the *hazard* the detach creates (Rust running while the interpreter is unlocked),
-  which is the half that could corrupt a file. Do not read its green as cover for the detach.
-- **`TestSaveReleasesTheGil` is the guard, and it was mutation-checked per call site.** The
-  threshold is 0.80x with best-of-3 legs and a 4-core skip, chosen to sit in the middle of a
-  measured 0.43-vs-0.98 gap rather than close to either side. If it ever flakes, widen the
-  threshold — do not delete it.
-- ⚠ **A wall-clock assertion is invalid under `-Cinstrument-coverage`, and this repo runs
-  the whole pytest suite that way.** On an instrumented build four threads are *slower* than
-  one — 1.693s against 1.347s on a 32-core machine where the ordinary build gives 0.43x — so
-  the comparison measures the instrumentation at any threshold. `TestSaveReleasesTheGil`
-  therefore skips when `XLSXTURBO_COVERAGE` is set, which `scripts/coverage_report.py` exports
-  for every pytest pass it drives. **The local suite and every CI test leg passed; only the
-  Coverage job caught it**, which is the job whose failures are easy to wave through as
-  informational. Its `AGENTS.md` line already said what to do: a Coverage failure means the
-  measurement broke. Read it.
-- ⚠ **`scripts/coverage_report.py` runs pytest TWICE, and the first fix keyed on a marker only
-  one of them sets.** Step 3 is the instrumented pass with `LLVM_PROFILE_FILE`; step 5 measures
-  the pure-Python layer under coverage.py — with no env of its own, and against the instrumented
-  extension step 3 left in the venv. Keying the skip on `LLVM_PROFILE_FILE` therefore fixed
-  half of it and left step 5 making a wall-clock assertion under *two* sources of slowdown.
-  Hence the dedicated `COVERAGE_MARKER` constant, set on both. **The tell was that both passes
-  reported the same counts as an ordinary run**, and it was nearly missed because the log had
-  been read through `tail -20`, which showed step 5's summary and hid step 3's. When one script
-  runs a suite more than once, a single summary line is not the job's result.
-- ⚠ **Two detaches need two mutations, and the first draft covered only one of them.** The
-  timing test originally exercised `df_to_xlsx` alone, so deleting the `lib.rs` wrapper —
-  half the change — left the **entire suite green at 739 tests**. Found by an independent
-  review asking which single-site mutation survives, not by the both-sites mutation that had
-  already been run and looked convincing. It is now parametrized over both entry points, and
-  each single-site mutation reddens exactly its own case (`dfs_to_xlsx` 1.00x, `df_to_xlsx`
-  0.94x) and leaves the other green. This is the repo's own *"a check bound to one caller
-  covers only that caller"* trap: when one change touches N call sites, mutate each alone.
-
-Two more things that review established, both worth keeping:
-
-- **The output is unchanged, and that is measured rather than argued.** The same workbook
-  built by the stock 1.3.0 wheel and by the patched build has 14 zip members, 13 of them
-  byte-identical; the only difference is `docProps/core.xml`, the creation-timestamp part
-  this repo already documents as the one non-reproducible member.
-- **`save_workbook` resolves a relative `output_path` against the process cwd twice** — once
-  for `NamedTempFile::new_in(dir)`, once for `tmp.persist(dest)` — so releasing the GIL lets
-  another thread `os.chdir` between them. Real by reading; **it does not reproduce as a
-  behaviour difference.** 300 exports against 67,656 concurrent chdir flips gave no error, no
-  stray temp file, and the same "lands in whichever directory is current" outcome as the
-  stock build, because a same-volume rename across directories simply succeeds. That probe
-  also measured the change working from the other side: the flipping thread got 48 turns
-  during 60 stock exports and 13,080 during 60 patched ones.
-
-Two things that decide the work when a new CPython ships:
-
-- **Declaring support is two documentation edits and no code.** Add the trove classifier and
-  the `docs/stability.md` row; `tests/test_stability_policy.py` compares them in both
-  directions and stays red until they agree. A CI leg is *not* required — the "Run in CI"
-  column may say `no`, which is already the page's own argument for 3.11 and 3.13. Do not add
-  a row for a `t` build: the parser reads the first table under that heading and compares
-  cell 0 against the classifiers, so a `3.14t` row fails the suite. Prose after the table is
-  safe, and that is where the free-threading note went.
-- **A CI leg is gated on pandas, not on xlsxturbo.** On 3.15rc1 neither pandas nor pyarrow had
-  a `cp315` wheel, so 17 of 28 test modules could not even be collected and ~90% of the suite
-  was unmeasurable. polars and openpyxl did ship 3.15 wheels, which is what made the
-  functional pass and the 24 pandas-free repo tests possible at all. Expect this gap every
-  year: the library is ready for a new CPython months before its test dependencies are.
+- *Declaring a new CPython is the trove classifier plus a `docs/stability.md` row, no code* -- never add a `t` row to that table; a CI leg waits for pandas wheels.
+- *The `abi3` wheel does not cover free-threaded builds* -- `3.14t` falls back to the sdist; do not promise free-threaded support without asking.
+- *`df_to_xlsx` and `dfs_to_xlsx` detach for the save* -- `convert_csv` already runs inside `csv_to_xlsx`'s detach, do not wrap it again.
+- *`TestSaveReleasesTheGil` is the only guard for the detach, per call site* -- widen its threshold if it flakes, never delete it; it skips under `XLSXTURBO_COVERAGE`.
 
 ### Output is deterministic except for one part, and the obvious measurement says otherwise
 
-Two exports of the same frame differ, because `docProps/core.xml` records the creation time.
-Every other member of the archive is byte-identical across runs.
-
-The trap is that writing both files and hashing them reports **identical** — that timestamp
-has one-second resolution, so a loop with no delay measures nothing. It was one step from
-being published as "output is byte-reproducible".
-`TestGeneratedFileDeterminism` waits 1.1 s deliberately, and mutating that wait to zero turns
-both of its tests red, which is what proves neither passes by accident. If a reproducible-build
-option is ever added, it belongs here as an opt-in — and it is additive, so it needs no major.
+- *Only `docProps/core.xml` differs between two exports, and a quick hash says identical* -- its timestamp has one-second resolution; `TestGeneratedFileDeterminism` waits 1.1 s on purpose. Full text: [dev-docs/python-versions.md](dev-docs/python-versions.md#output-is-deterministic-except-for-one-part-and-the-obvious-measurement-says-otherwise).
 
 ## Benchmarks
 
