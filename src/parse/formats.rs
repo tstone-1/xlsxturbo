@@ -164,11 +164,14 @@ impl FormatScope {
 
 /// Font-level keys — the only ones an inline text run can carry. Kept in sync
 /// with the `RichTextFormat` TypedDict in `python/xlsxturbo/types.py`.
+///
+/// `bg_color` is a cell fill, not a font property: an inline run has no fill in
+/// OOXML, and until 1.6.0 a segment's `bg_color` was accepted and written
+/// nowhere. It belongs with the cell keys below.
 const FORMAT_KEYS_FONT: &[&str] = &[
     "bold",
     "italic",
     "underline",
-    "bg_color",
     "font_color",
     "font_size",
     "font_name",
@@ -177,6 +180,7 @@ const FORMAT_KEYS_FONT: &[&str] = &[
 /// Cell geometry — what `Cell` scope and above add to the font keys. The font
 /// keys are not restated here; [`FormatScope::valid_keys`] concatenates them.
 const FORMAT_KEYS_CELL: &[&str] = &[
+    "bg_color",
     "border",
     "border_left",
     "border_right",
@@ -267,7 +271,7 @@ fn parse_format_dict(
         format = format.set_font_color(parse_color(&color_str).in_field(context, "font_color")?);
     }
 
-    if let Some(size) = view.f64("font_size")? {
+    if let Some(size) = view.non_negative_f64("font_size")? {
         format = format.set_font_size(size);
     }
 

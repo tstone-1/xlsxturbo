@@ -146,7 +146,7 @@ failure is reported by the layer that applies options.
 
 ```python
 xlsxturbo.df_to_xlsx(df, "out.xlsx", images={"A1": "logo.png"})
-# ConfigurationError: Failed to load image 'logo.png': No such file or directory (os error 2)
+# ConfigurationError: images['A1']: Failed to load image 'logo.png': No such file or directory (os error 2)
 ```
 
 Both messages name the sheet, the option or the path, and `except

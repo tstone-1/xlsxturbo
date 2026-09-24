@@ -386,8 +386,10 @@ fn csv_to_xlsx(
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
-///            Values can be simple (str, int, float, bool) or dicts with "value" and optional
-///            "num_format", "align_horizontal", "align_vertical", and "wrap_text".
+///            Values can be simple (None, str, int, float, bool, date, datetime) or dicts with
+///            "value" and an optional "format" dict (the keys column_formats accepts), plus the
+///            shorthand keys "num_format", "font_name", "quote_prefix", "align_horizontal",
+///            "align_vertical" and "wrap_text", which override the same key in "format".
 ///            Cells are written after all DataFrame data, so they can overwrite data cells.
 ///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///
@@ -642,8 +644,10 @@ fn version() -> &'static str {
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
-///            Values can be simple (str, int, float, bool) or dicts with "value" and optional
-///            "num_format", "align_horizontal", "align_vertical", and "wrap_text".
+///            Values can be simple (None, str, int, float, bool, date, datetime) or dicts with
+///            "value" and an optional "format" dict (the keys column_formats accepts), plus the
+///            shorthand keys "num_format", "font_name", "quote_prefix", "align_horizontal",
+///            "align_vertical" and "wrap_text", which override the same key in "format".
 ///            Cells are written after all DataFrame data, so they can overwrite data cells.
 ///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
 ///

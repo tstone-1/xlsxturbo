@@ -30,6 +30,7 @@ compiled extension, so it is safe to import from anywhere.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from os import PathLike
 from typing import Literal, TypedDict
 
@@ -221,14 +222,14 @@ class RichTextFormat(TypedDict, total=False):
     """Format options for a rich text segment.
 
     Font-level keys only. A segment is an inline run inside one cell, so
-    cell-level keys (borders, alignment, wrap_text) would never render and are
-    rejected at runtime; format the cell itself via column_formats or cells.
+    cell-level keys (bg_color, borders, alignment, wrap_text) would never render
+    and are rejected at runtime; format the cell itself via column_formats or
+    cells.
     """
 
     bold: bool
     italic: bool
     font_color: str  # '#RRGGBB' or named color
-    bg_color: str  # '#RRGGBB' or named color
     font_size: float
     font_name: str  # Font family for this run
     underline: bool
@@ -430,7 +431,7 @@ class _CellValueRequired(TypedDict):
     an empty dict, which the runtime rejects.
     """
 
-    value: str | int | float | bool  # The cell value (required)
+    value: str | int | float | bool | date | datetime | None  # The cell value (required); None writes an empty cell
 
 
 class CellValueOptions(_CellValueRequired, total=False):
@@ -486,4 +487,5 @@ class SheetOptions(TypedDict, total=False):
     textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
     charts: dict[str, ChartOptions] | None  # Cell ref -> native Excel chart options
     sparklines: dict[str, SparklineOptions] | None  # Location ref -> sparkline options
-    cells: dict[str, str | int | float | bool | CellValueOptions] | None  # Cell ref -> value or options
+    # Cell ref -> value or options
+    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None

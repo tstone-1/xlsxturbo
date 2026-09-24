@@ -1,8 +1,8 @@
 //! Arbitrary cell write application helpers.
 
-use crate::parse::{parse_column_format, parse_horizontal_alignment, parse_vertical_alignment};
+use crate::parse::parse_column_format;
 use crate::types::CellWrite;
-use crate::write::{write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
+use crate::write::{write_py_value_with_format, CellFormat, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{Format, Worksheet};
 
@@ -16,55 +16,16 @@ pub(crate) fn apply_cells(
     let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
 
     for cell in cells {
-        let value = cell.value.bind(py);
-        let has_formatting = cell.num_format.is_some()
-            || cell.font_name.is_some()
-            || cell.quote_prefix
-            || cell.align_horizontal.is_some()
-            || cell.align_vertical.is_some()
-            || cell.wrap_text;
-        let fmt = if let Some(format) = &cell.format {
-            let cell_ref = rust_xlsxwriter::utility::row_col_to_cell(cell.row, cell.col);
-            Some(parse_column_format(
-                py,
-                format,
-                &format!("cells['{}']['format']", cell_ref),
-            )?)
-        } else if has_formatting {
-            let mut f = Format::new();
-            if let Some(nf) = &cell.num_format {
-                f = f.set_num_format(nf);
-            }
-            if let Some(name) = &cell.font_name {
-                f = f.set_font_name(name);
-            }
-            if cell.quote_prefix {
-                f = f.set_quote_prefix();
-            }
-            // These two cannot fail here: `extract_cells` parses both
-            // alignment strings at extract time and refuses the call, so a bad
-            // value never reaches this loop. Adding the option context would
-            // therefore be a per-cell allocation for a message nobody can
-            // read; the site that produces the user-visible message is
-            // `extract::extract_cells`, and that is where the context belongs.
-            if let Some(ah) = &cell.align_horizontal {
-                f = f.set_align(parse_horizontal_alignment(ah)?);
-            }
-            if let Some(av) = &cell.align_vertical {
-                f = f.set_align(parse_vertical_alignment(av)?);
-            }
-            if cell.wrap_text {
-                f = f.set_text_wrap();
-            }
-            Some(f)
-        } else {
-            None
-        };
+        let fmt = cell
+            .format
+            .as_ref()
+            .map(|format| parse_column_format(py, format, &cell.context).map(CellFormat::new))
+            .transpose()?;
         write_py_value_with_format(
             worksheet,
             cell.row,
             cell.col,
-            value,
+            cell.value.bind(py),
             &date_format,
             &datetime_format,
             fmt.as_ref(),

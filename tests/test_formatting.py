@@ -784,6 +784,42 @@ class TestFontNameAndQuotePrefix:
         assert field in str(error.value)
         assert "Score" in str(error.value)
 
+    @pytest.mark.parametrize("field", ["font_name", "quote_prefix"])
+    def test_conditional_format_treats_none_as_absent(self, tmp_xlsx: str, field: str) -> None:
+        """An explicit None is "not set" here too, as it is for every other key."""
+        df = pd.DataFrame({"Score": [1]})
+        options: Any = {"Score": {
+            "type": "cell", "criteria": "greater_than", "value": 0, "format": {"bold": True, field: None}
+        }}
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, conditional_formats=options)
+        with zipfile.ZipFile(tmp_xlsx) as archive:
+            assert "<b/>" in archive.read("xl/styles.xml").decode("utf-8")
+
+    @pytest.mark.parametrize(
+        "size", [float("nan"), float("inf"), -5.0], ids=["nan", "inf", "negative"]
+    )
+    @pytest.mark.parametrize("option", ["header_format", "rich_text"])
+    def test_font_size_must_be_finite_and_non_negative(
+        self, tmp_xlsx: str, option: str, size: float
+    ) -> None:
+        """rust_xlsxwriter wrote these verbatim, as ``<sz val="NaN"/>`` and ``<sz val="-5"/>``."""
+        df = pd.DataFrame({"Code": ["example"]})
+        kwargs: Any = (
+            {"header_format": {"font_size": size}}
+            if option == "header_format"
+            else {"rich_text": {"C1": [("run", {"font_size": size})]}}
+        )
+        with pytest.raises(xlsxturbo.ConfigurationError, match="'font_size' must") as error:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, **kwargs)
+        assert option in str(error.value)
+
+    def test_a_large_font_size_is_written_through(self, tmp_xlsx: str) -> None:
+        """No upper bound, on the precedent row_heights set: nothing measured Excel objecting."""
+        df = pd.DataFrame({"Code": ["example"]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format={"font_size": 500})
+        with zipfile.ZipFile(tmp_xlsx) as archive:
+            assert '<sz val="500"/>' in archive.read("xl/styles.xml").decode("utf-8")
+
     @pytest.mark.parametrize(("field", "value"), [("font_name", 123), ("quote_prefix", "yes"), ("quote_prefix", 1)])
     def test_invalid_format_types(self, tmp_xlsx: str, field: str, value: Any) -> None:
         """Shared formats reject mistyped options with the owning context."""
@@ -887,6 +923,9 @@ class TestRichText:
             ("align_vertical", "top"),
             ("wrap_text", True),
             ("quote_prefix", True),
+            # A fill belongs to the cell; a segment's bg_color was accepted and
+            # written nowhere until 1.6.0.
+            ("bg_color", "#00FF00"),
             ("border", True),
             ("border_left", "thin"),
             ("border_color", "#FF0000"),
@@ -941,8 +980,8 @@ class TestRichText:
                             "italic": True,
                             "underline": True,
                             "font_color": "#FF0000",
-                            "bg_color": "#00FF00",
                             "font_size": 14.0,
+                            "font_name": "Arial",
                         },
                     )
                 ]
@@ -952,6 +991,7 @@ class TestRichText:
             shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
         assert "<b/>" in shared
         assert "<i/>" in shared
+        assert '<rFont val="Arial"/>' in shared
         assert "styled" in shared
 
     def test_rich_text_bold(self, tmp_xlsx: str) -> None:

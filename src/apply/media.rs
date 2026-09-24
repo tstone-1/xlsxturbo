@@ -18,17 +18,21 @@ pub(crate) fn apply_images(
     for (cell_ref, config) in images {
         let (row, col) = parse_cell_ref(cell_ref).in_option(&format!("images['{}']", cell_ref))?;
 
-        let mut image = Image::new(&config.path)
-            .map_err(|e| format!("Failed to load image '{}': {}", config.path, e))?;
+        let mut image = Image::new(&config.path).map_err(|e| {
+            format!(
+                "images['{}']: Failed to load image '{}': {}",
+                cell_ref, config.path, e
+            )
+        })?;
 
         // Apply options if provided
         if let Some(opts) = &config.options {
             let view = OptionMap::new(py, opts, format!("images['{}']", cell_ref));
             view.reject_unknown(IMAGE_KEYS)?;
-            if let Some(scale) = view.f64("scale_width")? {
+            if let Some(scale) = view.finite_f64("scale_width")? {
                 image = image.set_scale_width(scale);
             }
-            if let Some(scale) = view.f64("scale_height")? {
+            if let Some(scale) = view.finite_f64("scale_height")? {
                 image = image.set_scale_height(scale);
             }
             if let Some(alt) = view.string("alt_text")? {
@@ -38,7 +42,7 @@ pub(crate) fn apply_images(
 
         worksheet
             .insert_image(row, col, &image)
-            .map_err(|e| format!("Failed to insert image at '{}': {}", cell_ref, e))?;
+            .map_err(|e| format!("images['{}']: Failed to insert image: {}", cell_ref, e))?;
     }
 
     Ok(())
@@ -83,7 +87,7 @@ fn build_shape_font(
     if let Some(name) = view.string("name")? {
         font = font.set_name(&name);
     }
-    if let Some(size) = view.f64("size")? {
+    if let Some(size) = view.non_negative_f64("size")? {
         font = font.set_size(size);
     }
     if view.bool("bold")?.unwrap_or(false) {

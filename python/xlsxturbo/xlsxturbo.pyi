@@ -7,6 +7,8 @@ so that ``from xlsxturbo.xlsxturbo import HeaderFormat`` keeps type-checking for
 code written before they moved.
 """
 
+from datetime import date, datetime
+
 from xlsxturbo.types import (
     CellValueOptions as CellValueOptions,
     ChartOptions as ChartOptions,
@@ -165,7 +167,7 @@ def df_to_xlsx(
     textboxes: dict[str, str | TextboxOptions] | None = None,
     charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
-    cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
+    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: dict[str, SparklineOptions] | None = None,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
@@ -255,7 +257,10 @@ def df_to_xlsx(
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
-            Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
+            Values can be simple (None, str, int, float, bool, date, datetime) or dicts with
+            'value' and an optional 'format' dict (the keys column_formats accepts), plus the
+            shorthand keys 'num_format', 'font_name', 'quote_prefix', 'align_horizontal',
+            'align_vertical' and 'wrap_text', which override the same key in 'format'.
             Cells are written after DataFrame data, so they can overwrite existing values.
             Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
 
@@ -297,7 +302,7 @@ def dfs_to_xlsx(
     textboxes: dict[str, str | TextboxOptions] | None = None,
     charts: dict[str, ChartOptions] | None = None,
     defined_names: dict[str, str] | None = None,
-    cells: dict[str, str | int | float | bool | CellValueOptions] | None = None,
+    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: dict[str, SparklineOptions] | None = None,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
@@ -368,7 +373,10 @@ def dfs_to_xlsx(
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
-            Values can be simple (str, int, float, bool) or dicts with 'value' and optional 'num_format'.
+            Values can be simple (None, str, int, float, bool, date, datetime) or dicts with
+            'value' and an optional 'format' dict (the keys column_formats accepts), plus the
+            shorthand keys 'num_format', 'font_name', 'quote_prefix', 'align_horizontal',
+            'align_vertical' and 'wrap_text', which override the same key in 'format'.
             Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
 
     Note:

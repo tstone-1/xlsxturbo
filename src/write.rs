@@ -22,6 +22,38 @@ fn int_fits_f64(magnitude: u64) -> bool {
 pub(crate) const DATE_NUM_FORMAT: &str = "yyyy-mm-dd";
 pub(crate) const DATETIME_NUM_FORMAT: &str = "yyyy-mm-dd hh:mm:ss";
 
+/// A caller's cell format, with the variants a date and a datetime value get.
+///
+/// A date is only readable as a date through its number format, and a caller's
+/// `Format` carries one too: `General` unless they set `num_format`. Using the
+/// caller's format as it stands therefore turned a bold date column into a
+/// column of serial numbers (`46289` for 2026-09-24), with nothing to say so.
+/// `Format::merge` keeps every property the caller set, the number format
+/// included, and fills an unset one from the date default, which is the rule:
+/// an explicit `num_format` wins, anything else keeps the date readable.
+///
+/// Built once per column or per `cells` entry, never per cell: a merge clones
+/// the whole format. [`write_py_value_with_format`] takes this type rather than
+/// a bare `Format` so a caller cannot hand it an unmerged one.
+#[derive(Clone)]
+pub(crate) struct CellFormat {
+    value: Format,
+    date: Format,
+    datetime: Format,
+}
+
+impl CellFormat {
+    pub(crate) fn new(format: Format) -> Self {
+        let date = format.merge(&Format::new().set_num_format(DATE_NUM_FORMAT));
+        let datetime = format.merge(&Format::new().set_num_format(DATETIME_NUM_FORMAT));
+        CellFormat {
+            value: format,
+            date,
+            datetime,
+        }
+    }
+}
+
 /// Write a string to a cell, applying column format if provided.
 fn write_str(
     worksheet: &mut Worksheet,
@@ -205,6 +237,9 @@ pub(crate) fn write_cell(
 }
 
 /// Write a Python value to the worksheet with optional column format.
+///
+/// `date_format` and `datetime_format` apply when the cell has no format of its
+/// own; with one, the date variants of `cell_format` do (see [`CellFormat`]).
 pub(crate) fn write_py_value_with_format(
     worksheet: &mut Worksheet,
     row: u32,
@@ -212,8 +247,12 @@ pub(crate) fn write_py_value_with_format(
     value: &Bound<'_, PyAny>,
     date_format: &Format,
     datetime_format: &Format,
-    column_format: Option<&Format>,
+    cell_format: Option<&CellFormat>,
 ) -> Result<(), String> {
+    let column_format = cell_format.map(|f| &f.value);
+    let date_format = cell_format.map_or(date_format, |f| &f.date);
+    let datetime_format = cell_format.map_or(datetime_format, |f| &f.datetime);
+
     // Check for None first.
     if value.is_none() {
         return write_str(worksheet, row, col, "", column_format);
@@ -297,8 +336,7 @@ pub(crate) fn write_py_value_with_format(
                 "numpy datetime64",
             );
         }
-        let fmt = column_format.unwrap_or(datetime_format);
-        return write_num(worksheet, row, col, excel_dt, Some(fmt));
+        return write_num(worksheet, row, col, excel_dt, Some(datetime_format));
     }
 
     // Datetime before date, since datetime is subclass of date. Use a typed
@@ -355,8 +393,7 @@ pub(crate) fn write_py_value_with_format(
         if excel_dt < 61.0 {
             return write_pre_1900_as_text(worksheet, row, col, value, column_format, "datetime");
         }
-        let fmt = column_format.unwrap_or(datetime_format);
-        return write_num(worksheet, row, col, excel_dt, Some(fmt));
+        return write_num(worksheet, row, col, excel_dt, Some(datetime_format));
     }
 
     // Typed check first, same rationale as the datetime branch above; this
@@ -374,8 +411,7 @@ pub(crate) fn write_py_value_with_format(
         if excel_date < 61.0 {
             return write_pre_1900_as_text(worksheet, row, col, value, column_format, "date");
         }
-        let fmt = column_format.unwrap_or(date_format);
-        return write_num(worksheet, row, col, excel_date, Some(fmt));
+        return write_num(worksheet, row, col, excel_date, Some(date_format));
     }
 
     // numpy scalar int (before f64 to avoid precision loss).

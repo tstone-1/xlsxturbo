@@ -71,7 +71,7 @@ REEXPORTS = _stub_reexports()
 # Names `types.py` imports for its own use, which `dir()` therefore reports as
 # public but `__all__` deliberately omits. Guarded below against naming an
 # import that no longer exists.
-TYPING_HELPERS = {"annotations", "Literal", "PathLike", "TypedDict"}
+TYPING_HELPERS = {"annotations", "date", "datetime", "Literal", "PathLike", "TypedDict"}
 
 
 class TestStubAndRuntimeAgree:

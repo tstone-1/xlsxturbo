@@ -128,13 +128,13 @@ fn build_sparkline(
     apply_color!("negative_points_color", set_negative_points_color);
     apply_color!("markers_color", set_markers_color);
 
-    if let Some(weight) = view.f64("line_weight")? {
+    if let Some(weight) = view.non_negative_f64("line_weight")? {
         sparkline = sparkline.set_line_weight(weight);
     }
-    if let Some(max) = view.f64("custom_max")? {
+    if let Some(max) = view.finite_f64("custom_max")? {
         sparkline = sparkline.set_custom_max(max);
     }
-    if let Some(min) = view.f64("custom_min")? {
+    if let Some(min) = view.finite_f64("custom_min")? {
         sparkline = sparkline.set_custom_min(min);
     }
     if let Some(date_range) = view.string("date_range")? {

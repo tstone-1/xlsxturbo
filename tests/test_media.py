@@ -6,7 +6,7 @@ import base64
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pytest
@@ -787,6 +787,59 @@ class TestSparklines:
         assert 'minAxisType="custom"' in xml
         assert 'dateAxis="1"' in xml
         assert "<xm:f>Sheet1!A1:C1</xm:f>" in xml  # the supplied date range
+
+
+class TestNumbersReachingTheXmlAreChecked:
+    """NaN, infinity and negative sizes were written into the XML verbatim.
+
+    ``line_weight=nan`` became ``lineWeight="NaN"``; nothing raised. The cases
+    that stay valid (a weight of zero, a large scale) are the controls: a screen
+    refusing everything would pass the rejections alone.
+    """
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("line_weight", float("nan")),
+            ("line_weight", -1.0),
+            ("custom_max", float("inf")),
+            ("custom_min", float("nan")),
+        ],
+    )
+    def test_sparkline_numbers(self, tmp_xlsx: str, key: str, value: float) -> None:
+        """Each sparkline number is refused, naming the sparkline and the key."""
+        df = pd.DataFrame({"q1": [10], "q2": [30]})
+        config: Any = {"range": "Sheet1!A2:B2", key: value}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"sparklines\['C2'\]: '{key}' must"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, sparklines={"C2": config})
+
+    def test_sparkline_weight_zero_is_accepted(self, tmp_xlsx: str) -> None:
+        """The control: zero is a weight, not a defect."""
+        df = pd.DataFrame({"q1": [10], "q2": [30]})
+        config: Any = {"range": "Sheet1!A2:B2", "line_weight": 0.0}
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, sparklines={"C2": config})
+
+    @pytest.mark.parametrize("size", [float("nan"), -3.0], ids=["nan", "negative"])
+    def test_textbox_font_size(self, tmp_xlsx: str, size: float) -> None:
+        """A textbox font size is refused the same way a cell font size is."""
+        df = pd.DataFrame({"A": [1]})
+        config: Any = {"text": "T", "font": {"size": size}}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"textboxes\['B2'\].*'size' must"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": config})
+
+    @pytest.mark.parametrize("key", ["scale_width", "scale_height"])
+    def test_image_scale_must_be_finite(
+        self, tmp_xlsx_factory: Callable[..., str], key: str
+    ) -> None:
+        """An image scale of NaN is refused; a large finite one is kept (the control)."""
+        img_path = tmp_xlsx_factory(".png")
+        Path(img_path).write_bytes(base64.b64decode(TINY_PNG_B64))
+        df = pd.DataFrame({"A": [1]})
+        bad: Any = {"path": img_path, key: float("nan")}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"images\['B5'\]: '{key}' must"):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx_factory(), images={"B5": bad})
+        good: Any = {"path": img_path, key: 50.0}
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx_factory(), images={"B5": good})
 
 
 class TestDeterministicFeatureMapOrder:

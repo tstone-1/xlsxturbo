@@ -55,6 +55,7 @@ an addition, not a replacement, and nothing here is deprecated.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
@@ -132,7 +133,7 @@ class ExportOptions:
     conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = _UNSET
 
     # Content
-    cells: dict[str, str | int | float | bool | CellValueOptions] | None = _UNSET
+    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = _UNSET
     formula_columns: dict[str, str] | None = _UNSET
     merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = _UNSET
     hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = _UNSET

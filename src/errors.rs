@@ -166,6 +166,9 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          already names the path.",
     )?;
 
+    // The docstring is deliberately not phrased as a count of raise sites: that
+    // wording went stale twice as pre-checks were added, so `tests/test_errors.py`
+    // asserts the subjects rather than the number.
     let workbook_validation = new_exception_class(
         py,
         "WorkbookValidationError",
@@ -177,10 +180,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          the sheet and both names involved. Workbook rules the writer only detects \
          while serialising, a duplicate sheet name among them, surface as \
          `FileError` instead. A subclass of `ConfigurationError`, and so also a \
-         `ValueError`.\n\n\
-         Deliberately not phrased as a count of raise sites: that wording went stale \
-         twice as pre-checks were added, so `tests/test_errors.py` now asserts the \
-         subjects rather than the number.",
+         `ValueError`.",
     )?;
 
     // `get_or_init` rather than `set`: re-importing the extension must not invalidate a

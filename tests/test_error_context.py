@@ -191,6 +191,11 @@ CASES: list[tuple[str, dict[str, Any], list[str]]] = [
         ["images['']", "Empty cell reference"],
     ),
     (
+        "image_file_missing",
+        {"images": {"C3": "/nonexistent/image.png"}},
+        ["images['C3']", "Failed to load image", "/nonexistent/image.png"],
+    ),
+    (
         "checkbox_cell_ref",
         {"checkboxes": {"": True}},
         ["checkboxes['']", "Empty cell reference"],
@@ -230,6 +235,17 @@ CASES: list[tuple[str, dict[str, Any], list[str]]] = [
         "cells_align_vertical",
         {"cells": {"D1": {"value": 1, "align_vertical": "bogus"}}},
         ["cells['D1']", "'align_vertical'", "Unknown vertical alignment 'bogus'"],
+    ),
+    (
+        "cells_key_out_of_range",
+        {"cells": {"A1": 1, "ZZZZ1": 2}},
+        ["cells['ZZZZ1']", "exceeds Excel's maximum column"],
+    ),
+    # The reusable format is parsed at apply time; its errors name the key as written.
+    (
+        "cells_format_bad_color",
+        {"cells": {"c3": {"value": 1, "format": {"bg_color": "nope"}}}},
+        ["cells['c3']['format']", "'bg_color'", "Unknown color"],
     ),
 ]
 

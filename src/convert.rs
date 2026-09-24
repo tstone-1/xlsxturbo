@@ -15,7 +15,9 @@ use crate::types::{
     WriteConfig,
 };
 use crate::workbook::{apply_defined_names, save_workbook};
-use crate::write::{write_cell, write_py_value_with_format, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT};
+use crate::write::{
+    write_cell, write_py_value_with_format, CellFormat, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT,
+};
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use rayon::prelude::*;
@@ -223,8 +225,10 @@ pub fn convert_csv_to_xlsx(
                     )
                     .map_err(|e| {
                         ConvertError::Config(format!(
-                            "Write error at ({}, {}): {}",
-                            row_count, col_idx, e
+                            "Write error at row {}, column {}: {}",
+                            u64::from(row_count) + 1,
+                            col_idx + 1,
+                            e
                         ))
                     })?;
                 }
@@ -333,7 +337,14 @@ fn flush_parallel_chunk(
                 date_format,
                 datetime_format,
             )
-            .map_err(|e| format!("Write error at ({}, {}): {}", row_u32, col_idx, e))?;
+            .map_err(|e| {
+                format!(
+                    "Write error at row {}, column {}: {}",
+                    u64::from(row_u32) + 1,
+                    col_idx + 1,
+                    e
+                )
+            })?;
         }
     }
 
@@ -361,7 +372,7 @@ fn write_row_cell(
     value: &Bound<'_, PyAny>,
     date_format: &Format,
     datetime_format: &Format,
-    col_formats: &[Option<Format>],
+    col_formats: &[Option<CellFormat>],
     track_widths: bool,
     max_lens: &mut [usize],
 ) -> Result<(), String> {
@@ -504,8 +515,11 @@ pub(crate) fn write_sheet_data(
         .map_err(|_| format!("Column count {} exceeds u16 limit", columns.len()))?;
 
     // Build column formats if provided
-    let col_formats: Vec<Option<Format>> = if let Some(cf) = opts.column_formats {
+    let col_formats: Vec<Option<CellFormat>> = if let Some(cf) = opts.column_formats {
         build_column_formats(py, &columns, cf)?
+            .into_iter()
+            .map(|f| f.map(CellFormat::new))
+            .collect()
     } else {
         vec![None; columns.len()]
     };

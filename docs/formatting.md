@@ -46,7 +46,7 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 
 > **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, `sparklines`, and `rich_text` segment formats.
 >
-> `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `bg_color`, `font_size`, `font_name`). A segment is an inline run inside one cell, so cell-level keys — borders, `align_horizontal`/`align_vertical`, `wrap_text`, `quote_prefix` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.
+> `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `font_size`, `font_name`). A segment is an inline run inside one cell, so cell-level keys — `bg_color`, borders, `align_horizontal`/`align_vertical`, `wrap_text`, `quote_prefix` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.
 >
 > Column patterns in `column_formats`, `conditional_formats`, and `validations` must match at least one DataFrame column. A zero-match exact name or wildcard raises `ValueError` instead of silently omitting the requested behavior.
 
@@ -89,6 +89,7 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx", column_formats={
 # - font_name (str): Font family, e.g. 'Arial'
 # - quote_prefix (bool): Excel quote marker; leaves the value and type unchanged
 # - num_format (str): Excel number format ('0.00', '#,##0', '0.00%', etc.)
+#   Date and datetime values keep 'yyyy-mm-dd' / 'yyyy-mm-dd hh:mm:ss' unless this is set.
 # - bold (bool): Bold text
 # - italic (bool): Italic text
 # - underline (bool): Underlined text
@@ -226,8 +227,9 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 - Tuple of `(range, text)` or `(range, text, format_dict)`
 - Range uses Excel notation: `'A1:D1'`, `'B3:B10'`, etc.
 - Format options are the same set `header_format` takes -- the font keys (bold, italic,
-  underline, font_color, bg_color, font_size) **and** the cell keys (border and the four
-  per-side border keys, border_color, align_horizontal, align_vertical, wrap_text). Only
+  underline, font_color, font_size, font_name) **and** the cell keys (bg_color, border and
+  the four per-side border keys, border_color, align_horizontal, align_vertical, wrap_text,
+  quote_prefix). Only
   `num_format` is out of scope; that one is accepted by `column_formats` and the nested
   `format` keys.
 

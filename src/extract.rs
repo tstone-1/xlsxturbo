@@ -1243,116 +1243,100 @@ fn cell_bool_field(
     }
 }
 
+/// The `cells` keys that are shorthand for a key of the reusable `format` dict.
+/// A present (non-None) shorthand overrides the same key in `format`, explicit
+/// `False` included.
+const CELL_FORMAT_SHORTHANDS: [&str; 6] = [
+    "num_format",
+    "font_name",
+    "quote_prefix",
+    "align_horizontal",
+    "align_vertical",
+    "wrap_text",
+];
+
 /// Extract cells from Python dict (cell_ref -> value or {value, num_format, align_horizontal, ...})
 pub(crate) fn extract_cells(py_dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Vec<CellWrite>> {
     let mut cells = Vec::new();
     for (key, value) in py_dict.iter() {
         let cell_ref: String = extract_typed!(key, "a string cell reference", "cells key");
-        let (row, col) = parse_cell_ref(&cell_ref).map_err(crate::errors::configuration)?;
+        let context = format!("cells['{}']", cell_ref);
+        let (row, col) = parse_cell_ref(&cell_ref)
+            .map_err(|e| crate::errors::configuration(format!("{}: {}", context, e)))?;
 
         // Check if value is a dict with "value" and optional formatting keys
-        if let Ok(d) = value.cast::<pyo3::types::PyDict>() {
-            reject_unknown_dict_keys(
-                d,
-                &format!("cells['{}']", cell_ref),
-                &[
-                    "value",
-                    "format",
-                    "num_format",
-                    "font_name",
-                    "quote_prefix",
-                    "align_horizontal",
-                    "align_vertical",
-                    "wrap_text",
-                ],
-            )?;
-            let val = d.get_item("value")?.ok_or_else(|| {
-                crate::errors::configuration(format!(
-                    "cells['{}'] dict missing 'value' key",
-                    cell_ref
-                ))
-            })?;
-            let num_fmt = cell_string_field(d, &cell_ref, "num_format")?;
-            let font_name = cell_string_field(d, &cell_ref, "font_name")?;
-            let quote_prefix = cell_bool_field(d, &cell_ref, "quote_prefix")?;
-            let align_h = cell_string_field(d, &cell_ref, "align_horizontal")?;
-            // The two alignment parsers take a value, not an option, so the
-            // cell and key go in front here -- the same `option['key']: 'field':`
-            // form the apply layer uses. Without it a `cells` dict with two
-            // entries answered `Unknown horizontal alignment 'bogus'` and
-            // nothing said which cell.
-            if let Some(ref ah) = align_h {
-                parse_horizontal_alignment(ah).map_err(|e| {
-                    crate::errors::configuration(format!(
-                        "cells['{}']: 'align_horizontal': {}",
-                        cell_ref, e
-                    ))
-                })?;
-            }
-            let align_v = cell_string_field(d, &cell_ref, "align_vertical")?;
-            if let Some(ref av) = align_v {
-                parse_vertical_alignment(av).map_err(|e| {
-                    crate::errors::configuration(format!(
-                        "cells['{}']: 'align_vertical': {}",
-                        cell_ref, e
-                    ))
-                })?;
-            }
-            let wrap = cell_bool_field(d, &cell_ref, "wrap_text")?;
-            let format = present_cell_field(d, "format")?
-                .map(|obj| {
-                    let dict = obj.cast::<pyo3::types::PyDict>().map_err(|_| {
-                        crate::errors::configuration_type(format!(
-                            "cells['{}']: 'format' must be a dict, got {}",
-                            cell_ref,
-                            pytype_name(&obj)
-                        ))
-                    })?;
-                    let mut fields =
-                        pydict_to_hashmap(dict, &format!("cells['{}']['format']", cell_ref))?;
-                    // Non-None shorthand fields override the reusable format,
-                    // including explicit false. Keep the caller's dict untouched.
-                    for key in [
-                        "num_format",
-                        "font_name",
-                        "quote_prefix",
-                        "align_horizontal",
-                        "align_vertical",
-                        "wrap_text",
-                    ] {
-                        if let Some(value) = present_cell_field(d, key)? {
-                            fields.insert(key.to_string(), value.unbind());
-                        }
-                    }
-                    Ok::<_, PyErr>(fields)
-                })
-                .transpose()?;
-            cells.push(CellWrite {
-                row,
-                col,
-                value: val.unbind(),
-                format,
-                num_format: num_fmt,
-                font_name,
-                quote_prefix,
-                align_horizontal: align_h,
-                align_vertical: align_v,
-                wrap_text: wrap,
-            });
-        } else {
+        let Ok(d) = value.cast::<pyo3::types::PyDict>() else {
             cells.push(CellWrite {
                 row,
                 col,
                 value: value.unbind(),
                 format: None,
-                num_format: None,
-                font_name: None,
-                quote_prefix: false,
-                align_horizontal: None,
-                align_vertical: None,
-                wrap_text: false,
+                context,
             });
+            continue;
+        };
+        let mut valid_keys = vec!["value", "format"];
+        valid_keys.extend_from_slice(&CELL_FORMAT_SHORTHANDS);
+        reject_unknown_dict_keys(d, &context, &valid_keys)?;
+        let val = d.get_item("value")?.ok_or_else(|| {
+            crate::errors::configuration(format!("{} dict missing 'value' key", context))
+        })?;
+
+        // The shorthands are type-checked here, at extract time, so a wrong
+        // type is refused before any sheet is written and the message names
+        // the key as `cells['X']: 'key' must be ...`. Their values are then
+        // parsed with the rest of the format at apply time.
+        cell_string_field(d, &cell_ref, "num_format")?;
+        cell_string_field(d, &cell_ref, "font_name")?;
+        cell_bool_field(d, &cell_ref, "quote_prefix")?;
+        cell_bool_field(d, &cell_ref, "wrap_text")?;
+        // The two alignment parsers take a value, not an option, so the
+        // cell and key go in front here -- the same `option['key']: 'field':`
+        // form the apply layer uses. Without it a `cells` dict with two
+        // entries answered `Unknown horizontal alignment 'bogus'` and
+        // nothing said which cell.
+        if let Some(ah) = cell_string_field(d, &cell_ref, "align_horizontal")? {
+            parse_horizontal_alignment(&ah).map_err(|e| {
+                crate::errors::configuration(format!("{}: 'align_horizontal': {}", context, e))
+            })?;
         }
+        if let Some(av) = cell_string_field(d, &cell_ref, "align_vertical")? {
+            parse_vertical_alignment(&av).map_err(|e| {
+                crate::errors::configuration(format!("{}: 'align_vertical': {}", context, e))
+            })?;
+        }
+
+        let reusable = present_cell_field(d, "format")?
+            .map(|obj| {
+                let dict = obj.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    crate::errors::configuration_type(format!(
+                        "{}: 'format' must be a dict, got {}",
+                        context,
+                        pytype_name(&obj)
+                    ))
+                })?;
+                pydict_to_hashmap(dict, &format!("{}['format']", context))
+            })
+            .transpose()?;
+        let format_context = if reusable.is_some() {
+            format!("{}['format']", context)
+        } else {
+            context
+        };
+        // Copying keeps the caller's dict untouched.
+        let mut fields = reusable.unwrap_or_default();
+        for key in CELL_FORMAT_SHORTHANDS {
+            if let Some(value) = present_cell_field(d, key)? {
+                fields.insert(key.to_string(), value.unbind());
+            }
+        }
+        cells.push(CellWrite {
+            row,
+            col,
+            value: val.unbind(),
+            format: (!fields.is_empty()).then_some(fields),
+            context: format_context,
+        });
     }
     Ok(cells)
 }

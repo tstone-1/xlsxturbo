@@ -22,12 +22,18 @@ class TestErrorPaths:
     """Tests for error handling (v0.10.0)."""
 
     def test_nonexistent_image_file_raises_error(self, tmp_xlsx: str) -> None:
-        """Non-existent image file raises clear error."""
+        """A missing image is a ConfigurationError naming the option key, not a FileError.
+
+        docs/errors.md documents the class: the path arrived as an option, so the
+        option layer reports it. FileError is also a ValueError, so matching on
+        ValueError alone would stay green if the class changed -- which under the
+        1.0 promise is a breaking change.
+        """
         df = pd.DataFrame({"A": [1]})
-        with pytest.raises(ValueError, match=r"(?i)image") as exc_info:
+        with pytest.raises(xlsxturbo.ConfigurationError) as exc_info:
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, images={"B1": "/nonexistent/path/to/image.png"})
-        message = str(exc_info.value)
-        assert "Failed to load image" in message or "image" in message.lower()
+        assert not isinstance(exc_info.value, xlsxturbo.FileError)
+        assert str(exc_info.value).startswith("images['B1']: Failed to load image ")
 
     def test_validation_list_exceeds_255_chars_raises_error(self, tmp_xlsx: str) -> None:
         """Validation list exceeding 255 chars raises clear error."""

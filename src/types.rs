@@ -131,18 +131,21 @@ pub(crate) type SparklineConfig = HashMap<String, Py<PyAny>>;
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
 /// Represents a single cell write operation with optional formatting
+///
+/// `format` is one format dict whichever way the caller spelled it: the
+/// reusable `format` dict with the shorthand keys (`num_format`, `font_name`,
+/// ...) merged over it, or the shorthand keys alone. It is parsed at apply time
+/// by the same `parse_column_format` every other formatted option uses, so a
+/// shorthand key is one entry in `extract_cells`' list and nothing else.
+/// `context` names the option for that parser's errors, spelled the way the
+/// caller wrote the key.
 #[derive(Debug)]
 pub(crate) struct CellWrite {
     pub(crate) row: u32,
     pub(crate) col: u16,
     pub(crate) value: Py<PyAny>,
     pub(crate) format: Option<HashMap<String, Py<PyAny>>>,
-    pub(crate) num_format: Option<String>,
-    pub(crate) font_name: Option<String>,
-    pub(crate) quote_prefix: bool,
-    pub(crate) align_horizontal: Option<String>,
-    pub(crate) align_vertical: Option<String>,
-    pub(crate) wrap_text: bool,
+    pub(crate) context: String,
 }
 
 /// Infallible variant of `PyAny::get_type().name()` returning "unknown" on failure.
@@ -314,6 +317,38 @@ impl<'py, 'm> OptionMap<'py, 'm> {
     /// A Python `bool` is refused (see [`Self::numeric_field`]).
     pub(crate) fn f64(&self, key: &str) -> Result<Option<f64>, String> {
         self.numeric_field(key, "a number")
+    }
+
+    /// [`Self::f64`], refusing NaN and infinity, which rust_xlsxwriter writes
+    /// into the XML verbatim (`lineWeight="NaN"`).
+    pub(crate) fn finite_f64(&self, key: &str) -> Result<Option<f64>, String> {
+        let value = self.f64(key)?;
+        if let Some(v) = value.filter(|v| !v.is_finite()) {
+            return Err(format!(
+                "{}: '{}' must be a finite number, got {}",
+                self.context, key, v
+            ));
+        }
+        Ok(value)
+    }
+
+    /// [`Self::finite_f64`], also refusing a negative value.
+    ///
+    /// rust_xlsxwriter writes a size or weight into the XML as given, so
+    /// without this `font_size=-5` became `<sz val="-5"/>`. There is no upper
+    /// bound, on the precedent `row_heights` set: Excel clamps an over-limit
+    /// height on load without a repair prompt (measured, and pinned by
+    /// `test_a_height_above_excels_maximum_is_accepted`), so refusing a large
+    /// value would break callers for no defect.
+    pub(crate) fn non_negative_f64(&self, key: &str) -> Result<Option<f64>, String> {
+        let value = self.finite_f64(key)?;
+        if let Some(v) = value.filter(|&v| v < 0.0) {
+            return Err(format!(
+                "{}: '{}' must not be negative, got {}",
+                self.context, key, v
+            ));
+        }
+        Ok(value)
     }
 
     /// Extract an optional i64 (integer) field. Missing or `None` yields `Ok(None)`.

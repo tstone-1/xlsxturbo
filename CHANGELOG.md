@@ -11,6 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A reusable `format` dictionary for individual cell writes, supporting the full
   column-format style vocabulary. Existing shorthand fields take precedence.
 
+### Fixed
+- A date or datetime written with a format that sets no `num_format` now keeps its
+  date number format. Before, any format replaced it: `column_formats={"d": {"bold":
+  True}}` on a date column, or a `cells` entry with `format`, `font_name` or another
+  styling key, wrote every date as a bare serial (`46289` for 2026-09-24) with the
+  `General` format. This contradicted the documented "formatted as date" behaviour, so
+  it is repaired under the documented-contract exception in `docs/stability.md`. An
+  explicit `num_format` is still used as given.
+- `rich_text` segments now reject `bg_color`. A segment is an inline run, which has no
+  fill in the file format, so the key was accepted and written nowhere, although the
+  docs say keys that cannot render are rejected. It is still accepted by every
+  cell-level format.
+- `font_size` in any format, a textbox font `size` and a sparkline `line_weight` are
+  refused when NaN, infinite or negative, and sparkline `custom_max`/`custom_min` and
+  image `scale_width`/`scale_height` when NaN or infinite. rust_xlsxwriter wrote these
+  into the XML as given (`<sz val="NaN"/>`, `lineWeight="NaN"`). Large finite values
+  are still written through, as for `row_heights`.
+- An explicit `None` for `font_name` or `quote_prefix` in a conditional format is now
+  treated as absent, as it is everywhere else, instead of being refused.
+- Two failures now name the option key that caused them: a `cells` key beyond Excel's
+  grid (`cells['ZZZZ1']: ...`) and an image file that cannot be opened
+  (`images['C3']: Failed to load image ...`). The exception classes are unchanged.
+- CSV write errors report a 1-based row and column, like CSV parse errors.
+- Type annotations for `cells` values include `None`, `date` and `datetime`, which
+  the runtime has always accepted.
+
 ## [1.5.1] - 2026-09-18
 
 ### Changed

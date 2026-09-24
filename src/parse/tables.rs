@@ -39,6 +39,18 @@ pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
     )
 }
 
+/// True for `TRUE` and `FALSE` in any case.
+///
+/// Excel reserves its two logical constants, and a table named `"true"` draws
+/// the same recovery prompt as one named `"Q1"` (measured on Excel 16.112,
+/// rust_xlsxwriter#189). Folded with `to_uppercase`, which is the fold
+/// rust_xlsxwriter applies, so the two cannot disagree about a name and leave a
+/// rewritten one still being refused at `add_table`.
+pub(crate) fn is_logical_constant(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    upper == "TRUE" || upper == "FALSE"
+}
+
 /// Sanitize a string for use as an Excel table name
 ///
 /// The name is normalised to NFC first, then invalid characters become `_` and
@@ -77,18 +89,6 @@ pub(crate) fn parse_table_style(style: &str) -> Result<TableStyle, String> {
 /// Excel accepts them. Closing that gap means widening the allowlist or
 /// inverting it to a denylist, which changes what is *accepted* and needs its
 /// own audit in that direction — see `AGENTS.md`.
-/// True for `TRUE` and `FALSE` in any case.
-///
-/// Excel reserves its two logical constants, and a table named `"true"` draws
-/// the same recovery prompt as one named `"Q1"` (measured on Excel 16.112,
-/// rust_xlsxwriter#189). Folded with `to_uppercase`, which is the fold
-/// rust_xlsxwriter applies, so the two cannot disagree about a name and leave a
-/// rewritten one still being refused at `add_table`.
-pub(crate) fn is_logical_constant(name: &str) -> bool {
-    let upper = name.to_uppercase();
-    upper == "TRUE" || upper == "FALSE"
-}
-
 pub(crate) fn sanitize_table_name(name: &str) -> String {
     // Compose before screening, so a decomposed name is not mangled by the
     // allowlist below. NFC and not NFKC: NFKC would fold U+FF21 FULLWIDTH A to
