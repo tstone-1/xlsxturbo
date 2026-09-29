@@ -3,7 +3,7 @@
 `csv_to_xlsx` reads a CSV and writes an `.xlsx`, detecting each value's type from its
 text. It is a separate entry point from the DataFrame functions and takes far fewer
 options -- see the [capability matrix](capability-matrix.md) for exactly which. The
-command-line tool documented at the bottom of this page is a thin wrapper over it.
+[`xlsxturbo` command](#cli-usage) documented at the bottom of this page is a thin wrapper over it.
 
 ## CSV Conversion
 
@@ -36,26 +36,21 @@ CSV and DataFrame string values are always written as literal string cells, neve
 
 ## CLI Usage
 
-!!! warning "Not installed by `pip install xlsxturbo`"
+`pip install xlsxturbo` installs an `xlsxturbo` command (since 1.7.0). To try it without
+installing anything into your environment:
 
-    The command-line tool is a Rust binary, and the PyPI wheel ships only the Python
-    extension module — no console script and no executable. `pip install xlsxturbo`
-    therefore does **not** give you an `xlsxturbo` command.
-
-    To get it, build from source. The `cli` feature is on by default:
-
-    ```bash
-    git clone https://github.com/tstone-1/xlsxturbo
-    cd xlsxturbo
-    cargo build --release          # produces target/release/xlsxturbo
-    ```
-
-    Everything the CLI does is available from Python through `csv_to_xlsx`, which the
-    binary is a thin wrapper over.
+```bash
+uvx xlsxturbo input.csv output.xlsx      # or: pipx run xlsxturbo input.csv output.xlsx
+```
 
 ```bash
 xlsxturbo input.csv output.xlsx [OPTIONS]
+python -m xlsxturbo input.csv output.xlsx [OPTIONS]    # the same command
 ```
+
+A source build also produces a standalone Rust binary with the same options and exit
+codes, for machines without Python: `cargo build --release` writes
+`target/release/xlsxturbo`.
 
 ### Options
 
@@ -65,7 +60,8 @@ xlsxturbo input.csv output.xlsx [OPTIONS]
   - `mdy` or `us`: US format (01-02-2024 = January 2)
   - `dmy` or `eu`: European format (01-02-2024 = February 1)
 - `-p, --parallel`: Use multi-core CSV processing (faster for large files, uses more memory)
-- `-v, --verbose`: Show progress information
+- `-v, --verbose`: Show progress information on stderr
+- `-V, --version`: Print the version and exit
 
 ### Exit codes
 

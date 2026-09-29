@@ -59,9 +59,15 @@ from xlsxturbo import csv_to_xlsx
 csv_to_xlsx("sales.csv", "sales.xlsx")
 ```
 
-Types are detected from the file's text. There is also a command-line tool for the same
-job, though it is **not** included in the PyPI wheel — it has to be built from source. See
-[CSV conversion](https://tstone-1.github.io/xlsxturbo/csv-conversion/).
+Types are detected from the file's text. The same conversion is available from the shell,
+with no Python code at all:
+
+```bash
+pip install xlsxturbo
+xlsxturbo sales.csv sales.xlsx --date-order us
+```
+
+See [CSV conversion](https://tstone-1.github.io/xlsxturbo/csv-conversion/).
 
 ## What it can do
 

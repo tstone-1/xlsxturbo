@@ -112,5 +112,5 @@ tool.
   - Everything else → Text
 - **~7-9x faster** than pandas + openpyxl on reference systems (see [benchmarks](performance.md))
 - **Memory efficient** - streams data with 1MB buffer
-- Available as a **Python library**, plus a **CLI tool** that has to be
-  [built from source](csv-conversion.md#cli-usage) — it is not in the PyPI wheel
+- Available as a **Python library** and an **`xlsxturbo` command** for CSV files, both
+  installed by `pip install xlsxturbo` — see [CLI usage](csv-conversion.md#cli-usage)

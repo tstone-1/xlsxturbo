@@ -41,6 +41,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+# A Python wrapper over csv_to_xlsx, not the Rust binary from `cargo build`: maturin
+# builds only the extension module, so the wheel has no binary to install.
+[project.scripts]
+xlsxturbo = "xlsxturbo.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/tstone-1/xlsxturbo"
 Repository = "https://github.com/tstone-1/xlsxturbo"

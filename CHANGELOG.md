@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has succeeded, so a failed export writes nothing. A text stream is refused with
   `ConfigurationTypeError`. `xlsxturbo.types` gains `BinaryWriter` and `OutputTarget`
   to annotate it.
+- `pip install xlsxturbo` now installs an `xlsxturbo` command, and `python -m xlsxturbo`
+  runs it. It converts a CSV file with the same options, output and exit codes as the
+  Rust binary that source builds produce, which the wheel has never contained. The
+  command's options and exit codes are covered by the stability promise.
 
 ## [1.6.0] - 2026-09-24
 

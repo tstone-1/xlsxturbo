@@ -30,8 +30,12 @@ Everything else is internal and may change in any release:
   freely; match on the class, or on `errno` for `FileError`, never on the string.
 - The internal layout of the generated XML — see [Generated files](#generated-files) below.
 
-The `xlsxturbo` command-line binary is not part of the surface either, because it is not part
-of the wheel: `cargo build --release` produces it, but a `pip install` does not.
+**The `xlsxturbo` command** that `pip install` puts on your `PATH` (and `python -m xlsxturbo`)
+is covered as a command: its options, its two positional arguments, the `OK <rows> <cols>`
+line it prints on success, and its exit codes (0, 1 for a failed conversion, 2 for a usage
+error). Its `--help` and `--verbose` text is not. The `xlsxturbo.cli` module behind it is
+internal: run the command, do not import it. The Rust binary that `cargo build --release`
+produces takes the same options but is not part of the wheel, and is not covered.
 
 ## What counts as a breaking change
 
