@@ -146,6 +146,9 @@ validation are keyword arguments as well; see their pages in the Guide.
 
 ## From `polars.DataFrame.write_excel`
 
+The examples use `pl.from_pandas(sales)`, which needs `pyarrow` for the Python date
+objects in this sample frame. Install it alongside polars when running these examples.
+
 `write_excel` makes more decisions for you: it wraps the frame in an Excel table with no
 style (an autofilter, no colours) and gives numeric columns thousands separators with red
 negatives. `df_to_xlsx` writes plain cells unless asked, so state the ones you want.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -15,6 +16,60 @@ pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for 
 
 class TestValidations:
     """Tests for data validation feature (v0.10.0)."""
+
+    @pytest.mark.parametrize(("field", "attribute"), [("input_title", "promptTitle"), ("error_title", "errorTitle")])
+    @pytest.mark.parametrize("with_message", [False, True])
+    def test_validation_title_without_message_is_preserved(
+        self, tmp_xlsx: str, field: str, attribute: str, with_message: bool,
+    ) -> None:
+        """Each title is independent of its optional message."""
+        config: Any = {"type": "whole_number", "min": 0, "max": 1, field: "Synthetic title"}
+        if with_message:
+            config[field.replace("title", "message")] = "Synthetic message"
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        validation = active_ws(wb).data_validations.dataValidation[0]
+        assert getattr(validation, attribute) == "Synthetic title"
+        assert validation.formula1 == "0"
+        assert validation.formula2 == "1"
+        wb.close()
+
+    @pytest.mark.parametrize("field", ["input_title", "error_title"])
+    @pytest.mark.parametrize("with_message", [False, True])
+    def test_validation_titles_always_validate_types(self, tmp_xlsx: str, field: str, with_message: bool) -> None:
+        """Omitting a message cannot bypass validation of the title."""
+        config: Any = {"type": "whole_number", field: 123}
+        if with_message:
+            config[field.replace("title", "message")] = "Synthetic message"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"validations\['a'\].*{field}.*string"):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+
+    @pytest.mark.parametrize("field", ["min", "max"])
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_decimal_validation_requires_finite_bounds(self, tmp_xlsx: str, field: str, value: float) -> None:
+        """Non-finite bounds must not become validation formulas."""
+        config: Any = {"type": "decimal", field: value}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"validations\['a'\].*{field}.*finite"):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+
+    @pytest.mark.parametrize("field", ["min", "max"])
+    @pytest.mark.parametrize("value", [False, True])
+    def test_whole_number_validation_rejects_bool_bounds(self, tmp_xlsx: str, field: str, value: bool) -> None:
+        """Booleans do not become zero/one numeric bounds."""
+        config: Any = {"type": "whole_number", field: value}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"validations\['a'\].*{field}.*bool"):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+
+    @pytest.mark.parametrize("kind", ["decimal", "whole_number"])
+    def test_finite_zero_one_bounds_are_preserved(self, tmp_xlsx: str, kind: str) -> None:
+        """The invalid-number screen keeps ordinary finite bounds working."""
+        config: Any = {"type": kind, "min": 0, "max": 1}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        validation = active_ws(wb).data_validations.dataValidation[0]
+        assert validation.formula1 == "0"
+        assert validation.formula2 == "1"
+        wb.close()
 
     def test_list_validation(self, tmp_xlsx: str) -> None:
         """Verify dropdown list validation."""

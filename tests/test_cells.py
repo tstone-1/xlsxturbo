@@ -62,6 +62,32 @@ class TestCells:
         assert active_ws(wb)["A2"].value == "overwritten"
         wb.close()
 
+    @pytest.mark.parametrize("polars", [False, True])
+    @pytest.mark.parametrize("multi_sheet", [False, True])
+    @pytest.mark.parametrize("value", [None, "", float("nan"), pd.NA, pd.NaT])
+    @pytest.mark.parametrize("form", ["bare", "dict", "empty_format", "formatted"])
+    def test_blank_cells_override_existing_data(
+        self, tmp_xlsx: str, polars: bool, multi_sheet: bool, value: Any, form: str,
+    ) -> None:
+        """Explicit blanks remove existing data, independently of engine or styling."""
+        data = {"a": ["synthetic original"], "b": ["keep"]}
+        df = pl.DataFrame(data) if polars else pd.DataFrame(data)
+        item: Any = value if form == "bare" else {"value": value}
+        if form in ("empty_format", "formatted"):
+            item["format"] = {} if form == "empty_format" else {"bold": True}
+        cells = {"A2": item}
+        if multi_sheet:
+            xlsxturbo.dfs_to_xlsx([(df, "Sheet1", {"cells": cells})], tmp_xlsx)
+        else:
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells=cells)
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert ws["A2"].value is None
+        assert ws["B2"].value == "keep"
+        assert ws["A1"].value == "a"
+        assert ws["A2"].font.bold is (form == "formatted")
+        wb.close()
+
     def test_cell_dict_missing_value_key(self, tmp_xlsx: str) -> None:
         """Dict-style cell without 'value' key raises ValueError."""
         df = pd.DataFrame({"a": [1]})

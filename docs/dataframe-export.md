@@ -64,15 +64,17 @@ What to expect:
 - **The whole file is held in memory** before it is written, compressed. With
   `constant_memory=True` the worksheet data is still staged on disk while rows are
   written, but the finished archive is not.
-- **A failed export writes nothing** into the object, the same guarantee the path
-  form gives by never replacing a file with a partial one.
+- **Conversion and workbook-save failures write nothing** into the object.
+  A failure while delivering the finished archive can leave partial bytes in the
+  object; unlike a path export, an arbitrary writer cannot be rolled back.
 - **The object stays open, at its new position.** Call `buffer.getvalue()`, or
   `buffer.seek(0)` before handing it to something that reads it.
 - **A text stream is refused** with a `ConfigurationTypeError`. An `.xlsx` file is
   binary, so open files with `"wb"`, not `"w"`.
 - A `write()` that returns fewer bytes than it was given is called again with the rest;
   one that returns `None` (Django's `HttpResponse`, for example) is taken to have
-  accepted everything.
+  accepted everything, except for `io.RawIOBase` streams. Their `None` means the
+  stream would block, and raises `FileError` with `errno.EAGAIN`.
 
 ## Type Detection Examples
 

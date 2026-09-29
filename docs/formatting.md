@@ -52,8 +52,11 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 
 ## Column Formatting
 
-`font_name` and `quote_prefix` also work in merged-range formats. They are not
-supported in conditional-format rules; set them through `column_formats` instead.
+`font_name` and `quote_prefix` also work in merged-range formats. Conditional-format
+rules reject `font_name`, `font_size`, `align_horizontal`, `align_vertical`,
+`wrap_text` and `quote_prefix`, because these properties are not written into the
+rule's differential format. Set them through `column_formats` instead. An explicit
+`None` for any of these keys is treated as absent.
 `quote_prefix` changes Excel's quote marker, not the stored value or type. Pass
 identifiers as strings and use `num_format='@'` when text formatting is needed.
 

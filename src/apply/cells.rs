@@ -14,6 +14,10 @@ pub(crate) fn apply_cells(
 ) -> Result<(), String> {
     let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
     let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
+    // An unformatted empty string is a no-op in rust_xlsxwriter. Explicit
+    // overrides must clear an existing value, so even a plain override gets
+    // a default format (which makes empty values real blank writes).
+    let default_format = CellFormat::new(Format::new());
 
     for cell in cells {
         let fmt = cell
@@ -28,7 +32,7 @@ pub(crate) fn apply_cells(
             cell.value.bind(py),
             &date_format,
             &datetime_format,
-            fmt.as_ref(),
+            Some(fmt.as_ref().unwrap_or(&default_format)),
         )?;
     }
     Ok(())

@@ -2,13 +2,18 @@
 
 ``output_path`` accepts ``io.BytesIO``, a file opened ``"wb"``, or anything with a
 ``write(bytes)`` method. The archive is serialised in memory during the detached
-save and handed to the object afterwards, so a failed export writes nothing into it.
+save and handed to the object afterwards, so conversion/save failures write nothing.
+Delivery failures may leave partial bytes in a writer that cannot be rolled back.
 """
 
 from __future__ import annotations
 
+import errno
 import io
+import os
+import sys
 import zipfile
+from functools import partial
 from pathlib import Path
 from typing import ClassVar
 
@@ -209,6 +214,48 @@ class TestWriterProtocol:
         """A write() returning 0 fails instead of looping forever."""
         with pytest.raises(xlsxturbo.FileError, match="accepted 0 of the remaining"):
             xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), StuckWriter())
+
+    def test_raw_writer_none_is_not_response_writer_success(self) -> None:
+        """RawIOBase's None means would-block on every platform."""
+        with io.RawIOBase() as writer:
+            # RawIOBase.write is normally unsupported; this stream instead
+            # reports the documented nonblocking result without an OS pipe.
+            writer.write = lambda _data: None  # type: ignore[method-assign]
+            with pytest.raises(xlsxturbo.FileError, match="would block") as error:
+                xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), writer)
+        assert error.value.errno == errno.EAGAIN
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="nonblocking anonymous pipes differ on Windows")
+    @pytest.mark.parametrize("entry", ["df", "dfs", "csv", "csv_parallel"])
+    def test_nonblocking_raw_writer_would_block_is_not_success(self, tmp_path: Path, entry: str) -> None:
+        """A real full nonblocking pipe refuses all four export paths without data loss being hidden."""
+        read_fd, write_fd = os.pipe()
+        with os.fdopen(read_fd, "rb", buffering=0) as reader, os.fdopen(write_fd, "wb", buffering=0) as writer:
+            os.set_blocking(write_fd, False)
+            os.set_blocking(read_fd, False)
+            filled = 0
+            while True:
+                try:
+                    filled += os.write(write_fd, b"x" * 4096)
+                except BlockingIOError:
+                    break
+            assert writer.write(b"x") is None
+            df = pd.DataFrame({"a": [1]})
+            if entry == "df":
+                export = partial(xlsxturbo.df_to_xlsx, df, writer)
+            elif entry == "dfs":
+                export = partial(xlsxturbo.dfs_to_xlsx, [(df, "Sheet1")], writer)
+            else:
+                source = tmp_path / "synthetic.csv"
+                source.write_text("a\n1\n", encoding="utf-8")
+                export = partial(xlsxturbo.csv_to_xlsx, source, writer, parallel=entry == "csv_parallel")
+            with pytest.raises(xlsxturbo.FileError, match="would block") as error:
+                export()
+            assert error.value.errno == errno.EAGAIN
+            drained = 0
+            while chunk := reader.read(65536):
+                drained += len(chunk)
+            assert drained == filled
 
     def test_exception_from_write_propagates_unchanged(self) -> None:
         """The writer's own exception reaches the caller as itself."""

@@ -25,3 +25,5 @@ pyyaml>=6.0.3,<7
 # tests/test_ci_config.py on its first run.
 numpy>=2.2.6
 xlsxwriter>=3.2.9,<4
+# The migration examples convert pandas date objects via polars.from_pandas.
+pyarrow>=21.0.0

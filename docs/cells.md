@@ -55,6 +55,8 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 
 **Notes:**
 - Cells are written after all DataFrame data, so they can overwrite existing values
+- `None`, an empty string, and missing or non-finite values clear an existing cell,
+  with or without a format dictionary
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode
 

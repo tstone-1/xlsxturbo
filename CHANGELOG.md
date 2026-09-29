@@ -5,14 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.0] - 2026-09-29
 
 ### Added
+- Benchmarks support mixed, numeric and string workloads, plus an optional isolated
+  peak-memory measurement on macOS/Linux.
 - `output_path` in `df_to_xlsx`, `dfs_to_xlsx` and `csv_to_xlsx` accepts a binary
   file-like object (`io.BytesIO`, a file opened `"wb"`, a web response body) as well as
   a path, for downloads and uploads that need no temporary file. The workbook is
   serialised in memory during the save and written to the object only once the save
-  has succeeded, so a failed export writes nothing. A text stream is refused with
+  has succeeded, so conversion/save failures write nothing. Delivery errors may
+  leave partial bytes in the writer. A text stream is refused with
   `ConfigurationTypeError`. `xlsxturbo.types` gains `BinaryWriter` and `OutputTarget`
   to annotate it.
 - `pip install xlsxturbo` now installs an `xlsxturbo` command, and `python -m xlsxturbo`
@@ -26,6 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   examples, by number format, header style, freeze pane and table style.
 
 ### Fixed
+- Explicit blank `cells` overrides now clear existing DataFrame values without
+  requiring a format. Previously `None`, empty strings and missing/non-finite values
+  silently kept the old value when no format was supplied, contrary to the documented
+  overwrite contract.
+- Binary `io.RawIOBase` outputs now raise `FileError` with `errno.EAGAIN` when
+  `write()` returns `None` (would-block), instead of reporting success without delivering
+  the archive. Response-style writers may still return `None` to accept all bytes.
+- Conditional formats now reject `font_size`, `align_horizontal`, `align_vertical`
+  and `wrap_text`, which were accepted but never written into the rule. As with
+  `font_name` and `quote_prefix`, explicit `None` remains an absent value. The type
+  annotations now match the supported properties; ordinary cell formats are unchanged.
+- Validation titles are now written and type-checked even without a matching message;
+  previously title-only options were silently ignored. Decimal bounds reject NaN and
+  infinity, and whole-number bounds reject booleans instead of treating them as 0/1.
+  These repairs and the conditional-format and blank-cell repairs above restore the
+  existing contracts under the documented-contract exception in `docs/stability.md`.
+- Migration-example tests now declare their PyArrow dependency in the CI/release test
+  requirements, so the pandas-to-polars examples also run outside the development venv.
+- Benchmarks compare every generated cell outside the timed write, detecting missing
+  interior values even when worksheet dimensions match. Failed runs remain visible
+  with counts and errors, missing measurements are not fabricated, and any failed run
+  or warmup returns a nonzero exit status.
+- The rich-text roadmap now lists the supported `font_name` key instead of `bg_color`.
 - The option-shape table in `docs/api-reference.md` said `column_widths`,
   `column_formats` and `formula_columns` are all keyed by column index, name or
   pattern. `column_widths` takes an index or `"_all"`, `column_formats` a name or

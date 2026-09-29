@@ -51,7 +51,14 @@ fn parse_cf_format(view: &OptionMap<'_, '_>) -> Result<Option<Format>, String> {
         Some(map) => {
             // Differential styles cannot carry these base-cell properties. An
             // explicit None means "absent", as it does for every other key.
-            for key in ["font_name", "quote_prefix"] {
+            for key in [
+                "font_name",
+                "quote_prefix",
+                "font_size",
+                "align_horizontal",
+                "align_vertical",
+                "wrap_text",
+            ] {
                 if map.get(key).is_some_and(|v| !v.bind(view.py()).is_none()) {
                     return Err(format!(
                         "{}: '{}' is not supported in conditional formats; use column_formats instead",

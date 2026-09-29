@@ -114,7 +114,7 @@ class TestRuntimeUsability:
         column_keys = typing.get_type_hints(types_module.ColumnFormat)
         assert "num_format" in conditional_keys
         assert "font_color" in conditional_keys
-        for key in ("font_name", "quote_prefix"):
+        for key in ("font_name", "quote_prefix", "font_size", "align_horizontal", "align_vertical", "wrap_text"):
             assert key in column_keys
             assert key not in conditional_keys
 

@@ -119,8 +119,8 @@ impl<'py> OutputArg<'py> {
     /// the caller, who may be about to `seek(0)` or `getvalue()` it. A `write()`
     /// that returns a count shorter than it was given -- allowed for raw,
     /// unbuffered streams -- is called again with the rest. One that returns
-    /// `None` is taken as having accepted everything, which is what Django's
-    /// `HttpResponse.write` and similar response bodies do. An exception raised
+    /// `None` means would-block for RawIOBase, but acceptance for Django's
+    /// `HttpResponse.write` and similar response bodies. An exception raised
     /// by `write()` propagates unchanged.
     fn deliver(&self, buffer: &[u8]) -> PyResult<()> {
         let Self::Writer(writer) = self else {
@@ -131,6 +131,17 @@ impl<'py> OutputArg<'py> {
             let chunk = PyBytes::new(writer.py(), &buffer[offset..]);
             let returned = writer.call_method1("write", (chunk,))?;
             let written = if returned.is_none() {
+                let raw_io = writer.py().import("io")?.getattr("RawIOBase")?;
+                if writer.is_instance(&raw_io)? {
+                    return Err(errors::file(errors::FileFailure {
+                        message: format!(
+                            "Failed to write workbook to {}: write() would block with {} bytes remaining",
+                            pytype_name(writer),
+                            buffer.len() - offset
+                        ),
+                        errno: Some(writer.py().import("errno")?.getattr("EAGAIN")?.extract()?),
+                    }));
+                }
                 buffer.len() - offset
             } else {
                 returned.extract::<usize>()?

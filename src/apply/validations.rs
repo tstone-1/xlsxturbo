@@ -37,6 +37,13 @@ fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str, default: i32) -> Re
     if bound.is_none() {
         return Ok(default);
     }
+    if bound.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(format!(
+            "{}: '{}' must be an integer, got bool",
+            view.context(),
+            key
+        ));
+    }
     if let Ok(v) = bound.extract::<i32>() {
         return Ok(v);
     }
@@ -168,8 +175,8 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
         "decimal" | "number" => {
             view.reject_unknown(&keys_with(&["min", "max"]))?;
             // Decimal validation with between rule
-            let min = view.f64("min")?.unwrap_or(f64::MIN);
-            let max = view.f64("max")?.unwrap_or(f64::MAX);
+            let min = view.finite_f64("min")?.unwrap_or(f64::MIN);
+            let max = view.finite_f64("max")?.unwrap_or(f64::MAX);
             DataValidation::new()
                 .allow_decimal_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
         }
@@ -191,24 +198,32 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
         }
     };
 
-    // Add optional input message
-    let validation = if let Some(msg) = view.string("input_message")? {
-        let title = view.string("input_title")?.unwrap_or_default();
+    // Titles and messages are independently optional, and each supplied field
+    // must be validated even when its companion is absent.
+    let validation = if let Some(title) = view.string("input_title")? {
         validation
             .set_input_title(&title)
             .map_err(|e| format!("Failed to set input title: {}", e))?
+    } else {
+        validation
+    };
+    let validation = if let Some(msg) = view.string("input_message")? {
+        validation
             .set_input_message(&msg)
             .map_err(|e| format!("Failed to set input message: {}", e))?
     } else {
         validation
     };
 
-    // Add optional error message
-    let validation = if let Some(msg) = view.string("error_message")? {
-        let title = view.string("error_title")?.unwrap_or_default();
+    let validation = if let Some(title) = view.string("error_title")? {
         validation
             .set_error_title(&title)
             .map_err(|e| format!("Failed to set error title: {}", e))?
+    } else {
+        validation
+    };
+    let validation = if let Some(msg) = view.string("error_message")? {
+        validation
             .set_error_message(&msg)
             .map_err(|e| format!("Failed to set error message: {}", e))?
             .set_error_style(DataValidationErrorStyle::Stop)

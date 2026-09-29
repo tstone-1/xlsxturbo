@@ -63,11 +63,15 @@ xlsxturbo.df_to_xlsx(df, "validated.xlsx",
 - `input_title`, `input_message`: Prompt shown when cell is selected
 - `error_title`, `error_message`: Message shown when invalid data is entered
 
+Titles and messages can be supplied independently; every supplied value must be a string.
+
 **Notes:**
 - Validations apply to the data rows of the specified column
 - Column patterns work: `'score_*': {...}` matches all columns starting with `score_`
 - If only `min` or only `max` is specified, the other defaults to the type's extreme value
 - `whole_number` `min`/`max` are bounded to the i32 range (-2147483648 to 2147483647); a value outside that range raises `ValueError` naming the field and range
+- `decimal` bounds must be finite numbers; `NaN` and infinity are refused
+- Booleans are not numeric bounds, including for `whole_number`
 - List validation values are limited to 255 total characters (Excel limitation)
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode

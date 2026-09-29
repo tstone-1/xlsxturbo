@@ -8,7 +8,7 @@ is stable across systems, the absolute times are not.
 
 *Reference benchmark on 100,000 rows x 50 columns with mixed data types. Your results will vary by system - run the benchmark yourself (see [Benchmarking](#benchmarking)).*
 
-*All libraries use default settings; outputs differ in styling (e.g. polars auto-sizes columns and bolds headers by default, while xlsxturbo writes bare cells unless asked).*
+*All libraries use default settings, so the outputs differ in styling: `polars.write_excel` wraps the data in an Excel table and gives numeric columns thousands-separator formats, while xlsxturbo and pandas write bare cells unless asked. Every output is checked to hold the whole frame before its time counts.*
 
 ### Historical Windows 11 / AMD Ryzen 9
 
@@ -35,6 +35,15 @@ is stable across systems, the absolute times are not.
 *Test system: macOS (Darwin 25.5.0), Python 3.14.5, 10 CPUs. Median of 3 runs after warmup; max stdev across libraries: 0.9% of median. Re-run with `--markdown` to regenerate the current-system table.*
 
 Benchmark scripts can also emit markdown or JSON, which makes it easy to attach benchmark output to issues, release notes, or CI artifacts.
+
+The current script compares every header and data cell with the generated frame after
+each timed write. Floating-point comparisons allow the rounding used by the compared
+writers. The readback is outside the timing and is excluded from the separate memory
+measurement. The tables above predate this cell-by-cell check.
+
+Reports include successful and attempted run counts and any failures. A failed run or
+warmup makes the command exit with status 1. Failed libraries remain in the report with
+unavailable measurements, and a failed xlsxturbo baseline produces no speedup ratios.
 
 ## Threads
 
@@ -75,6 +84,12 @@ python benchmarks/benchmark.py --full
 
 # Custom size
 python benchmarks/benchmark.py --rows 500000 --cols 100
+
+# Data shape: mixed (the reference), numeric, or strings
+python benchmarks/benchmark.py --shape strings
+
+# Also measure each library's peak memory, in a fresh process per library (macOS, Linux)
+python benchmarks/benchmark.py --memory
 
 # Output formats for CI/documentation
 python benchmarks/benchmark.py --markdown

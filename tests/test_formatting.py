@@ -772,7 +772,10 @@ class TestFontNameAndQuotePrefix:
         assert '<rFont val="Arial"/>' in shared
         assert '<rFont val="Courier New"/>' in shared
 
-    @pytest.mark.parametrize(("field", "value"), [("font_name", "Arial"), ("quote_prefix", True)])
+    @pytest.mark.parametrize(("field", "value"), [
+        ("font_name", "Arial"), ("quote_prefix", True), ("font_size", 22),
+        ("align_horizontal", "center"), ("align_vertical", "top"), ("wrap_text", True),
+    ])
     def test_conditional_format_rejects_base_cell_properties(self, tmp_xlsx: str, field: str, value: Any) -> None:
         """Differential formats must not silently drop the new cell properties."""
         df = pd.DataFrame({"Score": [1]})
@@ -784,7 +787,9 @@ class TestFontNameAndQuotePrefix:
         assert field in str(error.value)
         assert "Score" in str(error.value)
 
-    @pytest.mark.parametrize("field", ["font_name", "quote_prefix"])
+    @pytest.mark.parametrize("field", [
+        "font_name", "quote_prefix", "font_size", "align_horizontal", "align_vertical", "wrap_text",
+    ])
     def test_conditional_format_treats_none_as_absent(self, tmp_xlsx: str, field: str) -> None:
         """An explicit None is "not set" here too, as it is for every other key."""
         df = pd.DataFrame({"Score": [1]})

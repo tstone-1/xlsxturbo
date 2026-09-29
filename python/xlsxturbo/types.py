@@ -104,7 +104,6 @@ class _CellFormat(TypedDict, total=False):
     italic: bool
     font_color: str  # '#RRGGBB' or named color (white, black, red, blue, etc.)
     bg_color: str  # '#RRGGBB' or named color
-    font_size: float
     underline: bool
     border: bool | str  # True = thin all sides, str = named style all sides
     border_left: bool | str  # True = thin, or a named style (thin, medium, thick, dashed, ...)
@@ -112,15 +111,16 @@ class _CellFormat(TypedDict, total=False):
     border_top: bool | str  # True = thin, or named style for top side only
     border_bottom: bool | str  # True = thin, or named style for bottom side only
     border_color: str  # Color for all borders. Requires a border to be set for a visible effect
-    align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
-    align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
-    wrap_text: bool  # Enable text wrapping within cell
 
 
 class HeaderFormat(_CellFormat, total=False):
     """Header cell formatting options. All fields are optional."""
 
     font_name: str  # Font family, e.g. 'Arial'
+    font_size: float
+    align_horizontal: str  # 'left', 'center', 'right', 'fill', 'justify', 'center_across', 'distributed'
+    align_vertical: str  # 'top', 'center', 'bottom', 'justify', 'distributed'
+    wrap_text: bool  # Enable text wrapping within cell
     quote_prefix: bool  # Excel quote marker; does not change the cell value or type
 
 
@@ -131,7 +131,7 @@ class ColumnFormat(HeaderFormat, total=False):
 
 
 class _ConditionalCellFormat(_CellFormat, total=False):
-    """Conditional styles exclude base-cell font names and quote markers."""
+    """Conditional styles exclude font names/sizes, alignment and quote markers."""
 
     num_format: str
 

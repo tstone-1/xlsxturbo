@@ -59,7 +59,7 @@ Power user features for richer Excel output.
   - API: `comments={'A1': 'Note'}` or `comments={'A1': {'text': 'Note', 'author': 'John'}}`
 
 - [x] **Rich text** - Multiple formats within a single cell (v0.10.0)
-  - Supports: bold, italic, font_color, bg_color, font_size, underline
+  - Supports: bold, italic, font_color, font_size, font_name, underline
   - API: `rich_text={'A1': [('Bold part', {'bold': True}), ' normal']}`
 
 ### Recent Milestones
