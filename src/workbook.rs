@@ -81,7 +81,7 @@ fn resolve_symlink_dest(dest: &Path) -> Option<std::path::PathBuf> {
 /// partial-write window.
 ///
 /// A symlink destination is written *through* — see [`resolve_symlink_dest`].
-pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Result<(), FileFailure> {
+fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Result<(), FileFailure> {
     let requested = Path::new(output_path);
     let resolved = resolve_symlink_dest(requested);
     let dest = resolved.as_deref().unwrap_or(requested);
@@ -113,16 +113,7 @@ pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Resul
 
     workbook
         .save_to_writer(tmp.as_file_mut())
-        .map_err(|e| match &e {
-            // `save_to_writer` wraps the underlying `io::Error`, so a disk-full
-            // or permissions failure keeps its number instead of arriving as an
-            // opaque library error.
-            XlsxError::IoError(io) => FileFailure::from_io(context.clone(), io),
-            other => FileFailure {
-                message: format!("{}: {}", context, other),
-                errno: None,
-            },
-        })?;
+        .map_err(|e| save_failure(&context, &e))?;
 
     set_output_permissions(&tmp, dest);
 
@@ -130,6 +121,51 @@ pub(crate) fn save_workbook(workbook: &mut Workbook, output_path: &str) -> Resul
         .map_err(|e| FileFailure::from_io(context, &e.error))?;
 
     Ok(())
+}
+
+/// Classify a failed serialisation as a [`FileFailure`] under `context`.
+///
+/// `save_to_writer` and `save_to_buffer` wrap the underlying `io::Error`, so a
+/// disk-full or permissions failure keeps its number instead of arriving as an
+/// opaque library error. The in-memory save can still hit the filesystem:
+/// `constant_memory` stages worksheet data in temporary files.
+fn save_failure(context: &str, error: &XlsxError) -> FileFailure {
+    match error {
+        XlsxError::IoError(io) => FileFailure::from_io(context, io),
+        other => FileFailure {
+            message: format!("{}: {}", context, other),
+            errno: None,
+        },
+    }
+}
+
+/// Where a finished workbook goes.
+///
+/// Python callers pass either a path or a binary file-like object. The
+/// file-like case cannot be written from inside the detached save, because
+/// calling its `write()` needs the GIL, so the archive is serialised into
+/// `Memory` and handed to the object afterwards by the caller that holds it.
+pub enum Destination<'a> {
+    /// A filesystem path, replaced atomically by [`save_workbook`].
+    Path(&'a str),
+    /// A buffer that receives the complete `.xlsx` archive.
+    Memory(&'a mut Vec<u8>),
+}
+
+/// Save `workbook` to `destination`.
+pub(crate) fn save_to(
+    workbook: &mut Workbook,
+    destination: Destination<'_>,
+) -> Result<(), FileFailure> {
+    match destination {
+        Destination::Path(path) => save_workbook(workbook, path),
+        Destination::Memory(buffer) => {
+            *buffer = workbook
+                .save_to_buffer()
+                .map_err(|e| save_failure("Failed to save workbook to the output buffer", &e))?;
+            Ok(())
+        }
+    }
 }
 
 /// The part of a defined name Excel validates: everything after a `!` sheet

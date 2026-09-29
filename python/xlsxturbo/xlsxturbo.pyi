@@ -10,6 +10,7 @@ code written before they moved.
 from datetime import date, datetime
 
 from xlsxturbo.types import (
+    BinaryWriter as BinaryWriter,
     CellValueOptions as CellValueOptions,
     ChartOptions as ChartOptions,
     ChartSeriesOptions as ChartSeriesOptions,
@@ -21,6 +22,7 @@ from xlsxturbo.types import (
     DateOrder as DateOrder,
     HeaderFormat as HeaderFormat,
     ImageOptions as ImageOptions,
+    OutputTarget as OutputTarget,
     PathArg as PathArg,
     RichTextFormat as RichTextFormat,
     SheetOptions as SheetOptions,
@@ -33,6 +35,7 @@ from xlsxturbo.types import (
 )
 
 __all__ = [
+    "BinaryWriter",
     "CellValueOptions",
     "ChartOptions",
     "ChartSeriesOptions",
@@ -49,6 +52,7 @@ __all__ = [
     "ImageOptions",
     "InputDataError",
     "OptionError",
+    "OutputTarget",
     "PathArg",
     "RichTextFormat",
     "SheetOptions",
@@ -102,7 +106,7 @@ class WorkbookValidationError(ConfigurationError):
 
 def csv_to_xlsx(
     input_path: PathArg,
-    output_path: PathArg,
+    output_path: OutputTarget,
     sheet_name: str = "Sheet1",
     parallel: bool = False,
     date_order: DateOrder = "auto",
@@ -111,7 +115,9 @@ def csv_to_xlsx(
 
     Args:
         input_path: Path to the input CSV file.
-        output_path: Path for the output XLSX file.
+        output_path: Path for the output XLSX file, or a binary file-like
+            object (``io.BytesIO``, a file opened ``"wb"``) to write it into.
+            The object is left open at its new position.
         sheet_name: Name of the worksheet (default: "Sheet1").
         parallel: Use multi-core parallel processing (default: False).
             Faster for large files (100K+ rows) but uses more memory.
@@ -143,7 +149,7 @@ def csv_to_xlsx(
 
 def df_to_xlsx(
     df: object,
-    output_path: PathArg,
+    output_path: OutputTarget,
     sheet_name: str = "Sheet1",
     header: bool = True,
     autofit: bool = False,
@@ -174,7 +180,9 @@ def df_to_xlsx(
 
     Args:
         df: pandas DataFrame or polars DataFrame to export.
-        output_path: Path for the output XLSX file.
+        output_path: Path for the output XLSX file, or a binary file-like
+            object (``io.BytesIO``, a file opened ``"wb"``) to write it into.
+            The object is left open at its new position.
         sheet_name: Name of the worksheet (default: "Sheet1").
         header: Include column names as header row (default: True).
         autofit: Automatically adjust column widths to fit content (default: False).
@@ -279,7 +287,7 @@ def df_to_xlsx(
 
 def dfs_to_xlsx(
     sheets: list[tuple[object, str] | tuple[object, str, SheetOptions]],
-    output_path: PathArg,
+    output_path: OutputTarget,
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
@@ -309,7 +317,9 @@ def dfs_to_xlsx(
 
     Args:
         sheets: List of (DataFrame, sheet_name) or (DataFrame, sheet_name, options) tuples.
-        output_path: Path for the output XLSX file.
+        output_path: Path for the output XLSX file, or a binary file-like
+            object (``io.BytesIO``, a file opened ``"wb"``) to write it into.
+            The object is left open at its new position.
         header: Include column names as header row (default: True).
         autofit: Automatically adjust column widths (default: False).
             Combined with column_widths: explicit widths win for the columns

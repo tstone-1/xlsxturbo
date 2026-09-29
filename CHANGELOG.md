@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `output_path` in `df_to_xlsx`, `dfs_to_xlsx` and `csv_to_xlsx` accepts a binary
+  file-like object (`io.BytesIO`, a file opened `"wb"`, a web response body) as well as
+  a path, for downloads and uploads that need no temporary file. The workbook is
+  serialised in memory during the save and written to the object only once the save
+  has succeeded, so a failed export writes nothing. A text stream is refused with
+  `ConfigurationTypeError`. `xlsxturbo.types` gains `BinaryWriter` and `OutputTarget`
+  to annotate it.
+
 ## [1.6.0] - 2026-09-24
 
 ### Added

@@ -28,6 +28,52 @@ df_polars = pl.DataFrame({'x': [1, 2, 3], 'y': [4.0, 5.0, 6.0]})
 xlsxturbo.df_to_xlsx(df_polars, "polars_output.xlsx", sheet_name="Data")
 ```
 
+## Writing to memory instead of a file
+
+`output_path` also accepts a binary file-like object: `io.BytesIO`, a file opened with
+`"wb"`, or anything else with a `write(bytes)` method. This is the shape for a web
+download or an object-storage upload, where a temporary file is only plumbing.
+`dfs_to_xlsx` and `csv_to_xlsx` accept the same targets.
+
+```python
+import io
+
+buffer = io.BytesIO()
+xlsxturbo.df_to_xlsx(df, buffer, autofit=True)
+data = buffer.getvalue()  # the complete .xlsx file
+```
+
+In a FastAPI endpoint:
+
+```python
+from fastapi import Response
+
+@app.get("/report.xlsx")
+def report() -> Response:
+    buffer = io.BytesIO()
+    xlsxturbo.df_to_xlsx(load_report(), buffer, table_style="Medium9")
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="report.xlsx"'},
+    )
+```
+
+What to expect:
+
+- **The whole file is held in memory** before it is written, compressed. With
+  `constant_memory=True` the worksheet data is still staged on disk while rows are
+  written, but the finished archive is not.
+- **A failed export writes nothing** into the object, the same guarantee the path
+  form gives by never replacing a file with a partial one.
+- **The object stays open, at its new position.** Call `buffer.getvalue()`, or
+  `buffer.seek(0)` before handing it to something that reads it.
+- **A text stream is refused** with a `ConfigurationTypeError`. An `.xlsx` file is
+  binary, so open files with `"wb"`, not `"w"`.
+- A `write()` that returns fewer bytes than it was given is called again with the rest;
+  one that returns `None` (Django's `HttpResponse`, for example) is taken to have
+  accepted everything.
+
 ## Type Detection Examples
 
 | CSV Value | Excel Type | Notes |

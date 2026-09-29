@@ -22,6 +22,7 @@ mod write;
 // Re-export public API for the CLI binary (main.rs)
 pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertError};
 pub use types::DateOrder;
+pub use workbook::Destination;
 
 use convert::{
     claimed_table_name, convert_dataframe_to_xlsx, finish_workbook, write_configured_sheet,
@@ -39,6 +40,7 @@ use types::WriteConfig;
 use workbook::{reject_table_name_collisions, ClaimedTableName};
 
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use rust_xlsxwriter::Workbook;
 use std::collections::HashMap;
 
@@ -56,6 +58,97 @@ fn path_arg_to_string(value: &Bound<'_, PyAny>, param_name: &str) -> PyResult<St
         param_name,
         pytype_name(value)
     )))
+}
+
+/// What `output_path` named: a file to write, or an object to write into.
+enum OutputArg<'py> {
+    /// A `str` or `os.PathLike` path.
+    Path(String),
+    /// A binary file-like object -- `io.BytesIO`, a file opened `"wb"`, a web
+    /// framework's response body. Anything with a `write(bytes)` method.
+    Writer(Bound<'py, PyAny>),
+}
+
+impl<'py> OutputArg<'py> {
+    /// Classify `output_path`.
+    ///
+    /// A path is tried first, so a `str` subclass or a path-like object that
+    /// also happens to have a `write` method is still a path, as it always was.
+    /// A text-mode stream is refused here rather than at the end of the export,
+    /// where its `write()` would reject the bytes with a message naming neither
+    /// this library nor the argument.
+    fn from_py(value: &Bound<'py, PyAny>) -> PyResult<Self> {
+        if let Ok(path) = value.extract::<String>() {
+            return Ok(Self::Path(path));
+        }
+        if let Ok(pathlike) = value.call_method0("__fspath__") {
+            if let Ok(path) = pathlike.extract::<String>() {
+                return Ok(Self::Path(path));
+            }
+        }
+        if value.hasattr("write")? {
+            let text_io = value.py().import("io")?.getattr("TextIOBase")?;
+            if value.is_instance(&text_io)? {
+                return Err(errors::configuration_type(format!(
+                    "'output_path' is a text stream ({}); an .xlsx file is binary, so pass a \
+                     binary stream such as io.BytesIO() or a file opened with 'wb'",
+                    pytype_name(value)
+                )));
+            }
+            return Ok(Self::Writer(value.clone()));
+        }
+        Err(errors::configuration_type(format!(
+            "'output_path' must be str, a path-like object returning str (bytes paths are not \
+             supported), or a binary file-like object with a write() method, got {}",
+            pytype_name(value)
+        )))
+    }
+
+    /// The destination the save writes to. For a writer, the archive lands in
+    /// `buffer` and [`OutputArg::deliver`] passes it on.
+    fn destination<'a>(&'a self, buffer: &'a mut Vec<u8>) -> Destination<'a> {
+        match self {
+            Self::Path(path) => Destination::Path(path),
+            Self::Writer(_) => Destination::Memory(buffer),
+        }
+    }
+
+    /// Hand a finished in-memory archive to the writer. Nothing to do for a path.
+    ///
+    /// The object is written to and left open at its new position: it belongs to
+    /// the caller, who may be about to `seek(0)` or `getvalue()` it. A `write()`
+    /// that returns a count shorter than it was given -- allowed for raw,
+    /// unbuffered streams -- is called again with the rest. One that returns
+    /// `None` is taken as having accepted everything, which is what Django's
+    /// `HttpResponse.write` and similar response bodies do. An exception raised
+    /// by `write()` propagates unchanged.
+    fn deliver(&self, buffer: &[u8]) -> PyResult<()> {
+        let Self::Writer(writer) = self else {
+            return Ok(());
+        };
+        let mut offset = 0;
+        while offset < buffer.len() {
+            let chunk = PyBytes::new(writer.py(), &buffer[offset..]);
+            let returned = writer.call_method1("write", (chunk,))?;
+            let written = if returned.is_none() {
+                buffer.len() - offset
+            } else {
+                returned.extract::<usize>()?
+            };
+            if written == 0 {
+                return Err(errors::file(errors::FileFailure {
+                    message: format!(
+                        "Failed to write workbook to {}: write() accepted 0 of the remaining {} bytes",
+                        pytype_name(writer),
+                        buffer.len() - offset
+                    ),
+                    errno: None,
+                }));
+            }
+            offset += written.min(buffer.len() - offset);
+        }
+        Ok(())
+    }
 }
 
 /// Helper: cast a PyAny to PyDict or raise TypeError with a clear message.
@@ -227,7 +320,8 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
 ///
 /// Args:
 ///     input_path: Path to the input CSV file
-///     output_path: Path for the output XLSX file
+///     output_path: Path for the output XLSX file, or a binary file-like
+///         object (io.BytesIO, a file opened 'wb') to write the workbook into
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
 ///     parallel: Use multi-core parallel processing (default: False).
 ///               Faster for large files (100K+ rows) but uses more memory.
@@ -266,7 +360,7 @@ fn csv_to_xlsx(
     date_order: &str,
 ) -> PyResult<(u32, u16)> {
     let input_path = path_arg_to_string(input_path, "input_path")?;
-    let output_path = path_arg_to_string(output_path, "output_path")?;
+    let output = OutputArg::from_py(output_path)?;
     let sheet_name = sheet_name.to_string();
     let order = DateOrder::parse(date_order).ok_or_else(|| {
         errors::configuration(format!(
@@ -277,14 +371,17 @@ fn csv_to_xlsx(
 
     // No Python objects are touched below this point, so release the GIL for
     // the (potentially rayon-parallel) pure-Rust conversion work.
+    let mut buffer = Vec::new();
+    let destination = output.destination(&mut buffer);
     let result = py.detach(|| {
         if parallel {
-            convert_csv_to_xlsx_parallel(&input_path, &output_path, &sheet_name, order)
+            convert_csv_to_xlsx_parallel(&input_path, destination, &sheet_name, order)
         } else {
-            convert_csv_to_xlsx(&input_path, &output_path, &sheet_name, order)
+            convert_csv_to_xlsx(&input_path, destination, &sheet_name, order)
         }
-    });
-    Ok(result?)
+    })?;
+    output.deliver(&buffer)?;
+    Ok(result)
 }
 
 /// Convert a pandas or polars DataFrame to XLSX format.
@@ -294,7 +391,8 @@ fn csv_to_xlsx(
 ///
 /// Args:
 ///     df: pandas DataFrame or polars DataFrame to export
-///     output_path: Path for the output XLSX file
+///     output_path: Path for the output XLSX file, or a binary file-like
+///         object (io.BytesIO, a file opened 'wb') to write the workbook into
 ///     sheet_name: Name of the worksheet (default: "Sheet1")
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
@@ -478,7 +576,7 @@ fn df_to_xlsx<'py>(
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
-    let output_path = path_arg_to_string(output_path, "output_path")?;
+    let output = OutputArg::from_py(output_path)?;
     require_supported_dataframe(df, None)?;
     let row_heights = extract_row_heights_kwarg(row_heights)?;
     let opts = extract_options(&RawOptions {
@@ -541,16 +639,18 @@ fn df_to_xlsx<'py>(
         constant_memory,
     };
 
-    convert_dataframe_to_xlsx(
+    let mut buffer = Vec::new();
+    let result = convert_dataframe_to_xlsx(
         py,
         df,
-        &output_path,
+        output.destination(&mut buffer),
         sheet_name,
         &config,
         &opts,
         defined_names.as_ref(),
-    )
-    .map_err(PyErr::from)
+    )?;
+    output.deliver(&buffer)?;
+    Ok(result)
 }
 
 /// Get the version of the xlsxturbo library
@@ -574,7 +674,8 @@ fn version() -> &'static str {
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
 ///             comments, validations, rich_text, images, checkboxes, textboxes, charts,
 ///             sparklines, cells
-///     output_path: Path for the output XLSX file
+///     output_path: Path for the output XLSX file, or a binary file-like
+///         object (io.BytesIO, a file opened 'wb') to write the workbook into
 ///     header: Include column names as header row (default: True)
 ///     autofit: Automatically adjust column widths to fit content (default: False)
 ///              Combined with column_widths: explicit widths win for the columns
@@ -736,7 +837,7 @@ fn dfs_to_xlsx<'py>(
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
-    let output_path = path_arg_to_string(output_path, "output_path")?;
+    let output = OutputArg::from_py(output_path)?;
     if sheets.is_empty() {
         return Err(errors::configuration(
             "dfs_to_xlsx requires at least one sheet, got an empty list",
@@ -867,8 +968,14 @@ fn dfs_to_xlsx<'py>(
     // defined names and the detached save were written out twice until 1.3.x,
     // which is how the GIL release first shipped in a draft that covered only
     // one of them. See `convert::finish_workbook`.
-    finish_workbook(py, &mut workbook, defined_names.as_ref(), &output_path)
-        .map_err(PyErr::from)?;
+    let mut buffer = Vec::new();
+    finish_workbook(
+        py,
+        &mut workbook,
+        defined_names.as_ref(),
+        output.destination(&mut buffer),
+    )?;
+    output.deliver(&buffer)?;
 
     Ok(stats)
 }

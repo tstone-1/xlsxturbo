@@ -85,12 +85,17 @@ fn main() {
     let result = if args.parallel {
         xlsxturbo_core::convert_csv_to_xlsx_parallel(
             &args.input,
-            &args.output,
+            xlsxturbo_core::Destination::Path(&args.output),
             &args.sheet_name,
             date_order,
         )
     } else {
-        xlsxturbo_core::convert_csv_to_xlsx(&args.input, &args.output, &args.sheet_name, date_order)
+        xlsxturbo_core::convert_csv_to_xlsx(
+            &args.input,
+            xlsxturbo_core::Destination::Path(&args.output),
+            &args.sheet_name,
+            date_order,
+        )
     };
 
     match result {

@@ -14,7 +14,7 @@ use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
     WriteConfig,
 };
-use crate::workbook::{apply_defined_names, save_workbook};
+use crate::workbook::{apply_defined_names, save_to, Destination};
 use crate::write::{
     write_cell, write_py_value_with_format, CellFormat, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT,
 };
@@ -116,7 +116,7 @@ fn open_csv_reader(input_path: &str) -> Result<csv::Reader<File>, ConvertError> 
 /// `write_rows` returns the `(rows, columns)` it wrote.
 fn convert_csv(
     input_path: &str,
-    output_path: &str,
+    output: Destination<'_>,
     sheet_name: &str,
     write_rows: impl FnOnce(
         &mut Worksheet,
@@ -139,7 +139,7 @@ fn convert_csv(
 
     let counts = write_rows(worksheet, &mut csv_reader, &date_format, &datetime_format)?;
 
-    save_workbook(&mut workbook, output_path).map_err(ConvertError::File)?;
+    save_to(&mut workbook, output).map_err(ConvertError::File)?;
 
     Ok(counts)
 }
@@ -179,7 +179,7 @@ fn checked_csv_record(
 ///
 /// # Arguments
 /// * `input_path` - Path to the input CSV file
-/// * `output_path` - Path for the output XLSX file
+/// * `output` - Where the XLSX file goes
 /// * `sheet_name` - Name of the worksheet (default: "Sheet1")
 /// * `date_order` - Date parsing order for ambiguous dates (default: Auto)
 ///
@@ -188,13 +188,13 @@ fn checked_csv_record(
 /// * `Err(error)` - What went wrong, tagged as filesystem or not
 pub fn convert_csv_to_xlsx(
     input_path: &str,
-    output_path: &str,
+    output: Destination<'_>,
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), ConvertError> {
     convert_csv(
         input_path,
-        output_path,
+        output,
         sheet_name,
         |worksheet, csv_reader, date_format, datetime_format| {
             let mut row_count: u32 = 0;
@@ -255,13 +255,13 @@ const PARALLEL_CHUNK_ROWS: usize = 10_000;
 /// scales to CSVs larger than available RAM.
 pub fn convert_csv_to_xlsx_parallel(
     input_path: &str,
-    output_path: &str,
+    output: Destination<'_>,
     sheet_name: &str,
     date_order: DateOrder,
 ) -> Result<(u32, u16), ConvertError> {
     convert_csv(
         input_path,
-        output_path,
+        output,
         sheet_name,
         |worksheet, csv_reader, date_format, datetime_format| {
             let mut row_count: u32 = 0;
@@ -957,7 +957,7 @@ pub(crate) fn finish_workbook(
     py: Python<'_>,
     workbook: &mut Workbook,
     defined_names: Option<&HashMap<String, String>>,
-    output_path: &str,
+    output: Destination<'_>,
 ) -> Result<(), ConvertError> {
     apply_defined_names(workbook, defined_names).map_err(ConvertError::Config)?;
 
@@ -971,7 +971,7 @@ pub(crate) fn finish_workbook(
     // into owned Rust types by this point, so the archive write borrows nothing
     // from the interpreter. `tests/test_concurrency.py` pins both the speedup
     // (per entry point) and the correctness of concurrent saves.
-    py.detach(|| save_workbook(workbook, output_path))
+    py.detach(|| save_to(workbook, output))
         .map_err(ConvertError::File)?;
 
     Ok(())
@@ -981,7 +981,7 @@ pub(crate) fn finish_workbook(
 pub(crate) fn convert_dataframe_to_xlsx(
     py: Python<'_>,
     df: &Bound<'_, PyAny>,
-    output_path: &str,
+    output: Destination<'_>,
     sheet_name: &str,
     config: &WriteConfig<'_>,
     opts: &ExtractedOptions,
@@ -999,7 +999,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
     )
     .map_err(ConvertError::Config)?;
 
-    finish_workbook(py, &mut workbook, defined_names, output_path)?;
+    finish_workbook(py, &mut workbook, defined_names, output)?;
 
     Ok(result)
 }

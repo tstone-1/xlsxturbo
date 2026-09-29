@@ -71,7 +71,7 @@ REEXPORTS = _stub_reexports()
 # Names `types.py` imports for its own use, which `dir()` therefore reports as
 # public but `__all__` deliberately omits. Guarded below against naming an
 # import that no longer exists.
-TYPING_HELPERS = {"annotations", "date", "datetime", "Literal", "PathLike", "TypedDict"}
+TYPING_HELPERS = {"annotations", "date", "datetime", "Literal", "PathLike", "Protocol", "TypedDict"}
 
 
 class TestStubAndRuntimeAgree:
@@ -292,10 +292,12 @@ class TestRequiredFieldsAreTyped:
         """
         conditional = {"ChartSeriesOptions"}
         classified = set(REQUIRED_FIELDS) | FULLY_OPTIONAL | conditional
+        # TypedDicts only: `BinaryWriter` is a class too, but a Protocol for the
+        # output target, with no keys to classify.
         declared = {
             name
             for name in types_module.__all__
-            if isinstance(getattr(types_module, name), type)
+            if typing.is_typeddict(getattr(types_module, name))
         }
         assert declared == classified, (
             f"unclassified shape(s): {sorted(declared - classified)}; "

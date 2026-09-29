@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from os import PathLike
-from typing import Literal, TypedDict
+from typing import Literal, Protocol, TypedDict
 
 # The public surface, authoritative rather than descriptive: `from
 # xlsxturbo.types import *` gives exactly these names. Without it the four
@@ -42,6 +42,7 @@ from typing import Literal, TypedDict
 # helper would have needed another exclusion. That test now compares against
 # this list.
 __all__ = [
+    "BinaryWriter",
     "CellValueOptions",
     "ChartOptions",
     "ChartSeriesOptions",
@@ -53,6 +54,7 @@ __all__ = [
     "DateOrder",
     "HeaderFormat",
     "ImageOptions",
+    "OutputTarget",
     "PathArg",
     "RichTextFormat",
     "SheetOptions",
@@ -65,6 +67,21 @@ __all__ = [
 ]
 
 PathArg = str | PathLike[str]
+
+
+class BinaryWriter(Protocol):
+    """Anything the finished workbook can be written into.
+
+    ``io.BytesIO``, a file opened ``"wb"``, and web framework response bodies
+    all qualify. ``write`` may return a byte count or ``None``.
+    """
+
+    def write(self, data: bytes, /) -> object:
+        """Accept a chunk of the ``.xlsx`` archive."""
+        ...
+
+
+OutputTarget = PathArg | BinaryWriter
 
 DateOrder = Literal["auto", "mdy", "us", "dmy", "eu", "european"]
 ValidationType = Literal[

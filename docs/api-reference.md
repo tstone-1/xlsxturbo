@@ -22,7 +22,8 @@ Writes one pandas or polars DataFrame to one worksheet.
 
 - **`df`** — any object exposing a pandas- or polars-compatible interface. The type is
   detected at runtime; neither library is a dependency of xlsxturbo.
-- **`output_path`** — `str` or `os.PathLike`.
+- **`output_path`** — `str`, `os.PathLike`, or a binary file-like object such as
+  `io.BytesIO`. See [Writing to memory](dataframe-export.md#writing-to-memory-instead-of-a-file).
 - **returns** `tuple[int, int]` — the number of rows and columns written, the header
   row included when `header=True`.
 
@@ -36,7 +37,8 @@ Writes several DataFrames into one workbook, one sheet each.
   two-tuple form uses the top-level options; the three-tuple form overrides them for that
   sheet only. A `list` of the same shape is accepted wherever a tuple is shown; the tuple is
   the recommended form and the one the type stubs describe.
-- **`output_path`** — `str` or `os.PathLike`.
+- **`output_path`** — `str`, `os.PathLike`, or a binary file-like object such as
+  `io.BytesIO`. See [Writing to memory](dataframe-export.md#writing-to-memory-instead-of-a-file).
 - **returns** `list[tuple[int, int]]` — one `(rows, cols)` pair per sheet, in the order
   the sheets were given.
 
@@ -48,6 +50,8 @@ overridable per sheet; the capability matrix has the exact set. See
 
 Converts a CSV file to `.xlsx`, detecting each value's type from its text.
 
+- **`input_path`** — `str` or `os.PathLike`.
+- **`output_path`** — the same targets as `df_to_xlsx`.
 - **returns** `tuple[int, int]` — the number of rows and columns written.
 
 This is a much smaller surface than the DataFrame functions: it takes no formatting,
@@ -86,7 +90,8 @@ altogether). See [Charts and media](charts-and-media.md).
 
 The type definitions use only the standard library. Importing `xlsxturbo.types`
 also initialises the package, so the compiled extension must be installed. `SheetOptions` is the shape of a `dfs_to_xlsx`
-per-sheet dict, and `PathArg` is what the path parameters accept. `__all__` names the option
+per-sheet dict, `PathArg` is what `input_path` accepts, and `OutputTarget` (a `PathArg` or a
+`BinaryWriter`) is what `output_path` accepts. `__all__` names the option
 shapes and aliases and nothing else, so `import *` brings those in without the typing
 helpers they are built from.
 
