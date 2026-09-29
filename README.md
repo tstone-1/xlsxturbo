@@ -51,6 +51,10 @@ Types carry across without configuration: numbers stay numbers, booleans become 
 booleans, and dates and datetimes become real Excel date values with a display format
 attached. polars DataFrames work the same way — neither library is a dependency.
 
+Coming from `to_excel`, XlsxWriter, openpyxl or `polars.write_excel`? The
+[migration guide](https://tstone-1.github.io/xlsxturbo/migrating/) has side-by-side
+examples and every place the output differs.
+
 ## Convert a CSV
 
 ```python

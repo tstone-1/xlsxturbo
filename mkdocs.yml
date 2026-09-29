@@ -61,6 +61,7 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Guide:
+      - Migrating from pandas, XlsxWriter, openpyxl or polars: migrating.md
       - DataFrame export: dataframe-export.md
       - Multi-sheet workbooks: multi-sheet-workbooks.md
       - Excel tables: tables.md

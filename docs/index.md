@@ -62,6 +62,9 @@ tool.
 
 ## Where to go next
 
+- **[Migrating](migrating.md)** -- side-by-side examples for code that uses pandas
+  `to_excel`, XlsxWriter, openpyxl or `polars.write_excel`, and every place the output
+  differs.
 - **[Capability matrix](capability-matrix.md)** -- which options each function accepts,
   which can be overridden per sheet, and which survive `constant_memory` mode. Generated
   from the source, so it cannot drift.

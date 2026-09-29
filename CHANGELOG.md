@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs it. It converts a CSV file with the same options, output and exit codes as the
   Rust binary that source builds produce, which the wheel has never contained. The
   command's options and exit codes are covered by the stability promise.
+- A migration guide (`docs/migrating.md`) with side-by-side examples for pandas
+  `to_excel`, XlsxWriter, openpyxl and `polars.write_excel`, and a table of every
+  difference in output. Every example runs in the test suite, and each converted
+  workbook is compared with the original by cell value and, for the formatting
+  examples, by number format, header style, freeze pane and table style.
+
+### Fixed
+- The option-shape table in `docs/api-reference.md` said `column_widths`,
+  `column_formats` and `formula_columns` are all keyed by column index, name or
+  pattern. `column_widths` takes an index or `"_all"`, `column_formats` a name or
+  pattern, and `formula_columns` the name of the column it adds.
 
 ## [1.6.0] - 2026-09-24
 
