@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `benchmarks/benchmark.py --styled` runs an equivalent-output workload: every writer
+  produces the same Excel table, number formats and column widths, and each output is
+  checked for them as well as for its values. The default workload lets each library
+  write its own defaults, which differ in styling. Every report now names its workload.
+- The README shows writing to an `io.BytesIO`, and says that the finished file is held
+  in memory, including with `constant_memory=True`.
+
 ## [1.7.0] - 2026-09-29
 
 ### Added

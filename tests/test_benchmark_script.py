@@ -248,3 +248,112 @@ def test_memory_child_reports_a_number(bench: ModuleType) -> None:
     increase = bench.measure_peak_memory("xlsxturbo", 200, 5, "mixed")
     assert increase is not None
     assert increase >= 0
+
+
+@pytest.mark.parametrize("library", ["xlsxturbo", "pandas + openpyxl", "pandas + xlsxwriter", "polars"])
+@pytest.mark.parametrize("shape", ["mixed", "numeric", "strings"])
+def test_styled_writers_produce_the_same_report(
+    bench: ModuleType, tmp_path: Path, library: str, shape: str,
+) -> None:
+    """Every styled writer passes the value check and the styling check."""
+    frame = bench.generate_test_data(12, 8, shape=shape)
+    result = dict(bench.STYLED_BENCHMARK_FUNCS)[library](frame, str(tmp_path / "output.xlsx"), len(frame))
+    assert result.success, result.error
+
+
+@pytest.mark.parametrize("library", ["xlsxturbo", "pandas + openpyxl", "pandas + xlsxwriter", "polars"])
+def test_check_styling_refuses_default_output(bench: ModuleType, tmp_path: Path, library: str) -> None:
+    """The default writers' output fails the styling check, so the check can fail at all."""
+    frame = bench.generate_test_data(12, 8)
+    target = tmp_path / "output.xlsx"
+    assert dict(bench.BENCHMARK_FUNCS)[library](frame, str(target), len(frame)).success
+    with pytest.raises(RuntimeError):
+        bench.check_styling(str(target), frame)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"table_style": "Medium3"}, "TableStyleMedium2"),
+        ({"column_formats": {"float_2": {"num_format": "0.0"}}}, "C2 has number format"),
+        ({"column_widths": {0: 20}}, "column A has width"),
+    ],
+)
+def test_check_styling_refuses_each_difference(
+    bench: ModuleType, tmp_path: Path, change: dict[str, Any], message: str,
+) -> None:
+    """A wrong table style, number format or width is each refused on its own."""
+    frame = bench.generate_test_data(12, 8)
+    formats = {name: {"num_format": fmt} for name, fmt in bench.styled_formats(frame).items()}
+    options: dict[str, Any] = {
+        "table_style": "Medium2",
+        "column_formats": formats,
+        "column_widths": dict.fromkeys(range(8), 14),
+    }
+    target = tmp_path / "styled.xlsx"
+    xlsxturbo.df_to_xlsx(frame, str(target), **options)
+    bench.check_styling(str(target), frame)
+    for key, value in change.items():
+        options[key] = {**options[key], **value} if isinstance(value, dict) else value
+    xlsxturbo.df_to_xlsx(frame, str(target), **options)
+    with pytest.raises(RuntimeError, match=message):
+        bench.check_styling(str(target), frame)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="memory measurement needs resource")
+def test_memory_child_runs_the_styled_writer(
+    bench: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--styled reaches the fresh process, which must measure the styled writer."""
+    calls: list[str] = []
+    monkeypatch.setattr(bench, "STYLED_BENCHMARK_FUNCS", [("xlsxturbo", scripted_writer_with_kwargs(bench, calls))])
+    bench.run_memory_child("xlsxturbo", 3, 5, "mixed", True)
+    assert calls == ["styled"]
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
+def scripted_writer_with_kwargs(bench: ModuleType, calls: list[str]) -> Callable[..., Any]:
+    """A writer that records its call and accepts the memory child's keyword arguments.
+
+    Args:
+        bench: Imported benchmark module.
+        calls: Receives one entry per call.
+
+    Returns:
+        The writer.
+    """
+
+    def write(_frame: pd.DataFrame, _path: str, _rows: int, **_kwargs: object) -> Any:
+        """Record the call and succeed."""
+        calls.append("styled")
+        return bench.BenchmarkResult("xlsxturbo", 1.0, 1.0, 0.1, True)
+
+    return write
+
+
+def test_reports_name_the_workload(bench: ModuleType) -> None:
+    """A published table must say whether the writers produced the same output."""
+    summaries = {"xlsxturbo": bench.BenchmarkSummary("xlsxturbo", 1.0, 0.0, 1.0, 0.1, 1.0, [1.0], 1, [])}
+    info = {"platform": "x", "platform_release": "y", "python_version": "3", "cpu_count": 1, "packages": {}}
+    for styled in (False, True):
+        label = bench.workload_label(styled)
+        assert label in bench.format_markdown_output(summaries, 1, 1, 1, info, "mixed", styled)
+        assert label in bench.format_console_output(summaries, 1, 1, 1, info, "mixed", styled)
+        report = json.loads(bench.format_json_output(summaries, 1, 1, 1, info, "mixed", styled))
+        assert report["benchmark"]["styled"] is styled
+
+
+@pytest.mark.parametrize("styled", [False, True])
+def test_measure_peak_memory_passes_the_workload_on(
+    bench: ModuleType, monkeypatch: pytest.MonkeyPatch, styled: bool,
+) -> None:
+    """The child process gets --styled exactly when the parent was asked for it."""
+    seen: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> Any:
+        seen.append(command)
+        return type("Done", (), {"returncode": 0, "stdout": '{"ok": true, "error": null, "increase_mb": 1}'})()
+
+    monkeypatch.setattr(bench.subprocess, "run", fake_run)
+    assert bench.measure_peak_memory("xlsxturbo", 3, 5, "mixed", styled) == 1.0
+    assert ("--styled" in seen[0]) is styled

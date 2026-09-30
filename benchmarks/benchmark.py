@@ -15,6 +15,7 @@ Usage:
     python benchmarks/benchmark.py --rows 1000000 --cols 100  # Custom size
     python benchmarks/benchmark.py --shape strings   # numeric, strings or mixed data
     python benchmarks/benchmark.py --memory          # also measure peak memory
+    python benchmarks/benchmark.py --styled          # same table, formats, widths everywhere
 
 Every library writes the same DataFrame. Each output is compared with that frame
 after timing, so a library that silently writes less cannot look fast. Failed runs
@@ -412,6 +413,257 @@ BENCHMARK_FUNCS: list[tuple[str, Callable[..., BenchmarkResult]]] = [
 ]
 
 
+# The --styled workload: the same report from every writer. The default workload lets
+# each library write its defaults, which differ (polars adds a table and number
+# formats, the others write bare cells), so its ratios compare different outputs.
+# Here every writer produces an Excel table in STYLED_TABLE_STYLE, these number
+# formats by column type, and STYLED_COLUMN_WIDTH on every column, and
+# check_styling() refuses an output that does not.
+STYLED_TABLE_STYLE = "TableStyleMedium2"
+STYLED_COLUMN_WIDTH = 14
+STYLED_NUMBER_FORMATS = {"int": "#,##0", "float": "#,##0.00", "date": "yyyy-mm-dd"}
+
+
+def styled_formats(frame: pd.DataFrame) -> dict[str, str]:
+    """The number format each column of a generated frame gets in the styled workload.
+
+    Args:
+        frame: A frame from ``generate_test_data``; its column names start with the type.
+
+    Returns:
+        Column name to number format, for the columns that have one.
+    """
+    formats: dict[str, str] = {}
+    for name in frame.columns:
+        kind = str(name).split("_", 1)[0]
+        if kind in STYLED_NUMBER_FORMATS:
+            formats[str(name)] = STYLED_NUMBER_FORMATS[kind]
+    return formats
+
+
+def check_styling(filepath: str, frame: pd.DataFrame) -> None:
+    """Refuse a styled-workload output that lacks the table, a number format or a width.
+
+    Args:
+        filepath: The workbook.
+        frame: The generated benchmark frame.
+
+    Raises:
+        RuntimeError: When the table, its style, a column's number format or a width differs.
+    """
+    from openpyxl import load_workbook
+
+    rows, cols = frame.shape
+    with zipfile.ZipFile(filepath) as archive:
+        tables = [name for name in archive.namelist() if name.startswith("xl/tables/")]
+        if len(tables) != 1:
+            raise RuntimeError(f"expected one table part, found {tables}")
+        table = archive.read(tables[0]).decode("utf-8")
+    expected_ref = f'ref="A1:{column_letters(cols)}{rows + 1}"'
+    if expected_ref not in table or f'name="{STYLED_TABLE_STYLE}"' not in table:
+        raise RuntimeError(f"table does not cover {expected_ref} in {STYLED_TABLE_STYLE}")
+    widths = column_widths(filepath)
+    workbook = load_workbook(filepath, read_only=True)
+    try:
+        worksheet = workbook.worksheets[0]
+        formats = styled_formats(frame)
+        second_row = next(worksheet.iter_rows(min_row=2, max_row=2))
+        for col, name in enumerate(frame.columns, start=1):
+            letter = column_letters(col)
+            wanted = formats.get(str(name), "General")
+            found = second_row[col - 1].number_format
+            if found != wanted:
+                raise RuntimeError(f"{letter}2 has number format {found!r}, expected {wanted!r}")
+            width = widths.get(col)
+            # Writers store the width with or without Excel's character padding.
+            if width is None or not STYLED_COLUMN_WIDTH <= width < STYLED_COLUMN_WIDTH + 1:
+                raise RuntimeError(f"column {letter} has width {width}, expected {STYLED_COLUMN_WIDTH}")
+    finally:
+        workbook.close()
+
+
+def column_widths(filepath: str) -> dict[int, float]:
+    """The explicit width of every column the first worksheet sets, by 1-based index.
+
+    Read from the ``<col>`` elements directly: a writer may set several columns with one
+    ``min``/``max`` range, and openpyxl files such a range under its first column only.
+
+    Args:
+        filepath: The workbook.
+
+    Returns:
+        Column index to width.
+    """
+    with zipfile.ZipFile(filepath) as archive:
+        sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    cols_element = re.search(r"<cols>(.*?)</cols>", sheet, re.DOTALL)
+    widths: dict[int, float] = {}
+    for element in re.findall(r"<col\b[^>]*>", cols_element.group(1) if cols_element else ""):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', element))
+        if "width" in attrs:
+            for col in range(int(attrs["min"]), int(attrs["max"]) + 1):
+                widths[col] = float(attrs["width"])
+    return widths
+
+
+def _timed_styled(
+    library: str, write: Callable[[], None], output_path: str, frame: pd.DataFrame, *, verify_output: bool,
+) -> BenchmarkResult:
+    """Time one styled write and check its values and styling afterwards.
+
+    Args:
+        library: The row name in the report.
+        write: Writes ``frame`` to ``output_path``.
+        output_path: The workbook.
+        frame: The generated benchmark frame.
+        verify_output: False only for the memory run, whose readback would inflate the peak.
+
+    Returns:
+        The result; a failure carries its error instead of raising.
+    """
+    try:
+        start = time.perf_counter()
+        write()
+        elapsed = time.perf_counter() - start
+        if verify_output:
+            check_output(output_path, frame)
+            check_styling(output_path, frame)
+        return BenchmarkResult(
+            library=library,
+            time_seconds=elapsed,
+            rows_per_second=len(frame) / elapsed,
+            file_size_mb=get_file_size_mb(output_path),
+            success=True,
+        )
+    except Exception as e:
+        return BenchmarkResult(library, 0, 0, 0, success=False, error=str(e))
+
+
+def run_styled_xlsxturbo(
+    df_pd: pd.DataFrame, output_path: str, rows: int, *, verify_output: bool = True,
+) -> BenchmarkResult:
+    """Styled workload through xlsxturbo's keyword arguments."""
+    import xlsxturbo
+    from xlsxturbo.types import ColumnFormat
+
+    del rows
+    formats: dict[str, ColumnFormat] = {name: {"num_format": fmt} for name, fmt in styled_formats(df_pd).items()}
+    widths: dict[int | str, int | float] = dict.fromkeys(range(len(df_pd.columns)), STYLED_COLUMN_WIDTH)
+
+    def write() -> None:
+        xlsxturbo.df_to_xlsx(
+            df_pd, output_path,
+            table_style=STYLED_TABLE_STYLE.removeprefix("TableStyle"),
+            column_formats=formats or None,
+            column_widths=widths,
+        )
+
+    return _timed_styled("xlsxturbo", write, output_path, df_pd, verify_output=verify_output)
+
+
+def run_styled_pandas_xlsxwriter(
+    df_pd: pd.DataFrame, output_path: str, rows: int, *, verify_output: bool = True,
+) -> BenchmarkResult:
+    """Styled workload through pandas, then XlsxWriter's worksheet API for the table and columns."""
+    import pandas as pd
+
+    formats = styled_formats(df_pd)
+
+    def write() -> None:
+        with pd.ExcelWriter(output_path, engine="xlsxwriter", datetime_format=STYLED_NUMBER_FORMATS["date"]) as writer:
+            df_pd.to_excel(writer, index=False, sheet_name="Sheet1")
+            book = writer.book
+            sheet = writer.sheets["Sheet1"]
+            for col, name in enumerate(df_pd.columns):
+                fmt = formats.get(str(name))
+                # pandas already formats the date cells; a column format there is inert.
+                cell_format = book.add_format({"num_format": fmt}) if fmt and not str(name).startswith("date") else None
+                sheet.set_column(col, col, STYLED_COLUMN_WIDTH, cell_format)
+            sheet.add_table(0, 0, rows, len(df_pd.columns) - 1, {
+                "columns": [{"header": str(name)} for name in df_pd.columns],
+                "style": "Table Style Medium 2",
+            })
+
+    return _timed_styled("pandas + xlsxwriter", write, output_path, df_pd, verify_output=verify_output)
+
+
+def run_styled_pandas_openpyxl(
+    df_pd: pd.DataFrame, output_path: str, rows: int, *, verify_output: bool = True,
+) -> BenchmarkResult:
+    """Styled workload through pandas, then openpyxl, which formats cell by cell."""
+    import pandas as pd
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    formats = styled_formats(df_pd)
+    cols = len(df_pd.columns)
+
+    def write() -> None:
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            df_pd.to_excel(writer, index=False, sheet_name="Sheet1")
+            sheet = writer.sheets["Sheet1"]
+            for col, name in enumerate(df_pd.columns, start=1):
+                letter = column_letters(col)
+                sheet.column_dimensions[letter].width = STYLED_COLUMN_WIDTH
+                # Includes the date columns: this engine ignores datetime_format.
+                fmt = formats.get(str(name))
+                if fmt:
+                    for (cell,) in sheet.iter_rows(min_row=2, max_row=rows + 1, min_col=col, max_col=col):
+                        cell.number_format = fmt
+            table = Table(displayName="Table1", ref=f"A1:{column_letters(cols)}{rows + 1}")
+            table.tableStyleInfo = TableStyleInfo(name=STYLED_TABLE_STYLE, showRowStripes=True)
+            sheet.add_table(table)
+
+    return _timed_styled("pandas + openpyxl", write, output_path, df_pd, verify_output=verify_output)
+
+
+def run_styled_polars(
+    df_pd: pd.DataFrame,
+    output_path: str,
+    rows: int,
+    df_pl: object | None = None,
+    *,
+    verify_output: bool = True,
+) -> BenchmarkResult:
+    """Styled workload through ``polars.write_excel``."""
+    import polars as pl
+
+    del rows
+    frame = cast("pl.DataFrame", pl.from_pandas(df_pd) if df_pl is None else df_pl)
+    formats = styled_formats(df_pd)
+
+    def write() -> None:
+        frame.write_excel(
+            output_path,
+            table_style="Table Style Medium 2",
+            # A comprehension, not dict(): only a literal takes polars' invariant key type from context.
+            column_formats={name: fmt for name, fmt in formats.items()} or None,  # noqa: C416
+            # polars takes pixels; XlsxWriter maps 7 px per character plus 5 px padding.
+            column_widths=STYLED_COLUMN_WIDTH * 7 + 5,
+        )
+
+    return _timed_styled("polars", write, output_path, df_pd, verify_output=verify_output)
+
+
+STYLED_BENCHMARK_FUNCS: list[tuple[str, Callable[..., BenchmarkResult]]] = [
+    ("xlsxturbo", run_styled_xlsxturbo),
+    ("pandas + openpyxl", run_styled_pandas_openpyxl),
+    ("pandas + xlsxwriter", run_styled_pandas_xlsxwriter),
+    ("polars", run_styled_polars),
+]
+
+
+def writers(styled: bool) -> list[tuple[str, Callable[..., BenchmarkResult]]]:
+    """The compared writers for one workload.
+
+    Args:
+        styled: True for the equivalent-output report workload.
+
+    Returns:
+        Library name and writer, in report order.
+    """
+    return STYLED_BENCHMARK_FUNCS if styled else BENCHMARK_FUNCS
+
+
 def _max_rss_mb() -> float:
     """This process's peak resident memory so far, in MB.
 
@@ -424,7 +676,7 @@ def _max_rss_mb() -> float:
     return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
 
 
-def run_memory_child(library: str, rows: int, cols: int, shape: str) -> None:
+def run_memory_child(library: str, rows: int, cols: int, shape: str, styled: bool = False) -> None:
     """Measure one library's write in this (fresh) process and print the result as JSON.
 
     The frame is built first, and the peak resident memory at that point is the
@@ -437,8 +689,9 @@ def run_memory_child(library: str, rows: int, cols: int, shape: str) -> None:
         rows: Number of rows.
         cols: Number of columns.
         shape: A key of ``SHAPES``.
+        styled: Measure the styled workload's writer.
     """
-    func = dict(BENCHMARK_FUNCS)[library]
+    func = dict(writers(styled))[library]
     df_pd = generate_test_data(rows, cols, shape=shape)
     df_pl: object | None = None
     if library == "polars":
@@ -455,7 +708,7 @@ def run_memory_child(library: str, rows: int, cols: int, shape: str) -> None:
     print(json.dumps({"ok": result.success, "error": result.error, "increase_mb": _max_rss_mb() - baseline}))
 
 
-def measure_peak_memory(library: str, rows: int, cols: int, shape: str) -> float | None:
+def measure_peak_memory(library: str, rows: int, cols: int, shape: str, styled: bool = False) -> float | None:
     """Run one write in a fresh interpreter and return its peak memory increase in MB.
 
     A fresh process per library, because a peak only ever rises: measured in one
@@ -468,6 +721,7 @@ def measure_peak_memory(library: str, rows: int, cols: int, shape: str) -> float
         rows: Number of rows.
         cols: Number of columns.
         shape: A key of ``SHAPES``.
+        styled: Measure the styled workload's writer.
 
     Returns:
         The increase in MB, or None when the child failed.
@@ -484,6 +738,7 @@ def measure_peak_memory(library: str, rows: int, cols: int, shape: str) -> float
             str(cols),
             "--shape",
             shape,
+            *(["--styled"] if styled else []),
         ],
         capture_output=True,
         text=True,
@@ -510,6 +765,7 @@ def run_benchmarks(
     runs: int = 3,
     warmup: bool = True,
     verbose: bool = True,
+    styled: bool = False,
 ) -> dict[str, BenchmarkSummary]:
     """Run benchmarks for all libraries.
 
@@ -520,13 +776,15 @@ def run_benchmarks(
         runs: Number of benchmark runs per library
         warmup: Whether to do a warmup run (timing discarded, failures retained)
         verbose: Whether to print progress
+        styled: Run the equivalent-output report workload instead of each library's defaults
 
     Returns:
         Dictionary mapping library name to BenchmarkSummary
     """
+    funcs = writers(styled)
     temp_dir = Path(tempfile.mkdtemp(prefix="xlsxturbo_bench_"))
-    results: dict[str, list[BenchmarkResult]] = {name: [] for name, _ in BENCHMARK_FUNCS}
-    failures: dict[str, list[str]] = {name: [] for name, _ in BENCHMARK_FUNCS}
+    results: dict[str, list[BenchmarkResult]] = {name: [] for name, _ in funcs}
+    failures: dict[str, list[str]] = {name: [] for name, _ in funcs}
 
     # Pre-convert polars DataFrame once (outside timing)
     df_pl: object | None = None
@@ -540,7 +798,7 @@ def run_benchmarks(
     if warmup:
         if verbose:
             print("Warmup run...", flush=True)
-        for name, func in BENCHMARK_FUNCS:
+        for name, func in funcs:
             output_path = temp_dir / f"warmup_{name.replace(' ', '_')}.xlsx"
             if name == "polars":
                 result = func(df_pd, str(output_path), rows, df_pl=df_pl)
@@ -556,7 +814,7 @@ def run_benchmarks(
         if verbose:
             print(f"Run {run_num}/{runs}...", flush=True)
 
-        for name, func in BENCHMARK_FUNCS:
+        for name, func in funcs:
             output_path = temp_dir / f"run{run_num}_{name.replace(' ', '_')}.xlsx"
 
             gc.collect()
@@ -614,6 +872,7 @@ def format_console_output(
     runs: int,
     system_info: dict[str, object],
     shape: str = "mixed",
+    styled: bool = False,
 ) -> str:
     """Format results for console output."""
     import xlsxturbo
@@ -625,7 +884,7 @@ def format_console_output(
     lines.append(f"System: {system_info['platform']} {system_info['platform_release']}, "
                  f"Python {system_info['python_version']}, {system_info['cpu_count']} CPUs")
     lines.append("")
-    lines.append(f"Dataset: {rows:,} rows x {cols} columns ({shape})")
+    lines.append(f"Dataset: {rows:,} rows x {cols} columns ({shape}, {workload_label(styled)})")
     lines.append(f"Requested runs: {runs} (medians use successful runs; counts shown per library)")
     lines.append("")
 
@@ -666,6 +925,20 @@ def format_console_output(
     return "\n".join(lines)
 
 
+def workload_label(styled: bool) -> str:
+    """Name the workload in a report, so a table cannot be quoted without it.
+
+    Args:
+        styled: Whether the styled workload ran.
+
+    Returns:
+        A short description.
+    """
+    if styled:
+        return "styled: same table, number formats and column widths from every writer (`--styled`)"
+    return "defaults: each library's own default output, which differs in styling"
+
+
 def _measurement(value: float | None, spec: str) -> str:
     """Format a measured value, or a dash when no run succeeded.
 
@@ -698,6 +971,7 @@ def format_markdown_output(
     runs: int,
     system_info: dict[str, object],
     shape: str = "mixed",
+    styled: bool = False,
 ) -> str:
     """Format results as markdown table."""
     import xlsxturbo
@@ -709,6 +983,7 @@ def format_markdown_output(
                  f"Python {system_info['python_version']}, {system_info['cpu_count']} CPUs")
     lines.append(f"**xlsxturbo version:** {xlsxturbo.version()}")
     lines.append(f"**Dataset:** {rows:,} rows x {cols} columns, `{shape}` data (`--shape {shape}`)")
+    lines.append(f"**Workload:** {workload_label(styled)}")
     packages = cast("dict[str, str]", system_info["packages"])
     lines.append("**Packages:** " + ", ".join(f"{name} {ver}" for name, ver in packages.items()))
     lines.append(f"**Requested runs:** {runs} (medians use successful runs; counts shown per library)")
@@ -777,6 +1052,7 @@ def format_json_output(
     runs: int,
     system_info: dict[str, object],
     shape: str = "mixed",
+    styled: bool = False,
 ) -> str:
     """Format results as JSON for CI integration."""
     result = {
@@ -787,6 +1063,7 @@ def format_json_output(
             "runs": runs,
             "shape": shape,
             "column_cycle": list(SHAPES[shape]),
+            "styled": styled,
         },
         "results": [
             {
@@ -873,6 +1150,11 @@ def main() -> int:
         action="store_true",
         help="Also measure each library's peak memory, one fresh process per library (not on Windows)",
     )
+    parser.add_argument(
+        "--styled",
+        action="store_true",
+        help="Every writer produces the same Excel table, number formats and column widths",
+    )
     parser.add_argument("--memory-child", help=argparse.SUPPRESS)
     parser.add_argument(
         "--quiet",
@@ -893,7 +1175,7 @@ def main() -> int:
     if args.memory_child:
         if args.rows is None or args.cols is None:
             parser.error("--memory-child needs --rows and --cols")
-        run_memory_child(args.memory_child, args.rows, args.cols, args.shape)
+        run_memory_child(args.memory_child, args.rows, args.cols, args.shape, args.styled)
         return 0
     if args.memory and sys.platform == "win32":
         parser.error("--memory needs the resource module, which Windows does not have")
@@ -938,6 +1220,7 @@ def main() -> int:
             runs=args.runs,
             warmup=True,
             verbose=verbose,
+            styled=args.styled,
         )
 
         failed = failed or not summaries or any(s.errors or not s.all_times for s in summaries.values())
@@ -948,18 +1231,18 @@ def main() -> int:
             for name, summary in summaries.items():
                 if not summary.all_times:
                     continue
-                summary.peak_memory_mb = measure_peak_memory(name, rows, cols, args.shape)
+                summary.peak_memory_mb = measure_peak_memory(name, rows, cols, args.shape, args.styled)
                 if summary.peak_memory_mb is None:
                     summary.errors.append("memory run failed; see stderr for details")
                     failed = True
 
         # Format output
         if args.json:
-            output = format_json_output(summaries, rows, cols, args.runs, system_info, args.shape)
+            output = format_json_output(summaries, rows, cols, args.runs, system_info, args.shape, args.styled)
         elif args.markdown:
-            output = format_markdown_output(summaries, rows, cols, args.runs, system_info, args.shape)
+            output = format_markdown_output(summaries, rows, cols, args.runs, system_info, args.shape, args.styled)
         else:
-            output = format_console_output(summaries, rows, cols, args.runs, system_info, args.shape)
+            output = format_console_output(summaries, rows, cols, args.runs, system_info, args.shape, args.styled)
 
         all_outputs.append(output)
 

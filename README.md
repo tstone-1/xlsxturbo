@@ -73,6 +73,23 @@ xlsxturbo sales.csv sales.xlsx --date-order us
 
 See [CSV conversion](https://tstone-1.github.io/xlsxturbo/csv-conversion/).
 
+## Write to memory
+
+Every export function also writes to a binary file-like object, which is what a web
+download or an object-storage upload needs:
+
+```python
+import io
+
+buffer = io.BytesIO()
+df_to_xlsx(df, buffer, autofit=True)
+data = buffer.getvalue()  # the complete .xlsx file
+```
+
+The finished file is held in memory before it is written out, including with
+`constant_memory=True`. A FastAPI example and the full rules are under
+[Writing to memory](https://tstone-1.github.io/xlsxturbo/dataframe-export/#writing-to-memory-instead-of-a-file).
+
 ## What it can do
 
 - **DataFrame and CSV export** — pandas, polars, and CSV in, `.xlsx` out
