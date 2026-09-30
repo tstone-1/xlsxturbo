@@ -28,6 +28,36 @@ df_polars = pl.DataFrame({'x': [1, 2, 3], 'y': [4.0, 5.0, 6.0]})
 xlsxturbo.df_to_xlsx(df_polars, "polars_output.xlsx", sheet_name="Data")
 ```
 
+## Leaving rows above the data
+
+`startrow` is the zero-based row of the header, as in pandas' `to_excel`; the data starts
+on the row below it. The rows above are free for a title or notes:
+
+```python
+xlsxturbo.df_to_xlsx(
+    df,
+    "report.xlsx",
+    startrow=2,
+    table_style="Medium2",
+    merged_ranges=[("A1:D1", "Q3 report", {"bold": True, "font_size": 14})],
+    cells={"A2": "Revenue by region, in EUR"},
+)
+```
+
+- **Moves with the frame:** the header, the data, the Excel table, `freeze_panes` (the
+  rows above freeze too), `formula_columns` (their `{row}` is the real sheet row),
+  `conditional_formats` and `validations`.
+- **Stays where you put it:** every cell reference, in `cells`, `merged_ranges`,
+  `rich_text`, `hyperlinks`, `comments`, `images`, `charts` and `sparklines`, and the
+  row indexes in `row_heights`. A chart over the data therefore names the moved rows,
+  e.g. `Sheet1!$B$4:$B$10` for `startrow=2`.
+- **The returned row count** is the rows written, header included, without the offset.
+- A frame that does not fit below the offset (Excel has 1,048,576 rows) is refused
+  before anything is written. With `header=False` the first data row is `startrow`.
+
+In `dfs_to_xlsx`, `startrow` is a workbook default that each sheet can override in its
+options dict. It also works with `constant_memory=True`.
+
 ## Writing to memory instead of a file
 
 `output_path` also accepts a binary file-like object: `io.BytesIO`, a file opened with

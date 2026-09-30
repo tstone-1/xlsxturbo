@@ -463,6 +463,9 @@ NESTED_TYPE_PROBES: dict[str, dict[str, Any]] = {
     "charts": {"charts": {1: {"type": "bar"}}},
     "sparklines": {"sparklines": {1: {"range": "Sheet1!A1:B1"}}},
     "cells": {"cells": {1: "value"}},
+    # A scalar, but validated by `extract_startrow` rather than the binding, so
+    # a `bool` is refused rather than silently read as row 1.
+    "startrow": {"startrow": "2"},
 }
 
 

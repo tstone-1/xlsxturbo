@@ -603,6 +603,7 @@ pub(crate) struct SheetConfig {
     pub(crate) autofit: Option<bool>,
     pub(crate) table_style: Option<Option<String>>, // None = use default, Some(None) = explicitly no style
     pub(crate) freeze_panes: Option<bool>,
+    pub(crate) startrow: Option<u32>,
     pub(crate) column_widths: Option<HashMap<String, f64>>, // Keys: "0", "1", "_all" for global cap
     pub(crate) table_name: Option<String>,
     pub(crate) header_format: Option<HashMap<String, Py<PyAny>>>,
@@ -636,6 +637,8 @@ pub(crate) struct WriteConfig<'a> {
     pub(crate) autofit: bool,
     pub(crate) table_style: Option<&'a str>,
     pub(crate) freeze_panes: bool,
+    /// Zero-based sheet row of the header (or of the first data row without one).
+    pub(crate) startrow: u32,
     pub(crate) table_name: Option<&'a str>,
     pub(crate) row_heights: Option<&'a HashMap<u32, f64>>,
     pub(crate) constant_memory: bool,

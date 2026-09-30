@@ -175,6 +175,7 @@ def df_to_xlsx(
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: dict[str, SparklineOptions] | None = None,
+    startrow: int = 0,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
 
@@ -262,6 +263,13 @@ def df_to_xlsx(
             places a grouped sparkline, one per row of the data range. 'range' is required and
             must be sheet-qualified (e.g. 'Sheet1!A2:C10'), like a chart range.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
+        startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
+            data starts on the row below it (default: 0). The rows above stay free for
+            ``cells``, ``merged_ranges`` and ``rich_text``. Cell references in every
+            option stay absolute sheet positions, and so do ``row_heights`` keys. The
+            table, freeze panes, formula columns, conditional formats and validations
+            move with the frame. The returned row count does not include the offset.
+            Example: startrow=2 with cells={'A1': 'Q3 report'}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -312,6 +320,7 @@ def dfs_to_xlsx(
     defined_names: dict[str, str] | None = None,
     cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: dict[str, SparklineOptions] | None = None,
+    startrow: int = 0,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
 
@@ -380,6 +389,13 @@ def dfs_to_xlsx(
             Range key (e.g. 'D2:D10') makes a grouped sparkline; single cell makes one.
             'range' must be sheet-qualified, e.g. 'Sheet1!A2:C10'.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
+        startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
+            data starts on the row below it (default: 0). The rows above stay free for
+            ``cells``, ``merged_ranges`` and ``rich_text``. Cell references in every
+            option stay absolute sheet positions, and so do ``row_heights`` keys. The
+            table, freeze panes, formula columns, conditional formats and validations
+            move with the frame. The returned row count does not include the offset.
+            Example: startrow=2 with cells={'A1': 'Q3 report'}
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

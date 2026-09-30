@@ -148,6 +148,9 @@ class ExportOptions:
     charts: dict[str, ChartOptions] | None = _UNSET
     sparklines: dict[str, SparklineOptions] | None = _UNSET
 
+    # Placement
+    startrow: int = _UNSET
+
     # Workbook-level: accepted by the entry points, not by a per-sheet dict.
     constant_memory: bool = _UNSET
     defined_names: dict[str, str] | None = _UNSET

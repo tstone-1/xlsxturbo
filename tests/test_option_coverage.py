@@ -95,6 +95,13 @@ def _check_freeze_panes(path: str, _factory: PathFactory) -> None:
     assert ws.freeze_panes == "A2"
 
 
+def _check_startrow(path: str, _factory: PathFactory) -> None:
+    """startrow=2 must put the header on row 3 and leave rows 1-2 empty."""
+    assert xlsxturbo.df_to_xlsx(_base_df(), path, startrow=2) == (4, 2)
+    ws = active_ws(load_workbook(path))
+    assert [ws["A1"].value, ws["A2"].value, ws["A3"].value, ws["A4"].value] == [None, None, "Name", "Alice"]
+
+
 def _check_constant_memory(path: str, _factory: PathFactory) -> None:
     """constant_memory=True must emit a RuntimeWarning naming a skipped feature."""
     with pytest.warns(RuntimeWarning, match="constant_memory=True disables these features"):
@@ -259,6 +266,7 @@ COVERAGE: dict[str, Callable[[str, PathFactory], None]] = {
     "table_style": _check_table_style,
     "table_name": _check_table_name,
     "freeze_panes": _check_freeze_panes,
+    "startrow": _check_startrow,
     "constant_memory": _check_constant_memory,
     "column_widths": _check_column_widths,
     "row_heights": _check_row_heights,

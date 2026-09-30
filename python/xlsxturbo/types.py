@@ -487,6 +487,7 @@ class SheetOptions(TypedDict, total=False):
     autofit: bool
     table_style: str | None
     freeze_panes: bool
+    startrow: int  # Zero-based sheet row of the header; rows above stay free
     column_widths: dict[int | str, int | float] | None  # Keys: int index or '_all'
     row_heights: dict[int, int | float] | None
     table_name: str | None

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `startrow` in `df_to_xlsx` and `dfs_to_xlsx` (also per sheet): the zero-based row of
+  the header, as in pandas' `to_excel`, leaving the rows above free for a title or notes
+  written with `cells`, `merged_ranges` or `rich_text`. The table, freeze panes, formula
+  columns, conditional formats and validations move with the frame; cell references and
+  `row_heights` stay absolute. Works with `constant_memory=True`. A frame that does not
+  fit below the offset is refused before anything is written. The migration guide has a
+  `to_excel(startrow=...)` example.
 - `benchmarks/benchmark.py --styled` runs an equivalent-output workload: every writer
   produces the same Excel table, number formats and column widths, and each output is
   checked for them as well as for its values. The default workload lets each library

@@ -40,6 +40,7 @@ drift from the implementation -- see `scripts/gen_capability_matrix.py`.
 | `defined_names` | yes | yes | -- | -- | applies |
 | `cells` | yes | yes | -- | yes | skipped |
 | `sparklines` | yes | yes | -- | yes | skipped |
+| `startrow` | yes | yes | -- | yes | applies |
 | `parallel` | -- | -- | yes | -- | applies |
 | `date_order` | -- | -- | yes | -- | applies |
 
@@ -55,5 +56,5 @@ DataFrame and use `df_to_xlsx`.
 else needs to revisit a cell after the fact, which streaming output cannot do. A new
 option defaults to skipped, so this list only grows deliberately.
 
-Of the 27 options, 22 can be overridden per sheet in `dfs_to_xlsx`. The rest are
+Of the 28 options, 23 can be overridden per sheet in `dfs_to_xlsx`. The rest are
 workbook-wide.

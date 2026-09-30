@@ -193,6 +193,14 @@ fn extract_row_heights_kwarg(
         .transpose()
 }
 
+/// Extract the `startrow` keyword argument; `None` means row 0.
+fn extract_startrow_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<u32> {
+    match value {
+        Some(v) if !v.is_none() => extract::extract_startrow(v, "startrow"),
+        _ => Ok(0),
+    }
+}
+
 /// Helper: cast a PyAny to PyList or raise TypeError with a clear message.
 fn require_list<'py>(
     value: &Bound<'py, PyAny>,
@@ -492,6 +500,12 @@ fn csv_to_xlsx(
 ///                 negative_points, show_axis, color and the *_point colors, line_weight,
 ///                 custom_max, custom_min, group_max, group_min, date_range.
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
+///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
+///               starts on the row below it (default: 0). The rows above stay free for
+///               cells, merged_ranges and rich_text. Cell references in every option stay
+///               absolute sheet positions, and so do row_heights keys. The table, freeze
+///               panes, formula columns, conditional formats and validations move with
+///               the frame. The returned row count does not include the offset.
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -555,6 +569,7 @@ fn csv_to_xlsx(
     defined_names = None,
     cells = None,
     sparklines = None,
+    startrow = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
@@ -586,9 +601,11 @@ fn df_to_xlsx<'py>(
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
+    startrow: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let output = OutputArg::from_py(output_path)?;
     require_supported_dataframe(df, None)?;
+    let startrow = extract_startrow_kwarg(startrow)?;
     let row_heights = extract_row_heights_kwarg(row_heights)?;
     let opts = extract_options(&RawOptions {
         column_widths,
@@ -645,6 +662,7 @@ fn df_to_xlsx<'py>(
         autofit,
         table_style,
         freeze_panes,
+        startrow,
         table_name: table_name.as_deref(),
         row_heights: row_heights.as_ref(),
         constant_memory,
@@ -684,7 +702,7 @@ fn version() -> &'static str {
 ///             column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
 ///             comments, validations, rich_text, images, checkboxes, textboxes, charts,
-///             sparklines, cells
+///             sparklines, cells, startrow
 ///     output_path: Path for the output XLSX file, or a binary file-like
 ///         object (io.BytesIO, a file opened 'wb') to write the workbook into
 ///     header: Include column names as header row (default: True)
@@ -753,6 +771,12 @@ fn version() -> &'static str {
 ///                 Range key (e.g. "D2:D10") makes a grouped sparkline; single cell makes one.
 ///                 "range" must be sheet-qualified, e.g. "Sheet1!A2:C10".
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
+///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
+///               starts on the row below it (default: 0). The rows above stay free for
+///               cells, merged_ranges and rich_text. Cell references in every option stay
+///               absolute sheet positions, and so do row_heights keys. The table, freeze
+///               panes, formula columns, conditional formats and validations move with
+///               the frame. The returned row count does not include the offset.
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -817,6 +841,7 @@ fn version() -> &'static str {
     defined_names = None,
     cells = None,
     sparklines = None,
+    startrow = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
@@ -847,6 +872,7 @@ fn dfs_to_xlsx<'py>(
     defined_names: Option<HashMap<String, String>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
+    startrow: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let output = OutputArg::from_py(output_path)?;
     if sheets.is_empty() {
@@ -855,6 +881,7 @@ fn dfs_to_xlsx<'py>(
         ));
     }
     let row_heights = extract_row_heights_kwarg(row_heights)?;
+    let startrow = extract_startrow_kwarg(startrow)?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
     let mut table_names: HashMap<String, ClaimedTableName> = HashMap::new();
@@ -954,6 +981,7 @@ fn dfs_to_xlsx<'py>(
             autofit: effective_autofit,
             table_style: effective_table_style.as_deref(),
             freeze_panes: effective_freeze_panes,
+            startrow: sheet_config.startrow.unwrap_or(startrow),
             table_name: effective_table_name.as_deref(),
             row_heights: effective_row_heights,
             constant_memory,

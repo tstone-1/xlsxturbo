@@ -38,6 +38,7 @@ SAMPLE_VALUES: dict[str, Any] = {
     "header": True,
     "autofit": True,
     "freeze_panes": True,
+    "startrow": 2,
     "column_widths": {0: 30},
     "row_heights": {0: 22},
     "table_style": "Medium9",
@@ -243,7 +244,8 @@ class TestEquivalence:
         """
         out = tmp_path / "full.xlsx"
         xlsxturbo.df_to_xlsx(_frame(), out, **ExportOptions(**SAMPLE_VALUES).as_kwargs())
-        assert active_ws(load_workbook(out))["A1"].value == "Name"
+        header_cell = f"A{SAMPLE_VALUES['startrow'] + 1}"
+        assert active_ws(load_workbook(out))[header_cell].value == "Name"
 
 
 class TestBundleSemantics:

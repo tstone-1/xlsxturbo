@@ -247,6 +247,9 @@ pub fn convert_csv_to_xlsx(
 /// peak memory stays bounded regardless of total file size.
 const PARALLEL_CHUNK_ROWS: usize = 10_000;
 
+/// Rows in an Excel worksheet (1,048,576).
+const EXCEL_MAX_ROWS: u64 = 1_048_576;
+
 /// Convert a CSV file to XLSX format using parallel processing.
 ///
 /// Reads the CSV in chunks of `PARALLEL_CHUNK_ROWS` rows, parses each chunk in
@@ -505,7 +508,7 @@ pub(crate) fn write_sheet_data(
         None
     };
 
-    let mut row_idx: u32 = 0;
+    let mut row_idx: u32 = config.startrow;
 
     // Get column names
     let is_polars = is_polars_dataframe(df)?;
@@ -528,6 +531,25 @@ pub(crate) fn write_sheet_data(
     let track_widths = config.autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all"));
     let mut max_lens = vec![0usize; columns.len()];
 
+    // Refuse a frame that would run off the bottom of the grid below `startrow`
+    // before writing any of it, with a message that names the offset.
+    let row_count: usize = dataframe_row_count(df)?;
+    let rows_needed = row_count as u64 + u64::from(config.include_header);
+    if u64::from(config.startrow) + rows_needed > EXCEL_MAX_ROWS {
+        return Err(format!(
+            "startrow={} leaves room for {} rows, but the frame needs {} ({} data rows{})",
+            config.startrow,
+            EXCEL_MAX_ROWS - u64::from(config.startrow),
+            rows_needed,
+            row_count,
+            if config.include_header {
+                " plus the header"
+            } else {
+                ""
+            }
+        ));
+    }
+
     // Write header if requested
     if config.include_header {
         for (col_idx, col_name) in columns.iter().enumerate() {
@@ -546,11 +568,8 @@ pub(crate) fn write_sheet_data(
                     .map_err(|e| format!("Failed to write header '{}': {}", col_name, e))?;
             }
         }
-        row_idx = 1;
+        row_idx = config.startrow + 1; // cannot overflow: bounded by the check above
     }
-
-    // Get row count
-    let row_count: usize = dataframe_row_count(df)?;
 
     let rows = if is_polars {
         df.call_method0("iter_rows")
@@ -648,7 +667,8 @@ pub(crate) fn write_sheet_data(
         &content_widths,
     )?;
 
-    Ok((row_idx, total_col_count))
+    // Rows written, not the last row index: the offset is not part of the frame.
+    Ok((row_idx - config.startrow, total_col_count))
 }
 
 pub(crate) fn write_configured_sheet(
@@ -782,12 +802,12 @@ fn apply_worksheet_features(
             let last_col = col_count.saturating_sub(1);
 
             worksheet
-                .add_table(0, 0, last_row, last_col, &table)
+                .add_table(config.startrow, 0, last_row, last_col, &table)
                 .map_err(|e| format!("Failed to add table: {}", e))?;
         }
     }
 
-    let data_row_start = if config.include_header { 1u32 } else { 0u32 };
+    let data_row_start = config.startrow + u32::from(config.include_header);
     let data_row_end = last_row_idx.saturating_sub(1);
     let has_data_rows = row_count > 0 && data_row_end >= data_row_start;
 
@@ -799,9 +819,9 @@ fn apply_worksheet_features(
                 worksheet,
                 formulas,
                 col_count,
+                config.include_header.then_some(config.startrow),
                 data_row_start,
                 data_row_end,
-                config.include_header,
                 header_fmt,
             )?;
             total_col_count = col_count
@@ -827,7 +847,7 @@ fn apply_worksheet_features(
     // Freeze panes (freeze header row)
     if config.freeze_panes && config.include_header {
         worksheet
-            .set_freeze_panes(1, 0)
+            .set_freeze_panes(config.startrow + 1, 0)
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
     }
 

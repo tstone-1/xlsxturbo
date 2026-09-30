@@ -15,9 +15,9 @@ Check these first. If an export depends on one, keep it on its current writer.
 - **Reading or editing an existing workbook.** xlsxturbo only writes new files:
   `openpyxl.load_workbook(...)`, `pd.ExcelWriter(..., mode="a")` and template-filling have
   no equivalent. See [Compatibility](compatibility.md).
-- **Placing a frame at an offset**, with `startrow` / `startcol`, or several frames on one
-  sheet. Each DataFrame fills its own sheet from cell `A1`. Single values can go anywhere
-  with [`cells`](cells.md).
+- **A column offset or several frames on one sheet**: `startcol`, or two `to_excel` calls
+  into one sheet. Each DataFrame fills its own sheet from column `A`. A row offset,
+  `startrow`, does migrate: see [a title above the data](#a-title-above-the-data).
 - **Formats other than `.xlsx`**: no `.xls`, no macro-enabled `.xlsm`.
 
 ## The data these examples use
@@ -78,6 +78,26 @@ xlsxturbo.dfs_to_xlsx(
 
 `reset_index(names="")` turns the index into an ordinary column with an empty header,
 which is what `to_excel` writes for an unnamed index.
+
+### A title above the data
+
+```python
+# Before
+with pd.ExcelWriter("before_title.xlsx", engine="xlsxwriter") as writer:
+    sales.to_excel(writer, sheet_name="Sales", index=False, startrow=2)
+    writer.sheets["Sales"].write("A1", "September sales")
+```
+
+```python
+# After
+xlsxturbo.df_to_xlsx(
+    sales, "after_title.xlsx", sheet_name="Sales", startrow=2, cells={"A1": "September sales"}
+)
+```
+
+`startrow` means the same in both: the zero-based row of the header. Cell references in
+every other option stay absolute, so the title goes in `cells`, `merged_ranges` or
+`rich_text` at the rows left free.
 
 ### The differences to check
 

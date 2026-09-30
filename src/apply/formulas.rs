@@ -9,9 +9,9 @@ pub(crate) fn apply_formula_columns(
     worksheet: &mut Worksheet,
     formula_columns: &IndexMap<String, String>,
     start_col: u16,
+    header_row: Option<u32>,
     data_start_row: u32,
     data_end_row: u32,
-    include_header: bool,
     header_format: Option<&Format>,
 ) -> Result<u16, String> {
     let mut col_offset = 0u16;
@@ -22,10 +22,10 @@ pub(crate) fn apply_formula_columns(
             .ok_or("Formula column index exceeds u16 limit")?;
 
         // Write header for formula column (only when headers are enabled)
-        if include_header {
+        if let Some(header_row) = header_row {
             if let Some(fmt) = header_format {
                 worksheet
-                    .write_string_with_format(0, col_idx, col_name, fmt)
+                    .write_string_with_format(header_row, col_idx, col_name, fmt)
                     .map_err(|e| {
                         format!(
                             "formula_columns['{}']: failed to write the column header: {}",
@@ -33,12 +33,14 @@ pub(crate) fn apply_formula_columns(
                         )
                     })?;
             } else {
-                worksheet.write_string(0, col_idx, col_name).map_err(|e| {
-                    format!(
-                        "formula_columns['{}']: failed to write the column header: {}",
-                        col_name, e
-                    )
-                })?;
+                worksheet
+                    .write_string(header_row, col_idx, col_name)
+                    .map_err(|e| {
+                        format!(
+                            "formula_columns['{}']: failed to write the column header: {}",
+                            col_name, e
+                        )
+                    })?;
             }
         }
 

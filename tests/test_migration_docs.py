@@ -31,7 +31,7 @@ PAGE = REPO_ROOT / "docs" / "migrating.md"
 
 # The pairs the page is written to contain. Listed rather than discovered, so an
 # example that silently stops writing its file is a failure, not a smaller loop.
-EXPECTED_PAIRS = {"plain", "sheets", "index", "formatted", "polars", "openpyxl"}
+EXPECTED_PAIRS = {"plain", "sheets", "title", "index", "formatted", "polars", "openpyxl"}
 
 
 def python_blocks(text: str) -> list[str]:

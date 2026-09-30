@@ -15,6 +15,7 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "autofit",
     "table_style",
     "freeze_panes",
+    "startrow",
     "column_widths",
     "row_heights",
     "table_name",
@@ -294,6 +295,14 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_scalar!(opts, config, "autofit", autofit, "a bool");
         extract_scalar!(opts, config, "freeze_panes", freeze_panes, "a bool");
         extract_scalar!(opts, config, "table_name", table_name, "a string");
+        match opts.get_item("startrow") {
+            Ok(val) if !val.is_none() => {
+                config.startrow = Some(extract_startrow(&val, "sheet option 'startrow'")?);
+            }
+            Ok(_) => {}
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>(opts.py()) => {}
+            Err(e) => return Err(e),
+        }
 
         // table_style needs special handling: None means "explicitly no style".
         // Lookup failures are split the same way `extract_scalar!` splits them.
@@ -401,6 +410,36 @@ const MAX_COLUMN_INDEX: i64 = 16_383;
 
 /// Excel's maximum row index (zero-based; the grid holds 1,048,576 rows).
 const MAX_ROW_INDEX: i64 = 1_048_575;
+
+/// Extract `startrow`: an integer sheet row, never a `bool`, within Excel's grid.
+///
+/// `bool` is refused for the reason `row_heights` keys are: it subclasses `int`,
+/// so `startrow=True` would otherwise place the frame one row down. Whether the
+/// frame itself still fits below the offset is checked when it is written,
+/// where the row count is known.
+pub(crate) fn extract_startrow(value: &Bound<'_, PyAny>, context: &str) -> PyResult<u32> {
+    let wrong_type = || {
+        crate::errors::configuration_type(format!(
+            "{} must be a non-negative integer, got {}",
+            context,
+            pytype_name(value)
+        ))
+    };
+    if value.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(wrong_type());
+    }
+    let Ok(row) = value.extract::<i64>() else {
+        return Err(wrong_type());
+    };
+    if !(0..=MAX_ROW_INDEX).contains(&row) {
+        return Err(crate::errors::configuration(format!(
+            "{} must be between 0 and {}, got {}",
+            context, MAX_ROW_INDEX, row
+        )));
+    }
+    // Safe: bounded by 0..=MAX_ROW_INDEX just above.
+    Ok(row as u32)
+}
 
 /// Extract a `column_widths` or `row_heights` value: a real number, never a
 /// `bool`, and finite and non-negative.
