@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   produces the same Excel table, number formats and column widths, and each output is
   checked for them as well as for its values. The default workload lets each library
   write its own defaults, which differ in styling. Every report now names its workload.
+- `docs/performance.md` publishes styled and default results with peak memory, all
+  measured under the cell-by-cell output check. The README quotes the styled ratios
+  (3.6x / 6x / 8.6x) and no longer calls the ratios stable across systems.
 - The README shows writing to an `io.BytesIO`, and says that the finished file is held
   in memory, including with `constant_memory=True`.
 
