@@ -12,7 +12,9 @@
 
 - Only commit and push when explicitly asked by the user.
 - Do not include Claude-related or AI-generated footers in commit messages.
-- Before commit or push, run `cargo update` to check for Rust dependency updates — **and
+- Before commit or push, run `cargo update` to check for Rust dependency updates, and confirm
+  with `git diff --stat -- Cargo.lock` that the lockfile changed whenever cargo printed
+  `Updating` lines (on 2026-09-30 `cargo update` printed 55 updates and exited 0 three times in a row without writing the lockfile) — **and
   regenerate `THIRD-PARTY-LICENSES.md` afterwards** (`python scripts/gen_third_party_licenses.py --write`).
   The notice lists a version beside every crate, so a lock refresh makes it stale; the 1.3.0
   release commit refreshed the lock and shipped a notice naming the previous version of five

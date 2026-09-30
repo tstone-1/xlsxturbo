@@ -164,6 +164,7 @@ Pre-Push Checklist gates once the release changes are complete.
 ```bash
 uv lock                                   # uv.lock pins this project's own version
 cargo update                              # refresh Cargo.lock, including the root version
+git diff --stat -- Cargo.lock             # must list the lockfile; cargo's output is not proof
 uv run --no-sync python scripts/gen_third_party_licenses.py --write
 uv run --no-sync maturin develop --release # rebuild the extension after the version bump
 .venv/bin/python -m pytest tests/ -q        # Windows: .venv\Scripts\python.exe
