@@ -8,8 +8,8 @@ older one.
 
 | Version | Supported |
 |---------|-----------|
-| 1.9.x   | Yes -- the current line |
-| 1.1.x - 1.8.x | No -- any Python that runs 1.1 through 1.8 also runs 1.9; upgrade |
+| 1.10.x  | Yes -- the current line |
+| 1.1.x - 1.9.x | No -- any Python that runs 1.1 through 1.9 also runs 1.10; upgrade |
 | 1.0.x   | Security fixes only, while it remains the newest release installable on a supported Python |
 | < 1.0   | No -- upgrade |
 
