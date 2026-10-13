@@ -37,7 +37,12 @@ pytestmark = pytest.mark.skipif(
 
 TESTS_DIR = REPO_ROOT / "tests"
 REQUIREMENTS = REPO_ROOT / "requirements-test.txt"
-PANDAS2_REQUIREMENTS = REPO_ROOT / "requirements-test-pandas2.txt"
+# Dependencies whose declared range spans two majors, mapped to the layered file
+# that holds one CI leg to the older major and the single override it declares.
+OLDER_MAJOR_LEGS = {
+    "pandas": (REPO_ROOT / "requirements-test-pandas2.txt", "pandas<3"),
+    "polars": (REPO_ROOT / "requirements-test-polars1.txt", "polars<2"),
+}
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -241,7 +246,25 @@ class TestWorkflowMaturinFloorsMatchTheBuildBackend:
         )
 
 
-class TestBothPandasMajorsAreExercised:
+def _bounded_ranges() -> dict[str, tuple[int, int]]:
+    """Package -> (floor major, ceiling major) for each `name>=X...,<Y` requirement.
+
+    Requirements with no ceiling (`numpy`, `pyarrow`) are not in the result: an
+    open range names no second major to hold a leg to.
+    """
+    text = REQUIREMENTS.read_text(encoding="utf-8")
+    found = {
+        name.lower(): (int(floor), int(ceiling))
+        for name, floor, ceiling in re.findall(
+            r"^([A-Za-z0-9_.-]+)>=(\d+)[^,\n]*,<(\d+)", text, re.MULTILINE
+        )
+    }
+    # A parser that matches nothing would make every range look single-major.
+    assert len(found) >= 5, f"only parsed {len(found)} bounded requirements: {sorted(found)}"
+    return found
+
+
+class TestBothMajorsOfATwoMajorRangeAreExercised:
     """A declared range is only supported at the end that CI actually runs.
 
     `requirements-test.txt` allows `pandas>=2.3.3,<4`, and pip resolves to the
@@ -256,66 +279,73 @@ class TestBothPandasMajorsAreExercised:
     behaves the same on both" is a claim that deserves a job rather than an
     assumption. Both majors pass today; this keeps that measurable.
 
-    Scoped to pandas deliberately: it is the only dependency here whose declared
-    range currently spans two majors. A second one would need its own leg, and
-    nothing in this file would notice -- said out loud because a guard that reads
-    as general when it is specific is worse than one that admits its scope.
+    polars joined when Python 3.15 was added to the matrix: polars 1.44.2, the
+    last 1.x, cannot build a datetime column on 3.15, so the 3.15 leg needs
+    polars 2 and the range became `>=1.44.2,<3`.
+
+    This class was scoped to pandas until then, and said that a second
+    two-major dependency would go unnoticed.
+    `test_every_two_major_range_has_a_leg` is what notices now.
     """
 
-    def test_the_layered_file_constrains_only_pandas(self) -> None:
-        """The pandas-2 file overrides one ceiling and re-uses every other floor.
+    def test_every_two_major_range_has_a_leg(self) -> None:
+        """The table above names exactly the requirements that span two majors.
+
+        Both directions. A widened ceiling with no entry is a major declared
+        and never run. An entry whose range narrowed back to one major is a
+        file and a CI leg that are redundant and should go, with the entry,
+        rather than linger as a second way of testing the only major left.
+        """
+        spanning = {
+            name for name, (floor, ceiling) in _bounded_ranges().items() if ceiling - floor > 1
+        }
+        assert spanning == set(OLDER_MAJOR_LEGS), (
+            f"requirements-test.txt spans two majors for {sorted(spanning)}, but "
+            f"OLDER_MAJOR_LEGS has legs for {sorted(OLDER_MAJOR_LEGS)}. Add a layered "
+            f"requirements file and a CI leg for a new one; remove both for one that "
+            f"narrowed back to a single major."
+        )
+
+    @pytest.mark.parametrize("package", sorted(OLDER_MAJOR_LEGS))
+    def test_the_layered_file_constrains_only_its_package(self, package: str) -> None:
+        """The older-major file overrides one ceiling and re-uses every other floor.
 
         Layering is what keeps the floors single-sourced. A file that restated
-        the dependency list would be the fourth copy of it, which is the drift
+        the dependency list would be another copy of it, which is the drift
         this module exists to prevent.
         """
+        path, override = OLDER_MAJOR_LEGS[package]
         lines = [
             line.strip()
-            for line in PANDAS2_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+            for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ]
         assert lines[0] == "-r requirements-test.txt", (
-            f"{PANDAS2_REQUIREMENTS.name} must layer requirements-test.txt, not restate it; "
+            f"{path.name} must layer requirements-test.txt, not restate it; "
             f"its first directive is {lines[0]!r}"
         )
         overrides = lines[1:]
-        assert overrides == ["pandas<3"], (
-            f"{PANDAS2_REQUIREMENTS.name} should override the pandas ceiling and nothing "
+        assert overrides == [override], (
+            f"{path.name} should override the {package} ceiling and nothing "
             f"else, but declares {overrides}"
         )
 
-    def test_a_workflow_actually_installs_it(self) -> None:
+    @pytest.mark.parametrize("package", sorted(OLDER_MAJOR_LEGS))
+    def test_a_workflow_actually_installs_it(self, package: str) -> None:
         """The leg exists in CI, not merely the file.
 
         The silent failure this guards: deleting the matrix `include` entry
         leaves the file in the tree, looking like coverage that no longer runs.
         """
+        path, _ = OLDER_MAJOR_LEGS[package]
         installed_by = [
             workflow.name
             for workflow in sorted(WORKFLOWS.glob("*.yml"))
-            if PANDAS2_REQUIREMENTS.name in workflow.read_text(encoding="utf-8")
+            if path.name in workflow.read_text(encoding="utf-8")
         ]
         assert installed_by, (
-            f"{PANDAS2_REQUIREMENTS.name} is not referenced by any workflow, so pandas 2 is "
-            f"declared supported in requirements-test.txt and never run"
-        )
-
-    def test_the_declared_range_still_spans_two_majors(self) -> None:
-        """The leg's reason still holds.
-
-        The other direction, and the one that expires: if the pandas ceiling is
-        ever lowered back to `<3`, this file and its CI leg are redundant and
-        should go rather than linger as a second way of testing the only major
-        that is left.
-        """
-        text = REQUIREMENTS.read_text(encoding="utf-8")
-        match = re.search(r"^pandas>=(\d+)[^,]*,<(\d+)", text, re.MULTILINE)
-        assert match, "could not read a bounded pandas requirement from requirements-test.txt"
-        floor_major, ceiling_major = int(match.group(1)), int(match.group(2))
-        assert ceiling_major - floor_major > 1, (
-            f"requirements-test.txt now allows only pandas {floor_major}.x, so "
-            f"{PANDAS2_REQUIREMENTS.name} and its CI leg are redundant -- remove both, and "
-            f"this test with them"
+            f"{path.name} is not referenced by any workflow, so the older {package} major "
+            f"is declared supported in requirements-test.txt and never run"
         )
 
 

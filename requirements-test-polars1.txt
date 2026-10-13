@@ -1,0 +1,20 @@
+# The same test dependencies, held to polars 1.x.
+#
+# `requirements-test.txt` allows `polars>=1.44.2,<3`, so a plain install always
+# resolves to the newest -- polars 2 today. This file is the other end of that
+# range, installed by one leg of the `python-test` matrix in
+# .github/workflows/ci.yml, for the reason requirements-test-pandas2.txt gives.
+#
+# It layers rather than duplicates: every floor stays single-sourced in
+# requirements-test.txt, and only the polars ceiling is overridden here.
+#
+# The leg runs on Python 3.12 and cannot move to 3.15: polars 1.44.2, the last
+# 1.x release, cannot build a datetime column there (`pl.Series([datetime(...)])`
+# raises AttributeError, measured on Windows with 3.15.0; the same call works on
+# 3.14 and with polars 2.0.0 on 3.15). That is why the range was widened to
+# polars 2 in the change that added the 3.15 leg.
+#
+# `tests/test_ci_config.py` fails if this file stops layering the main one or
+# stops being referenced by a workflow.
+-r requirements-test.txt
+polars<2

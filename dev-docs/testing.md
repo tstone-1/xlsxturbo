@@ -8,9 +8,16 @@ Moved verbatim from the repository-root `AGENTS.md`, which keeps a one-line inde
   the main file (`-r requirements-test.txt`) and overrides only the pandas ceiling — never
   restates the list, which would be a fifth copy of it. `tests/test_ci_config.py` fails if
   that file stops layering, gains a package, stops being referenced by a workflow, or outlives
-  its reason (the pandas range narrowing back to one major). Scoped to pandas because it is
-  the only dependency whose range currently spans two majors; a second one needs its own leg
-  and nothing will notice on its own.
+  its reason (the pandas range narrowing back to one major). It was scoped to pandas while
+  that was the only dependency whose range spanned two majors, with the note that a second
+  one would need its own leg and nothing would notice on its own.
+
+  polars became the second on 2026-10-13 (`polars>=1.44.2,<3`, leg file
+  `requirements-test-polars1.txt`), and the guard now notices: `OLDER_MAJOR_LEGS` in
+  `tests/test_ci_config.py` maps each two-major dependency to its layered file, and
+  `test_every_two_major_range_has_a_leg` compares that table with the bounded ranges in
+  `requirements-test.txt` in both directions. It reads only requirements that have a
+  ceiling, so `numpy` and `pyarrow`, which have none, are outside it.
 
   How the gap was found is the transferable part: the local `.venv` had pandas 3 while
   `requirements-test.txt` said `<3`, so **local runs and CI had not been testing the same

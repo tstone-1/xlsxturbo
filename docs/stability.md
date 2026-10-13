@@ -102,7 +102,7 @@ warnings.simplefilter("error", DeprecationWarning)
 
 One `abi3` wheel per platform covers every supported version, so support here is structural
 rather than per-version: the wheel built against Python 3.10's stable ABI is the same file a
-3.14 interpreter loads.
+3.15 interpreter loads.
 
 | Python | Supported | Run in CI |
 |--------|-----------|-----------|
@@ -110,12 +110,19 @@ rather than per-version: the wheel built against Python 3.10's stable ABI is the
 | 3.11 | yes | no |
 | 3.12 | yes | yes |
 | 3.13 | yes | no |
-| 3.14 | yes | yes |
+| 3.14 | yes | no |
+| 3.15 | yes | yes |
 
 The versions marked "no" are not untested by oversight — they run the identical wheel through
 the identical `abi3` interface, so CI covers the oldest, a middle, and the newest, and the
 gaps carry no independent risk. What CI would catch on 3.11 that 3.10 and 3.12 do not is
 essentially nothing.
+
+**On Python 3.15, use polars 2.0 or newer.** polars 1.44.2, the last 1.x release, cannot
+build a datetime column on 3.15: `pl.Series([datetime(2024, 1, 15)])` raises
+`AttributeError` before xlsxturbo is called, while the same line works on 3.14 and with
+polars 2.0.0 on 3.15. pandas 3 has no such limit. CI runs polars 2 on 3.10, 3.12 and 3.15,
+and polars 1 on 3.12.
 
 **The table is about the ordinary builds. There is no wheel for a free-threaded
 interpreter.** An `abi3` wheel cannot serve a `Py_GIL_DISABLED` build, so on `python3.13t`,

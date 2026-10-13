@@ -121,6 +121,22 @@ Two things that decide the work when a new CPython ships:
   was unmeasurable. polars and openpyxl did ship 3.15 wheels, which is what made the
   functional pass and the 24 pandas-free repo tests possible at all. Expect this gap every
   year: the library is ready for a new CPython months before its test dependencies are.
+- **For 3.15 the leg was gated on polars as well, and an `abi3` wheel that installs says
+  nothing about that.** Measured 2026-10-13 on 3.15.0 final (released 2026-10-09), Windows
+  x86_64: pandas 3.0.6, pyarrow 26.0.0 and numpy 2.5.4 all had `cp315` wheels, and polars
+  1.44.2 installed from its `abi3` wheel. The suite then stopped at collection, because
+  `pl.Series([datetime(2024, 1, 15, 10, 30)])` raises
+  `AttributeError: 'NoneType' object has no attribute '_s'` in
+  `polars/_utils/construction/series.py`. int, str, float, bool, date, time and timedelta
+  columns build; only datetime fails. The controls: the same polars 1.44.2 on 3.14 builds
+  it, and polars 2.0.0 on 3.15 builds it. 1.44.2 is the last 1.x release, so a 3.15 leg
+  needs polars 2. With polars 2.0.0 the suite run from outside the checkout against the
+  published 1.8.0 wheel gave 1041 passed, 169 skipped on both 3.15.0 and 3.14.7, with no
+  test changed. Not checked on Linux or macOS. For the next CPython, run a per-dtype probe
+  of each frame library before reading "the wheel installed" as "the library works".
+- **The 3.15 leg replaced the 3.14 leg**, which keeps CI on the oldest, a middle and the
+  newest version, as the stability page says. `.python-version` still pins 3.14 for local
+  development, so 3.14 is run on every developer machine.
 
 ### Output is deterministic except for one part, and the obvious measurement says otherwise
 
