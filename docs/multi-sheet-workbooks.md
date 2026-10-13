@@ -2,6 +2,8 @@
 
 `dfs_to_xlsx` writes several DataFrames into one workbook, one sheet each. Options
 given at the top level apply to every sheet; options given per sheet override them.
+Two entries can also share a sheet: see
+[Several frames on one sheet](#several-frames-on-one-sheet).
 
 ## Multi-Sheet Workbooks
 
@@ -102,3 +104,45 @@ xlsxturbo.dfs_to_xlsx([
 
 As a keyword argument, `tab_color` colours every sheet. A per-sheet value overrides it,
 and a per-sheet `None` removes it for that sheet.
+
+## Several frames on one sheet
+
+Entries that name the same sheet each write their frame to it, at their own `startrow`.
+Use it for small tables that belong together, such as key figures with a breakdown below.
+
+```python
+summary = pd.DataFrame({"Item": ["rows checked", "rows flagged"], "Value": ["120", "7"]})
+reasons = pd.DataFrame({"Reason": ["missing", "outdated"], "Count": [4, 3]})
+
+xlsxturbo.dfs_to_xlsx([
+    (summary, "Summary"),
+    (reasons, "Summary", {"startrow": len(summary) + 3}),
+], "report.xlsx")
+```
+
+Every frame starts in column A. The call returns one `(rows, columns)` per entry, as it
+does with one frame per sheet. Sheet names are compared without regard to case, as Excel
+compares them, and the sheet keeps the spelling of its first entry.
+
+**Frames may not overlap.** Two frames that share a row raise `FrameOverlapError`, a
+`WorkbookValidationError`, before anything is written, naming both entries and their rows. Two entries for one sheet
+without a `startrow` both start in row 1, so they overlap.
+
+Which entry an option belongs to depends on what the option describes:
+
+| The option describes | Options | Rule |
+|---|---|---|
+| The frame | `header`, `table_style`, `table_name`, `autofilter`, `startrow`, `header_format`, `column_formats`, `conditional_formats`, `formula_columns`, `validations` | Each entry has its own. A keyword argument is the default for every frame |
+| The whole sheet | `autofit`, `freeze_panes`, `tab_color`, `column_widths`, `row_heights` | The first entry for the sheet sets them. A later entry that sets one raises `ConfigurationError` |
+| A cell reference | `cells`, `merged_ranges`, `hyperlinks`, `comments`, `rich_text`, `images`, `checkboxes`, `textboxes`, `charts`, `sparklines` | Each entry applies what its own options dict gives. A keyword argument is applied once per sheet |
+
+- `autofit` fits each column to the longest content of all frames on the sheet.
+  `freeze_panes=True` freezes below the header of the first entry.
+- A sheet holds one plain filter, so `autofilter=True` on two frames of a sheet raises
+  `ConfigurationError`. Give each frame a `table_style` if both need filter buttons: a
+  table has its own.
+- The cell-addressed options are applied after every frame is written, so a `cells`
+  entry can overwrite a value of any frame on the sheet.
+- With `constant_memory=True` rows are written once and in order. List the frames of a
+  sheet from top to bottom; any other order raises `ConfigurationError`. In normal mode
+  the order in the list is free.

@@ -3,7 +3,7 @@
 Nothing previously forced a sheet option to have a real effect on the written
 file -- an option can be accepted by validation, extracted into a typed Rust
 struct, and then silently dropped if its ``apply_*`` call is missing from
-``apply_worksheet_features`` in ``src/convert.rs``. This module writes a
+the feature steps in ``src/convert.rs``. This module writes a
 minimal workbook per option and asserts an observable artifact in the
 produced ``.xlsx`` (via openpyxl or a raw zip/XML read-back), so a future
 change that wires an option through extraction/validation but forgets to
@@ -324,7 +324,7 @@ def test_coverage_map_is_complete() -> None:
     `test_api_surface.py` uses) rather than trusting a hand-maintained list,
     so a new option added to the signature without a matching coverage
     function fails this test immediately -- it can no longer be silently
-    accepted, extracted, and dropped before reaching `apply_worksheet_features`.
+    accepted, extracted, and dropped before reaching the feature steps in `convert.rs`.
     """
     params = set(inspect.signature(xlsxturbo.df_to_xlsx).parameters.keys())
     sheet_options = params - NON_SHEET_PARAMS

@@ -25,7 +25,8 @@ pub use types::DateOrder;
 pub use workbook::Destination;
 
 use convert::{
-    claimed_table_name, convert_dataframe_to_xlsx, finish_workbook, write_configured_sheet,
+    add_named_worksheet, apply_cell_options, claimed_table_name, convert_dataframe_to_xlsx,
+    dataframe_row_count, finish_sheet, finish_workbook, write_frame, FrameOutcome,
 };
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
@@ -37,7 +38,11 @@ use extract::{
 use types::pytype_name;
 use types::ExtractedOptions;
 use types::WriteConfig;
-use workbook::{reject_table_name_collisions, ClaimedTableName};
+use types::{EffectiveOpts, FreezePanes, SheetConfig};
+use workbook::{
+    reject_frames_out_of_order, reject_overlapping_frames, reject_table_name_collisions,
+    ClaimedTableName, FrameSpan,
+};
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -354,6 +359,150 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
             .map(|v| require_dict(v, "cells").and_then(|d| extract_cells(&d)))
             .transpose()?,
     })
+}
+
+/// One `dfs_to_xlsx` entry with its options resolved against the workbook-wide
+/// keywords, held until every entry has been checked.
+///
+/// Several entries may name one sheet. `first` is the entry that created the
+/// sheet, which is the one that decides the options describing the whole sheet.
+struct SheetEntry<'py> {
+    df: Bound<'py, PyAny>,
+    /// The name as this entry spells it. The sheet carries the first entry's
+    /// spelling; Excel compares sheet names without regard to case.
+    name: String,
+    config: SheetConfig,
+    header: bool,
+    autofit: bool,
+    table_style: Option<String>,
+    freeze_panes: FreezePanes,
+    autofilter: bool,
+    tab_color: Option<u32>,
+    startrow: u32,
+    table_name: Option<String>,
+    /// Index of the first entry for the same sheet; its own index for that entry.
+    first: usize,
+}
+
+impl SheetEntry<'_> {
+    /// The scalar write configuration of this entry.
+    ///
+    /// The fields that describe the whole sheet (`autofit`, `freeze_panes`,
+    /// `tab_color`, `row_heights`) are read by `finish_sheet`, which is called
+    /// with the first entry's configuration only. On a later entry they are the
+    /// workbook-wide defaults and nothing applies them.
+    fn write_config<'a>(
+        &'a self,
+        row_heights: Option<&'a HashMap<u32, f64>>,
+        constant_memory: bool,
+    ) -> WriteConfig<'a> {
+        WriteConfig {
+            include_header: self.header,
+            autofit: self.autofit,
+            table_style: self.table_style.as_deref(),
+            freeze_panes: self.freeze_panes,
+            autofilter: self.autofilter,
+            tab_color: self.tab_color,
+            startrow: self.startrow,
+            table_name: self.table_name.as_deref(),
+            row_heights,
+            constant_memory,
+        }
+    }
+}
+
+/// Refuse an option that describes the whole sheet on a second or later entry
+/// for that sheet.
+///
+/// The first entry decides those. Taking the last one instead would be silent
+/// and would depend on the order of the list; refusing by name is neither.
+fn reject_whole_sheet_options(
+    config: &SheetConfig,
+    index: usize,
+    sheet_name: &str,
+    first: usize,
+) -> PyResult<()> {
+    let set = [
+        ("autofit", config.autofit.is_some()),
+        ("freeze_panes", config.freeze_panes.is_some()),
+        ("tab_color", config.tab_color.is_some()),
+        ("column_widths", config.column_widths.is_some()),
+        ("row_heights", config.row_heights.is_some()),
+    ];
+    match set.iter().find(|(_, present)| *present) {
+        Some((option, _)) => Err(errors::configuration(format!(
+            "sheets[{}] ('{}'): '{}' describes the whole sheet, and sheets[{}] is the first \
+             entry for this sheet. Set it there.",
+            index, sheet_name, option, first
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Check the layout of every sheet that holds more than one frame, before a
+/// cell is written: the frames may not overlap, at most one may carry the
+/// plain-range autofilter, and under `constant_memory` they are listed from top
+/// to bottom.
+fn check_frame_layout(entries: &[SheetEntry<'_>], constant_memory: bool) -> PyResult<()> {
+    for (first, lead) in entries.iter().enumerate() {
+        if lead.first != first {
+            continue;
+        }
+        let members: Vec<usize> = (first..entries.len())
+            .filter(|&index| entries[index].first == first)
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+
+        let filtered: Vec<usize> = members
+            .iter()
+            .copied()
+            .filter(|&index| entries[index].autofilter)
+            .collect();
+        if let [one, two, ..] = filtered[..] {
+            return Err(errors::configuration(format!(
+                "sheet '{}': sheets[{}] and sheets[{}] both have autofilter=True, and a sheet \
+                 holds one filter. Set 'autofilter': False on one of them, or give each frame \
+                 a table_style: a table has its own filter.",
+                lead.name, one, two
+            )));
+        }
+
+        let mut spans = Vec::with_capacity(members.len());
+        for &index in &members {
+            let entry = &entries[index];
+            let rows = dataframe_row_count(&entry.df)
+                .map_err(|e| errors::input_data(format!("sheet '{}': {}", entry.name, e)))?;
+            let start = u64::from(entry.startrow);
+            spans.push(FrameSpan {
+                entry: index,
+                start,
+                end: start + rows as u64 + u64::from(entry.header),
+            });
+        }
+        reject_overlapping_frames(&lead.name, &spans).map_err(errors::frame_overlap)?;
+        if constant_memory {
+            reject_frames_out_of_order(&lead.name, &spans).map_err(errors::configuration)?;
+        }
+    }
+    Ok(())
+}
+
+/// The column extent of a sheet over every frame written to it: the widest
+/// frame, and per column the widest estimated content.
+fn sheet_extent(frames: &[&FrameOutcome]) -> (u16, Vec<f64>) {
+    let col_count = frames.iter().map(|f| f.col_count).max().unwrap_or(0);
+    let mut widths: Vec<f64> = Vec::new();
+    for frame in frames {
+        for (column, &width) in frame.content_widths.iter().enumerate() {
+            match widths.get_mut(column) {
+                Some(widest) => *widest = widest.max(width),
+                None => widths.push(width),
+            }
+        }
+    }
+    (col_count, widths)
 }
 
 /// Convert a CSV file to XLSX format with automatic type detection.
@@ -750,6 +899,10 @@ fn version() -> &'static str {
 ///     sheets: List of tuples. Each tuple can be:
 ///             - (DataFrame, sheet_name) - uses global defaults
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
+///             Several tuples may name the same sheet: each writes its frame at
+///             its own startrow. The frames may not overlap, and the first tuple
+///             for a sheet sets autofit, freeze_panes, tab_color, column_widths
+///             and row_heights.
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
 ///             autofilter, tab_color, column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
@@ -983,28 +1136,48 @@ fn dfs_to_xlsx<'py>(
     // using the generated name. See `claimed_table_name` for the measurement.
     let mut next_table_id: u32 = 1;
 
+    // First pass: resolve every entry and check all of them, so that nothing
+    // below can fail on how the entries relate to each other once rows are
+    // being written.
+    let mut entries: Vec<SheetEntry<'py>> = Vec::with_capacity(sheets.len());
+    let mut first_by_name: HashMap<String, usize> = HashMap::new();
+
     for (index, sheet_tuple) in sheets.into_iter().enumerate() {
         let (df, sheet_name, sheet_config) = extract_sheet_info(&sheet_tuple, index)?;
         require_supported_dataframe(&df, Some(&sheet_name))?;
 
+        // Several entries may name one sheet: each writes a frame to it. The
+        // fold is the writer's own, which compares sheet names with
+        // `to_lowercase` -- 'Summary' and 'summary' are one sheet to Excel.
+        let first = *first_by_name
+            .entry(sheet_name.to_lowercase())
+            .or_insert(index);
+        let is_first = first == index;
+        if !is_first {
+            reject_whole_sheet_options(&sheet_config, index, &sheet_name, first)?;
+        }
+
         // Merge per-sheet scalar options with global defaults
         let effective_header = sheet_config.header.unwrap_or(header);
-        let effective_autofit = sheet_config.autofit.unwrap_or(autofit);
+        // A later frame needs the sheet's autofit only to know whether to
+        // estimate its widths for the capped fit.
+        let effective_autofit = if is_first {
+            sheet_config.autofit.unwrap_or(autofit)
+        } else {
+            entries[first].autofit
+        };
         let effective_table_style: Option<String> = match &sheet_config.table_style {
             Some(style_opt) => style_opt.clone(),
             None => table_style.map(|s| s.to_string()),
         };
-        let effective_freeze_panes = sheet_config.freeze_panes.unwrap_or(freeze_panes);
         let effective_table_name: Option<String> = sheet_config
             .table_name
             .as_ref()
             .cloned()
             .or_else(|| table_name.clone());
-        let effective_row_heights: Option<&HashMap<u32, f64>> =
-            sheet_config.row_heights.as_ref().or(row_heights.as_ref());
 
         // A table is only actually created when there's at least one data row
-        // and one column (see the gate in `apply_worksheet_features`), so an
+        // and one column (see the gate in `apply_frame_features`), so an
         // empty DataFrame never claims a table name here either — otherwise
         // two empty sheets sharing a table name would false-positive as a
         // conflict.
@@ -1045,33 +1218,95 @@ fn dfs_to_xlsx<'py>(
             }
         }
 
-        // Merge per-sheet complex options with global defaults (references, no cloning needed)
-        let effective_opts = sheet_config.merge_with(&opts);
-
-        let sheet_config_write = WriteConfig {
-            include_header: effective_header,
+        entries.push(SheetEntry {
+            df,
+            header: effective_header,
             autofit: effective_autofit,
-            table_style: effective_table_style.as_deref(),
-            freeze_panes: effective_freeze_panes,
+            table_style: effective_table_style,
+            freeze_panes: sheet_config.freeze_panes.unwrap_or(freeze_panes),
             autofilter: sheet_config.autofilter.unwrap_or(autofilter),
             tab_color: sheet_config.tab_color.unwrap_or(tab_color),
             startrow: sheet_config.startrow.unwrap_or(startrow),
-            table_name: effective_table_name.as_deref(),
-            row_heights: effective_row_heights,
-            constant_memory,
+            table_name: effective_table_name,
+            name: sheet_name,
+            config: sheet_config,
+            first,
+        });
+    }
+
+    check_frame_layout(&entries, constant_memory)?;
+
+    // Merge per-sheet complex options with global defaults (references, no
+    // cloning needed). A second or later frame on a sheet keeps the frame-bound
+    // ones and only its own cell-addressed ones: see `for_later_frame`.
+    let mut effective: Vec<EffectiveOpts<'_>> = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let merged = entry.config.merge_with(&opts);
+        effective.push(if entry.first == index {
+            merged
+        } else {
+            let sheet_column_widths = effective[entry.first].column_widths;
+            merged.for_later_frame(&entry.config, sheet_column_widths)
+        });
+    }
+    let write_config = |index: usize| {
+        let entry = &entries[index];
+        let sheet_row_heights = entry.config.row_heights.as_ref().or(row_heights.as_ref());
+        entry.write_config(sheet_row_heights, constant_memory)
+    };
+    let last_on_sheet = |index: usize| {
+        let first = entries[index].first;
+        !entries[index + 1..]
+            .iter()
+            .any(|later| later.first == first)
+    };
+
+    // Second pass: write the frames in list order, and finish a sheet as soon
+    // as its last frame is on it.
+    let mut frames: Vec<FrameOutcome> = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let in_sheet = |e: String| errors::configuration(format!("sheet '{}': {}", entry.name, e));
+        // The sheet carries the first entry's spelling of its name.
+        let sheet = entries[entry.first].name.as_str();
+        let config = write_config(index);
+
+        let worksheet = if entry.first == index {
+            add_named_worksheet(&mut workbook, sheet, constant_memory).map_err(in_sheet)?
+        } else {
+            workbook
+                .worksheet_from_name(sheet)
+                .map_err(|e| in_sheet(e.to_string()))?
         };
+        let frame = write_frame(py, worksheet, sheet, &entry.df, &config, &effective[index])
+            .map_err(in_sheet)?;
+        stats.push((frame.rows, frame.total_cols));
+        frames.push(frame);
 
-        let result = write_configured_sheet(
-            py,
-            &mut workbook,
-            &df,
-            &sheet_name,
-            &sheet_config_write,
-            effective_opts,
-        )
-        .map_err(|e| errors::configuration(format!("sheet '{}': {}", sheet_name, e)))?;
+        if last_on_sheet(index) {
+            let members: Vec<usize> = (entry.first..=index)
+                .filter(|&member| entries[member].first == entry.first)
+                .collect();
+            let on_sheet: Vec<&FrameOutcome> = members.iter().map(|&m| &frames[m]).collect();
+            let (col_count, content_widths) = sheet_extent(&on_sheet);
 
-        stats.push(result);
+            // The whole-sheet options are the first entry's.
+            finish_sheet(
+                worksheet,
+                &write_config(entry.first),
+                &effective[entry.first],
+                col_count,
+                &content_widths,
+            )
+            .map_err(in_sheet)?;
+            // The cell-addressed options come last, entry by entry, so that
+            // `cells` can overwrite the data of any frame on the sheet.
+            for &member in &members {
+                apply_cell_options(py, worksheet, &write_config(member), &effective[member])
+                    .map_err(|e| {
+                        errors::configuration(format!("sheet '{}': {}", entries[member].name, e))
+                    })?;
+            }
+        }
     }
 
     reject_table_name_collisions(&table_names, defined_names.as_ref())

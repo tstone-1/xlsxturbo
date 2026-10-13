@@ -151,7 +151,7 @@ class TestColumnWidthCap:
     def test_explicit_width_smaller_than_autofit_wins(self, tmp_xlsx: str) -> None:
         """An explicit width narrower than the autofit width is kept, not enlarged.
 
-        Pins the apply order in `apply_worksheet_features` (convert.rs):
+        Pins the apply order in `finish_sheet` (convert.rs):
         `worksheet.autofit()` runs first and the explicit `column_widths` are
         applied on top. rust_xlsxwriter lets an autofit width override a user
         width when the autofit width is greater, so applying autofit *after*

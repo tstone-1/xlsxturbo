@@ -50,3 +50,6 @@ xlsxturbo.dfs_to_xlsx([
 Plain `column_widths`, `header_format`, and `column_formats` remain supported. So do
 `freeze_panes`, `autofilter`, `tab_color` and `startrow`, which are properties of the sheet
 and need no second pass over the rows.
+
+[Several frames on one sheet](multi-sheet-workbooks.md#several-frames-on-one-sheet) work as
+well, when they are listed from top to bottom.

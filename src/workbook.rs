@@ -298,3 +298,140 @@ pub(crate) fn apply_defined_names(
     }
     Ok(())
 }
+
+/// The rows one frame occupies on its sheet, for the layout checks of a sheet
+/// that holds several frames.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSpan {
+    /// Position of the entry in the caller's `sheets` list.
+    pub(crate) entry: usize,
+    /// Zero-based first row: the header, or the first data row without one.
+    pub(crate) start: u64,
+    /// Zero-based row after the last one. Equal to `start` for a frame that
+    /// writes nothing (no header and no rows).
+    pub(crate) end: u64,
+}
+
+impl FrameSpan {
+    fn is_empty(&self) -> bool {
+        self.end == self.start
+    }
+
+    /// The span as Excel shows it: one-based and inclusive.
+    fn rows(&self) -> String {
+        format!("rows {}-{}", self.start + 1, self.end)
+    }
+}
+
+/// Refuse two frames on one sheet whose rows intersect.
+///
+/// Every frame starts in column A, so rows are all there is to compare. A
+/// frame that writes nothing occupies nothing and overlaps nothing.
+pub(crate) fn reject_overlapping_frames(sheet: &str, spans: &[FrameSpan]) -> Result<(), String> {
+    for (position, later) in spans.iter().enumerate() {
+        for earlier in &spans[..position] {
+            let disjoint = earlier.is_empty()
+                || later.is_empty()
+                || earlier.end <= later.start
+                || later.end <= earlier.start;
+            if !disjoint {
+                return Err(format!(
+                    "sheets[{}] and sheets[{}] overlap on sheet '{}': {} and {}. Move one of \
+                     them with startrow.",
+                    earlier.entry,
+                    later.entry,
+                    sheet,
+                    earlier.rows(),
+                    later.rows()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuse frames on one sheet that are not listed from top to bottom, which
+/// `constant_memory` needs: it writes each row once, in order, and cannot go
+/// back above a row it has written.
+pub(crate) fn reject_frames_out_of_order(sheet: &str, spans: &[FrameSpan]) -> Result<(), String> {
+    let mut lowest: Option<FrameSpan> = None;
+    for span in spans.iter().filter(|span| !span.is_empty()) {
+        if let Some(above) = lowest {
+            if span.start < above.end {
+                return Err(format!(
+                    "sheet '{}': constant_memory=True writes rows in order, so sheets[{}] \
+                     ({}) cannot follow sheets[{}] ({}). List the frames of a sheet from \
+                     top to bottom.",
+                    sheet,
+                    span.entry,
+                    span.rows(),
+                    above.entry,
+                    above.rows()
+                ));
+            }
+        }
+        lowest = Some(*span);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod frame_layout_tests {
+    use super::{reject_frames_out_of_order, reject_overlapping_frames, FrameSpan};
+
+    fn span(entry: usize, start: u64, end: u64) -> FrameSpan {
+        FrameSpan { entry, start, end }
+    }
+
+    #[test]
+    fn frames_that_touch_do_not_overlap() {
+        // Rows 1-3 and rows 4-6: the second starts on the row after the first.
+        assert!(reject_overlapping_frames("S", &[span(0, 0, 3), span(1, 3, 6)]).is_ok());
+        assert!(reject_overlapping_frames("S", &[span(0, 3, 6), span(1, 0, 3)]).is_ok());
+    }
+
+    #[test]
+    fn one_shared_row_is_an_overlap_in_either_order() {
+        for spans in [
+            [span(0, 0, 3), span(1, 2, 5)],
+            [span(0, 2, 5), span(1, 0, 3)],
+        ] {
+            let message = reject_overlapping_frames("S", &spans).unwrap_err();
+            assert!(
+                message.contains("sheets[0] and sheets[1] overlap on sheet 'S'"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_message_gives_one_based_inclusive_rows() {
+        let message = reject_overlapping_frames("S", &[span(0, 0, 3), span(1, 2, 5)]).unwrap_err();
+        assert!(message.contains("rows 1-3 and rows 3-5"), "{message}");
+    }
+
+    #[test]
+    fn a_frame_inside_another_and_a_third_frame_are_found() {
+        assert!(reject_overlapping_frames("S", &[span(0, 0, 10), span(1, 4, 5)]).is_err());
+        let message =
+            reject_overlapping_frames("S", &[span(0, 0, 3), span(1, 5, 8), span(2, 7, 9)])
+                .unwrap_err();
+        assert!(message.contains("sheets[1] and sheets[2]"), "{message}");
+    }
+
+    #[test]
+    fn an_empty_frame_overlaps_nothing() {
+        assert!(reject_overlapping_frames("S", &[span(0, 0, 5), span(1, 2, 2)]).is_ok());
+        assert!(reject_frames_out_of_order("S", &[span(0, 4, 8), span(1, 2, 2)]).is_ok());
+    }
+
+    #[test]
+    fn frames_listed_bottom_first_are_out_of_order() {
+        assert!(reject_frames_out_of_order("S", &[span(0, 0, 3), span(1, 3, 6)]).is_ok());
+        let message = reject_frames_out_of_order("S", &[span(0, 5, 8), span(1, 0, 3)]).unwrap_err();
+        assert!(
+            message.contains("sheets[1] (rows 1-3) cannot follow sheets[0] (rows 6-8)"),
+            "{message}"
+        );
+    }
+}

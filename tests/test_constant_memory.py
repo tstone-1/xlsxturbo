@@ -125,7 +125,7 @@ class TestConstantMemoryWarning:
     def test_dfs_to_xlsx_two_sheets_each_warn_once(self, tmp_xlsx: str) -> None:
         """dfs_to_xlsx with constant_memory=True warns once per sheet that has a disabled feature.
 
-        The skip-warning is emitted inside write_sheet_data, which runs once
+        The skip-warning is emitted inside write_frame, which runs once
         per sheet, so table_style set on both sheets of a two-sheet workbook
         produces two separate RuntimeWarnings (one per sheet), not a single
         workbook-level warning. Each warning also names its own sheet so a

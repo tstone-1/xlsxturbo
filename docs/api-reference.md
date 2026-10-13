@@ -31,7 +31,8 @@ Everything else is a keyword argument. See [DataFrame export](dataframe-export.m
 
 ## `dfs_to_xlsx(sheets, output_path, **options)`
 
-Writes several DataFrames into one workbook, one sheet each.
+Writes several DataFrames into one workbook, one sheet each. Entries that name the same
+sheet share it: see [Several frames on one sheet](multi-sheet-workbooks.md#several-frames-on-one-sheet).
 
 - **`sheets`** — a list of `(df, sheet_name)` or `(df, sheet_name, options)` tuples. The
   two-tuple form uses the top-level options; the three-tuple form overrides them for that
@@ -134,17 +135,26 @@ evaluated, so resolving the hints raised. Dropping 3.9 removed the split.
 
 ## Exceptions
 
-Seven classes, all exported from `xlsxturbo`:
+Nine classes, all exported from `xlsxturbo`:
 
 ```
 XlsxTurboError                      # base -- catches everything the library raises
 ├── OptionError                     # never raised itself; catches both of its children
 │   ├── ConfigurationError          # also ValueError
 │   │   └── WorkbookValidationError
+│   │       └── FrameOverlapError   # also FileError, for compatibility
 │   └── ConfigurationTypeError      # also TypeError
 ├── InputDataError                  # also ValueError
 └── FileError                       # also OSError and ValueError
+    ├── FilePermissionError         # also PermissionError
+    └── FrameOverlapError           # the same class as above
 ```
+
+`FilePermissionError` is the `FileError` raised when the operating system refuses the
+read or write, for example for a workbook that is open in Excel on Windows. It is also a
+`PermissionError`, which is what `pandas.to_excel` raises there. `FrameOverlapError` has
+two parents: it is a `WorkbookValidationError`, and it is a `FileError` only because the
+failure it replaces, a sheet name used twice, raised `FileError` until 1.10.0.
 
 `OptionError` exists so that `except OptionError` catches every problem with what you
 passed -- a bad value and a wrong type -- and nothing else. It has no builtin base of its

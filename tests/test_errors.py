@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import errno
 import inspect
+import os
 import pickle
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -54,7 +56,14 @@ EXPECTED_BASES: dict[str, tuple[type[BaseException], ...]] = {
     "ConfigurationTypeError": (Exception, TypeError),
     "InputDataError": (Exception, ValueError),
     "FileError": (Exception, OSError, ValueError),
+    # A `FileError` that is also the builtin other writers raise for a refused
+    # write, so `except PermissionError` moved over from `to_excel` still works.
+    "FilePermissionError": (Exception, OSError, ValueError, PermissionError),
     "WorkbookValidationError": (Exception, ValueError),
+    # `OSError` here is history, not meaning: a sheet name used twice raised
+    # `FileError` until several frames could share a sheet, and this is what is
+    # left of that failure.
+    "FrameOverlapError": (Exception, ValueError, OSError),
 }
 
 # Builtins a class must NOT be, so that "inherits everything" cannot pass the
@@ -72,8 +81,12 @@ FORBIDDEN_BASES: dict[str, tuple[type[BaseException], ...]] = {
     "ConfigurationError": (TypeError, OSError),
     "ConfigurationTypeError": (ValueError, OSError),
     "InputDataError": (TypeError, OSError),
-    "FileError": (TypeError,),
+    # Not a `PermissionError`: only its subclass is, so that `except
+    # PermissionError` does not start catching a missing folder or a full disk.
+    "FileError": (TypeError, PermissionError),
+    "FilePermissionError": (TypeError,),
     "WorkbookValidationError": (TypeError, OSError),
+    "FrameOverlapError": (TypeError, PermissionError),
 }
 
 
@@ -113,13 +126,46 @@ def _trigger_workbook_validation(out: Path) -> None:
     )
 
 
+def _trigger_file_permission(out: Path) -> None:
+    """Write to a target the operating system refuses.
+
+    On Windows that is a workbook another handle holds open, which is the case
+    the class exists for. Elsewhere it is a folder without write permission,
+    which does not stop a process running as root.
+    """
+    if sys.platform == "win32":
+        target = out / "held.xlsx"
+        xlsxturbo.df_to_xlsx(_frame(), target)
+        with target.open("rb"):
+            xlsxturbo.df_to_xlsx(_frame(), target)
+        return
+    if os.geteuid() == 0:
+        pytest.skip("root is not refused by a read-only folder")
+    folder = out / "read-only"
+    # `exist_ok`: one test calls its trigger once per builtin base, in one folder.
+    folder.mkdir(exist_ok=True)
+    folder.chmod(0o555)
+    try:
+        xlsxturbo.df_to_xlsx(_frame(), folder / "o.xlsx")
+    finally:
+        folder.chmod(0o755)
+
+
+def _trigger_frame_overlap(out: Path) -> None:
+    """Name one sheet twice without moving the second frame."""
+    df = _frame()
+    xlsxturbo.dfs_to_xlsx([(df, "A"), (df, "A")], out / "o.xlsx")
+
+
 # One real call per concrete class.
 TRIGGERS: dict[str, Callable[[Path], None]] = {
     "ConfigurationError": _trigger_configuration,
     "ConfigurationTypeError": _trigger_configuration_type,
     "InputDataError": _trigger_input_data,
     "FileError": _trigger_file,
+    "FilePermissionError": _trigger_file_permission,
     "WorkbookValidationError": _trigger_workbook_validation,
+    "FrameOverlapError": _trigger_frame_overlap,
 }
 
 # Classes that exist to be *caught*, never raised, mapped to exactly the
@@ -134,7 +180,12 @@ TRIGGERS: dict[str, Callable[[Path], None]] = {
 ABSTRACT: dict[str, frozenset[str]] = {
     "XlsxTurboError": frozenset(TRIGGERS),
     "OptionError": frozenset(
-        {"ConfigurationError", "ConfigurationTypeError", "WorkbookValidationError"}
+        {
+            "ConfigurationError",
+            "ConfigurationTypeError",
+            "WorkbookValidationError",
+            "FrameOverlapError",
+        }
     ),
 }
 

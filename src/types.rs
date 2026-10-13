@@ -698,8 +698,8 @@ pub(crate) enum FreezePanes {
 }
 
 /// Scalar configuration for writing a single sheet.
-/// Groups the simple config fields to reduce parameter counts in write_sheet_data
-/// and apply_worksheet_features.
+/// Groups the simple config fields to reduce parameter counts in `write_frame`
+/// and the feature steps that follow it.
 pub(crate) struct WriteConfig<'a> {
     pub(crate) include_header: bool,
     pub(crate) autofit: bool,
@@ -841,6 +841,104 @@ define_options! {
     charts: IndexMap<String, ChartConfig>,
     sparklines: IndexMap<String, SparklineConfig>,
     cells: Vec<CellWrite>,
+}
+
+/// The complex options addressed by an absolute cell reference. On a sheet that
+/// holds several frames they belong to the entry that names them and are not
+/// inherited from the workbook-wide keyword by a second or later frame, or an
+/// image given once would be inserted once per frame.
+#[cfg(test)]
+pub(crate) const CELL_ADDRESSED_OPTIONS: &[&str] = &[
+    "merged_ranges",
+    "hyperlinks",
+    "comments",
+    "rich_text",
+    "images",
+    "checkboxes",
+    "textboxes",
+    "charts",
+    "sparklines",
+    "cells",
+];
+
+/// The complex options bound to a frame's own columns and rows. Every frame on
+/// a sheet takes its own, or the workbook-wide default.
+#[cfg(test)]
+pub(crate) const FRAME_BOUND_OPTIONS: &[&str] = &[
+    "header_format",
+    "column_formats",
+    "conditional_formats",
+    "formula_columns",
+    "validations",
+];
+
+/// The complex options that describe a whole sheet. The first entry for a sheet
+/// decides them.
+#[cfg(test)]
+pub(crate) const WHOLE_SHEET_OPTIONS: &[&str] = &["column_widths"];
+
+impl<'a> EffectiveOpts<'a> {
+    /// The options of a second or later frame on a sheet.
+    ///
+    /// The frame-bound options stay as merged. The cell-addressed ones are
+    /// reduced to what this entry's own options dict gives, so that a
+    /// workbook-wide `cells` or `images` is applied once per sheet, with the
+    /// first entry. `column_widths` is the sheet's, decided by the first entry;
+    /// the frame needs it only to know whether to estimate its widths.
+    ///
+    /// Every field is listed in exactly one of `CELL_ADDRESSED_OPTIONS`,
+    /// `FRAME_BOUND_OPTIONS` and `WHOLE_SHEET_OPTIONS`, which a test enforces,
+    /// so a new option cannot be added without deciding this.
+    pub(crate) fn for_later_frame(
+        mut self,
+        own: &'a SheetConfig,
+        sheet_column_widths: Option<&'a HashMap<String, f64>>,
+    ) -> Self {
+        self.merged_ranges = own.merged_ranges.as_ref();
+        self.hyperlinks = own.hyperlinks.as_ref();
+        self.comments = own.comments.as_ref();
+        self.rich_text = own.rich_text.as_ref();
+        self.images = own.images.as_ref();
+        self.checkboxes = own.checkboxes.as_ref();
+        self.textboxes = own.textboxes.as_ref();
+        self.charts = own.charts.as_ref();
+        self.sparklines = own.sparklines.as_ref();
+        self.cells = own.cells.as_ref();
+        self.column_widths = sheet_column_widths;
+        self
+    }
+}
+
+#[cfg(test)]
+mod several_frames_classification_tests {
+    use super::{EffectiveOpts, CELL_ADDRESSED_OPTIONS, FRAME_BOUND_OPTIONS, WHOLE_SHEET_OPTIONS};
+
+    /// Every complex option is cell-addressed, frame-bound or whole-sheet, and
+    /// only one of the three. `for_later_frame` lists the fields by hand, so a
+    /// field added to `define_options!` fails here until it is classified.
+    #[test]
+    fn every_complex_option_is_classified_for_several_frames() {
+        for &name in EffectiveOpts::COMPLEX_OPTION_NAMES {
+            let places = [
+                CELL_ADDRESSED_OPTIONS.contains(&name),
+                FRAME_BOUND_OPTIONS.contains(&name),
+                WHOLE_SHEET_OPTIONS.contains(&name),
+            ];
+            assert_eq!(
+                places.iter().filter(|&&p| p).count(),
+                1,
+                "complex option '{}' must be in exactly one of CELL_ADDRESSED_OPTIONS, \
+                 FRAME_BOUND_OPTIONS and WHOLE_SHEET_OPTIONS, and `for_later_frame` must \
+                 treat it accordingly",
+                name
+            );
+        }
+        assert_eq!(
+            EffectiveOpts::COMPLEX_OPTION_NAMES.len(),
+            CELL_ADDRESSED_OPTIONS.len() + FRAME_BOUND_OPTIONS.len() + WHOLE_SHEET_OPTIONS.len(),
+            "a classification list names an option that does not exist"
+        );
+    }
 }
 
 #[cfg(test)]

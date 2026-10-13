@@ -28,7 +28,9 @@ The subclasses say what kind of failure it was:
 | `ConfigurationTypeError` | An option or argument has the wrong **type**: a list where a dict is required, a non-string dictionary key, a `bytes` path | `OptionError`, `TypeError` |
 | `InputDataError` | The object passed as data is not a pandas or polars DataFrame, or its columns cannot be read | `ValueError` |
 | `FileError` | A filesystem read or write failed: a missing output directory, a permissions problem, a full disk, an unreadable CSV input — and the [workbook rules Excel's writer checks only during the save](#save-time-validation-lands-in-fileerror) | `OSError`, `ValueError` |
+| `FilePermissionError` | The operating system refused the read or write (`EACCES` or `EPERM`): an output workbook that is open in Excel on Windows, a folder the process may not write to, a CSV input it may not read | `FileError`, `PermissionError` |
 | `WorkbookValidationError` | The configuration is well-formed but Excel forbids it. Raised by the two name pre-checks: two sheets claiming the same table name, and a table name that collides with a `defined_names` key | `ConfigurationError`, so also `OptionError` and `ValueError` |
+| `FrameOverlapError` | Two [frames on one sheet](multi-sheet-workbooks.md#several-frames-on-one-sheet) share a row. Raised before anything is written | `WorkbookValidationError`, and for compatibility `FileError`, so also `OSError` |
 
 ### "Anything wrong with what I passed"
 
@@ -111,6 +113,25 @@ except xlsxturbo.FileError as exc:
     raise
 ```
 
+**A refused write is also a `PermissionError`.** When the operating system refuses the
+read or write, the class is `FilePermissionError`, a `FileError` that is also the builtin
+`pandas.to_excel` raises for the same failure. The usual case is a workbook that is still
+open in Excel on Windows, and the handler written for `to_excel` works unchanged:
+
+```python
+while True:
+    try:
+        xlsxturbo.df_to_xlsx(df, path)
+        break
+    except PermissionError:
+        input(f"{path} is open. Close it and press Enter: ")
+```
+
+A missing folder or a full disk stays a plain `FileError`, so `except PermissionError`
+catches the refusal and nothing else. One difference from `to_excel` remains on macOS and
+Linux: the workbook is written to a temporary file and moved into place, so a target file
+that is itself read-only is replaced when its folder is writable, where `to_excel` raises.
+
 Two details worth knowing. The message still begins `Failed to save workbook to '<path>': `
 for a save failure, so message-matching code written against 0.18 keeps working — and
 that is exactly why **`strerror` and `filename` stay `None`**. `OSError` reformats its
@@ -131,14 +152,25 @@ fails there is reported by the save — so a mistake in what you passed can arri
 `FileError`:
 
 ```python
-xlsxturbo.dfs_to_xlsx([(df, "Data"), (df, "Data")], "out.xlsx")
-# FileError: Failed to save workbook to 'out.xlsx': Worksheet name 'data' has
-# already been used in this workbook.
+xlsxturbo.df_to_xlsx(df, "out.xlsx", charts={"D2": {"type": "bar", "data_range": "Other!$A$2:$A$3"}})
+# FileError: Failed to save workbook to 'out.xlsx': Unknown Worksheet name or index
+# 'Unknown worksheet name 'Other' in chart range 'Other!$A$2:$A$3''.
 ```
 
-A duplicate sheet name and a chart range naming a sheet the workbook does not contain
-are the two you are most likely to meet. Both keep the `Failed to save workbook to
-'<path>': ` prefix, and the writer's own sentence after it names the rule that was broken.
+A chart range naming a sheet the workbook does not contain is the one you are most likely
+to meet. It keeps the `Failed to save workbook to '<path>': ` prefix, and the writer's own
+sentence after it names the rule that was broken.
+
+A sheet name used twice was the other one until 1.10.0. Two `dfs_to_xlsx` entries may now
+name the same sheet, and what is refused is two frames that share a row: a
+`FrameOverlapError`, raised before anything is written. See
+[Several frames on one sheet](multi-sheet-workbooks.md#several-frames-on-one-sheet).
+
+`FrameOverlapError` is a `WorkbookValidationError`, and it is also a `FileError`. The
+second parent is there for one reason: `dfs_to_xlsx([(df, "Data"), (df, "Data")], ...)`
+raised `FileError` before, the same call raises `FrameOverlapError` now, and an
+`except FileError` or `except OSError` written around it has to keep catching it. No file
+is involved, and its `errno` is `None`.
 
 The mirror case runs the other way: an image xlsxturbo cannot open is a
 `ConfigurationError`, not a `FileError`, because the path arrived as an option and the

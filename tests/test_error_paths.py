@@ -339,9 +339,9 @@ class TestErrorPaths:
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells={"B1": {"value": "x", "wrap_text": "yes"}})  # type: ignore[arg-type]
 
     def test_dfs_to_xlsx_write_error_names_the_failing_sheet(self, tmp_xlsx: str) -> None:
-        """A per-sheet write-phase error (raised inside write_sheet_data) names its sheet.
+        """A per-sheet write-phase error (raised inside write_frame) names its sheet.
 
-        `column_formats` validation runs inside `write_sheet_data` (via
+        `column_formats` validation runs inside `write_frame` (via
         `build_column_formats`), not during the up-front option extraction,
         so its error is a good probe for the `sheet '<name>': ` prefix that
         `dfs_to_xlsx` adds around each sheet's write result.
@@ -360,7 +360,7 @@ class TestErrorPaths:
         """Two empty DataFrames sharing a table_name/table_style do not false-positive as a conflict.
 
         A table is only actually created when `row_count > 0` (the same gate
-        `apply_worksheet_features` uses), so the duplicate-table-name
+        `apply_frame_features` uses), so the duplicate-table-name
         pre-check must skip empty sheets too, matching that behavior.
         """
         df1 = pd.DataFrame({"A": pd.Series([], dtype="int64")})

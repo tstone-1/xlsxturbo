@@ -49,6 +49,8 @@ __all__ = [
     "ConfigurationTypeError",
     "DateOrder",
     "FileError",
+    "FilePermissionError",
+    "FrameOverlapError",
     "HeaderFormat",
     "ImageOptions",
     "InputDataError",
@@ -102,8 +104,22 @@ class InputDataError(XlsxTurboError, ValueError):
 class FileError(XlsxTurboError, OSError, ValueError):
     """A filesystem read or write failed."""
 
+class FilePermissionError(FileError, PermissionError):
+    """A filesystem read or write was refused for lack of permission.
+
+    Raised in place of a plain `FileError` for `EACCES` and `EPERM`, for example
+    when the output workbook is open in Excel on Windows.
+    """
+
 class WorkbookValidationError(ConfigurationError):
     """The configuration is well-formed, but Excel does not permit it."""
+
+class FrameOverlapError(WorkbookValidationError, FileError):
+    """Two frames on one sheet share a row.
+
+    Also a `FileError` for compatibility only: a sheet name used twice raised
+    `FileError` before several frames could share a sheet.
+    """
 
 def csv_to_xlsx(
     input_path: PathArg,
@@ -346,6 +362,10 @@ def dfs_to_xlsx(
 
     Args:
         sheets: List of (DataFrame, sheet_name) or (DataFrame, sheet_name, options) tuples.
+            Several tuples may name the same sheet: each writes its frame at its own
+            ``startrow``. The frames may not overlap, and the first tuple for a sheet
+            sets ``autofit``, ``freeze_panes``, ``tab_color``, ``column_widths`` and
+            ``row_heights``.
         output_path: Path for the output XLSX file, or a binary file-like
             object (``io.BytesIO``, a file opened ``"wb"``) to write it into.
             The object is left open at its new position.

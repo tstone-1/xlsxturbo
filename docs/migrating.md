@@ -15,9 +15,11 @@ Check these first. If an export depends on one, keep it on its current writer.
 - **Reading or editing an existing workbook.** xlsxturbo only writes new files:
   `openpyxl.load_workbook(...)`, `pd.ExcelWriter(..., mode="a")` and template-filling have
   no equivalent. See [Compatibility](compatibility.md).
-- **A column offset or several frames on one sheet**: `startcol`, or two `to_excel` calls
-  into one sheet. Each DataFrame fills its own sheet from column `A`. A row offset,
-  `startrow`, does migrate: see [a title above the data](#a-title-above-the-data).
+- **A column offset**: `startcol`, or two frames next to each other. Every frame starts in
+  column `A`. A row offset, `startrow`, does migrate: see
+  [a title above the data](#a-title-above-the-data). So do two `to_excel` calls that put
+  frames below each other on one sheet: see
+  [Several frames on one sheet](multi-sheet-workbooks.md#several-frames-on-one-sheet).
 - **Formats other than `.xlsx`**: no `.xls`, no macro-enabled `.xlsm`.
 
 ## The data these examples use
@@ -126,6 +128,13 @@ sales.set_index("region").to_excel("before_index.xlsx")
 # After
 xlsxturbo.df_to_xlsx(sales.set_index("region").reset_index(), "after_index.xlsx")
 ```
+
+### A workbook that is still open in Excel
+
+An `except PermissionError` around `to_excel`, for the case that the target is open in
+Excel, keeps working around `df_to_xlsx`: the failure is a `FilePermissionError`, which
+is a `PermissionError`. A missing output folder is an `OSError` with both writers. See
+[Errors and warnings](errors.md).
 
 ## From pandas with XlsxWriter formatting
 

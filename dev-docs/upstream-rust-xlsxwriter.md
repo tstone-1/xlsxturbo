@@ -115,7 +115,7 @@ save-time rule upstream adds is a candidate for a pre-check here.
 **`claimed_table_name` (`src/convert.rs`) owns the gate that decides whether a sheet claims a name
 at all** — a style requested, a header row, at least one data row, `constant_memory` off. Both
 pre-checks call it, because a pre-check that guessed the gate differently would refuse workbooks
-that save cleanly. It sits beside `apply_worksheet_features`, the code it mirrors.
+that save cleanly. It sits beside `apply_frame_features`, the code it mirrors.
 
 ⚠ **`sanitize_table_name` silently mangled names Excel accepts — measured 2026-08-21 end to end
 through the shipped 1.2.0 wheel, half fixed the same day.** It branches on `is_alphanumeric()`,

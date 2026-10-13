@@ -365,7 +365,7 @@ fn flush_parallel_chunk(
 /// Write a single cell value, tracking its content width when requested.
 ///
 /// Shared per-cell body used by both the polars and pandas row-writing loops in
-/// `write_sheet_data`: the only difference between those two engines is how a row's
+/// `write_frame`: the only difference between those two engines is how a row's
 /// values are obtained, not how each cell is written.
 #[allow(clippy::too_many_arguments)]
 fn write_row_cell(
@@ -404,7 +404,7 @@ fn write_row_cell(
 /// The table name a sheet claims, as it reaches the workbook, or `None` when
 /// the sheet creates no table.
 ///
-/// The gate is `apply_worksheet_features`': a table is added only when a style
+/// The gate is `apply_frame_features`': a table is added only when a style
 /// is requested, the header row is written and the frame has at least one data
 /// row and one column, and `constant_memory` skips the feature altogether. It
 /// lives beside that code on purpose — a pre-flight that guessed the gate
@@ -456,7 +456,7 @@ pub(crate) fn claimed_table_name(
 /// callers treat that as "has columns", since the alternative is to refuse a
 /// table for a frame whose width simply could not be read.
 ///
-/// Shared by `write_sheet_data` (to decide whether to write a table) and by the
+/// Shared by `write_frame` (to decide whether to write a table) and by the
 /// table-name pre-checks, which must mirror the same conditions that gate table
 /// creation — so two empty DataFrames sharing a table name don't false-positive
 /// as a conflict.
@@ -484,19 +484,38 @@ pub(crate) fn dataframe_row_count(df: &Bound<'_, PyAny>) -> Result<usize, String
     Ok(dataframe_shape(df)?.0)
 }
 
-/// Write DataFrame data and apply all features to a worksheet.
+/// What one frame left on its sheet, for the steps that run once per sheet.
+pub(crate) struct FrameOutcome {
+    /// Rows written, header included, without the `startrow` offset.
+    pub(crate) rows: u32,
+    /// Columns written, formula columns included.
+    pub(crate) total_cols: u16,
+    /// Columns of the frame itself, which is what column widths are fitted to.
+    pub(crate) col_count: u16,
+    /// Estimated width per frame column; empty unless the capped autofit is on.
+    pub(crate) content_widths: Vec<f64>,
+}
+
+/// Write one frame to a worksheet: its header, its data and the features bound
+/// to its position (table, formula columns, conditional formats, validations,
+/// autofilter).
 ///
-/// This is the shared per-sheet write logic used by both `convert_dataframe_to_xlsx`
-/// (single-sheet) and `dfs_to_xlsx` (multi-sheet). The caller is responsible for
-/// creating the workbook/worksheet and saving.
-pub(crate) fn write_sheet_data(
+/// A sheet takes three steps, and they are separate functions because a sheet
+/// may hold several frames (`dfs_to_xlsx` entries naming one sheet): this one
+/// per frame, then [`finish_sheet`] once for the options that describe the
+/// whole sheet, then [`apply_cell_options`] per entry for the options addressed
+/// by cell reference. The order across steps is fixed: the whole-sheet autofit
+/// has to see every frame, and `cells` has to come after every frame so that it
+/// can overwrite data. [`write_configured_sheet`] runs all three for the common
+/// case of one frame.
+pub(crate) fn write_frame(
     py: Python<'_>,
     worksheet: &mut Worksheet,
     sheet_name: &str,
     df: &Bound<'_, PyAny>,
     config: &WriteConfig<'_>,
-    opts: EffectiveOpts<'_>,
-) -> Result<(u32, u16), String> {
+    opts: &EffectiveOpts<'_>,
+) -> Result<FrameOutcome, String> {
     reject_autofilter_conflicts(config)?;
 
     // Create formats
@@ -669,8 +688,8 @@ pub(crate) fn write_sheet_data(
         Vec::new()
     };
 
-    // Apply all worksheet features (table, formulas, formatting, etc.)
-    let total_col_count = apply_worksheet_features(
+    // Apply the features bound to this frame's position
+    let total_cols = apply_frame_features(
         py,
         worksheet,
         sheet_name,
@@ -680,12 +699,16 @@ pub(crate) fn write_sheet_data(
         row_count,
         config,
         header_fmt.as_ref(),
-        &opts,
-        &content_widths,
+        opts,
     )?;
 
-    // Rows written, not the last row index: the offset is not part of the frame.
-    Ok((row_idx - config.startrow, total_col_count))
+    Ok(FrameOutcome {
+        // Rows written, not the last row index: the offset is not part of the frame.
+        rows: row_idx - config.startrow,
+        total_cols,
+        col_count,
+        content_widths,
+    })
 }
 
 /// Width of a filter button, in the character units column widths are given in.
@@ -700,7 +723,7 @@ pub(crate) fn write_sheet_data(
 const FILTER_BUTTON_WIDTH: f64 = 16.0 / 7.0;
 
 /// Whether the header cells of this sheet carry filter buttons: a plain-range
-/// autofilter, or an Excel table under the gate `apply_worksheet_features`
+/// autofilter, or an Excel table under the gate `apply_frame_features`
 /// creates one by.
 fn header_has_filter_buttons(config: &WriteConfig<'_>, row_count: usize, col_count: usize) -> bool {
     if !config.include_header || config.constant_memory || col_count == 0 {
@@ -737,24 +760,38 @@ fn reject_autofilter_conflicts(config: &WriteConfig<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// Apply the three options that are sheet properties rather than cell writes:
-/// tab colour, freeze panes and the plain-range autofilter.
+/// Apply the plain-range autofilter of one frame.
 ///
-/// None of them revisits a row, so they also apply under `constant_memory`
-/// (measured against rust_xlsxwriter 0.99.0: `<tabColor>`, `<pane>` and
-/// `<autoFilter>` are all written for a constant-memory worksheet when set
-/// after the data).
+/// Like the tab colour and the freeze panes it is a sheet property and not a
+/// cell write, so it also applies under `constant_memory` (measured against
+/// rust_xlsxwriter 0.99.0: `<tabColor>`, `<pane>` and `<autoFilter>` are all
+/// written for a constant-memory worksheet when set after the data). It is
+/// applied with the frame because its range is the frame's.
 ///
 /// `filter_col_count` is the number of columns the filter spans. Unlike a
 /// table it includes the formula columns: a plain range has no reason to stop
 /// short of them, and a row of filter buttons that ends two columns early
 /// reads as a defect. A frame with no data rows gets a header-only filter,
 /// which Excel accepts; a frame with no columns gets none.
-fn apply_sheet_properties(
+fn apply_autofilter(
     worksheet: &mut Worksheet,
     config: &WriteConfig<'_>,
     last_row_idx: u32,
     filter_col_count: u16,
+) -> Result<(), String> {
+    if config.autofilter && filter_col_count > 0 {
+        let last_row = last_row_idx.saturating_sub(1).max(config.startrow);
+        worksheet
+            .autofilter(config.startrow, 0, last_row, filter_col_count - 1)
+            .map_err(|e| format!("Failed to add autofilter: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Apply the tab colour and the freeze panes, which describe the whole sheet.
+fn apply_tab_color_and_freeze(
+    worksheet: &mut Worksheet,
+    config: &WriteConfig<'_>,
 ) -> Result<(), String> {
     if let Some(rgb) = config.tab_color {
         worksheet.set_tab_color(Color::RGB(rgb));
@@ -771,16 +808,27 @@ fn apply_sheet_properties(
             .set_freeze_panes(row, col)
             .map_err(|e| format!("Failed to freeze panes: {}", e))?;
     }
-
-    if config.autofilter && filter_col_count > 0 {
-        let last_row = last_row_idx.saturating_sub(1).max(config.startrow);
-        worksheet
-            .autofilter(config.startrow, 0, last_row, filter_col_count - 1)
-            .map_err(|e| format!("Failed to add autofilter: {}", e))?;
-    }
     Ok(())
 }
 
+/// Add a worksheet with the given name to the workbook.
+pub(crate) fn add_named_worksheet<'w>(
+    workbook: &'w mut Workbook,
+    sheet_name: &str,
+    constant_memory: bool,
+) -> Result<&'w mut Worksheet, String> {
+    let worksheet = if constant_memory {
+        workbook.add_worksheet_with_constant_memory()
+    } else {
+        workbook.add_worksheet()
+    };
+    worksheet
+        .set_name(sheet_name)
+        .map_err(|e| format!("Failed to set sheet name '{}': {}", sheet_name, e))?;
+    Ok(worksheet)
+}
+
+/// Write a sheet that holds one frame: all three steps of [`write_frame`].
 pub(crate) fn write_configured_sheet(
     py: Python<'_>,
     workbook: &mut Workbook,
@@ -789,20 +837,23 @@ pub(crate) fn write_configured_sheet(
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
 ) -> Result<(u32, u16), String> {
-    let worksheet = if config.constant_memory {
-        workbook.add_worksheet_with_constant_memory()
-    } else {
-        workbook.add_worksheet()
-    };
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name '{}': {}", sheet_name, e))?;
-    write_sheet_data(py, worksheet, sheet_name, df, config, opts)
+    let worksheet = add_named_worksheet(workbook, sheet_name, config.constant_memory)?;
+    let frame = write_frame(py, worksheet, sheet_name, df, config, &opts)?;
+    finish_sheet(
+        worksheet,
+        config,
+        &opts,
+        frame.col_count,
+        &frame.content_widths,
+    )?;
+    apply_cell_options(py, worksheet, config, &opts)?;
+    Ok((frame.rows, frame.total_cols))
 }
 
 /// Complex feature options that still work under `constant_memory` because they
-/// are applied during the data-write phase (in `write_sheet_data`), not in
-/// `apply_worksheet_features`. Every other present complex option is skipped.
+/// are applied during the data-write phase (in `write_frame`) or once per sheet
+/// (`finish_sheet`), without revisiting a row. Every other present complex
+/// option is skipped.
 const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &["column_widths", "header_format", "column_formats"];
 
 /// Emit a `RuntimeWarning` listing the features that `constant_memory` mode
@@ -856,16 +907,14 @@ fn warn_constant_memory_skips(
     Ok(())
 }
 
-/// Apply all worksheet features after data has been written.
+/// Apply the features bound to one frame's position, after its data is written:
+/// the table, formula columns, conditional formats, validations and the
+/// autofilter. Returns the frame's column count, formula columns included.
 ///
-/// Handles: table formatting, formula columns, conditional formats, freeze panes,
-/// column widths/autofit, row heights, merged ranges, hyperlinks, comments,
-/// validations, rich text, images, checkboxes, textboxes, native Excel charts,
-/// sparklines, and arbitrary cell writes. In constant_memory mode only column
-/// widths, header format, column formats and the sheet properties (tab colour,
-/// freeze panes, autofilter) are applied; everything else is skipped.
+/// In constant_memory mode only the autofilter is applied; the other four need
+/// to revisit rows, and are named in the warning emitted here.
 #[allow(clippy::too_many_arguments)]
-fn apply_worksheet_features(
+fn apply_frame_features(
     py: Python<'_>,
     worksheet: &mut Worksheet,
     sheet_name: &str,
@@ -876,17 +925,11 @@ fn apply_worksheet_features(
     config: &WriteConfig<'_>,
     header_fmt: Option<&Format>,
     opts: &EffectiveOpts<'_>,
-    content_widths: &[f64],
 ) -> Result<u16, String> {
-    // In constant_memory mode, only column widths (without autofit) and the
-    // sheet properties are supported.
-    // Warn about every other requested feature right here, next to the skip.
+    // Warn about every skipped feature right here, next to the skip.
     if config.constant_memory {
         warn_constant_memory_skips(py, sheet_name, config, opts)?;
-        if let Some(widths) = opts.column_widths {
-            apply_column_widths(worksheet, col_count, widths)?;
-        }
-        apply_sheet_properties(worksheet, config, last_row_idx, col_count)?;
+        apply_autofilter(worksheet, config, last_row_idx, col_count)?;
         return Ok(col_count);
     }
 
@@ -954,9 +997,43 @@ fn apply_worksheet_features(
         }
     }
 
-    // Tab colour, freeze panes and the plain-range autofilter. After the
-    // formula columns, so the filter spans them.
-    apply_sheet_properties(worksheet, config, last_row_idx, total_col_count)?;
+    // Apply data validations
+    if let Some(vals) = opts.validations {
+        if has_data_rows {
+            apply_validations(py, worksheet, columns, data_row_start, data_row_end, vals)?;
+        }
+    }
+
+    // The plain-range autofilter, after the formula columns so that it spans them.
+    apply_autofilter(worksheet, config, last_row_idx, total_col_count)?;
+
+    Ok(total_col_count)
+}
+
+/// Apply the options that describe a whole sheet, once every frame on it is
+/// written: tab colour, freeze panes, column widths and autofit, row heights.
+///
+/// `config` and `opts` are those of the first entry for the sheet, which is the
+/// one that decides them. `col_count` and `content_widths` cover every frame on
+/// the sheet: the widest frame, and per column the widest estimate.
+///
+/// In constant_memory mode autofit and row heights are skipped; plain column
+/// widths, the tab colour and the freeze panes apply.
+pub(crate) fn finish_sheet(
+    worksheet: &mut Worksheet,
+    config: &WriteConfig<'_>,
+    opts: &EffectiveOpts<'_>,
+    col_count: u16,
+    content_widths: &[f64],
+) -> Result<(), String> {
+    if config.constant_memory {
+        if let Some(widths) = opts.column_widths {
+            apply_column_widths(worksheet, col_count, widths)?;
+        }
+        return apply_tab_color_and_freeze(worksheet, config);
+    }
+
+    apply_tab_color_and_freeze(worksheet, config)?;
 
     // Apply custom column widths and/or autofit
     if let Some(widths) = opts.column_widths {
@@ -986,6 +1063,25 @@ fn apply_worksheet_features(
             })?;
         }
     }
+    Ok(())
+}
+
+/// Apply one entry's options that are addressed by cell reference: merged
+/// ranges, hyperlinks, comments, rich text, images, checkboxes, textboxes,
+/// charts, sparklines and, last, `cells`.
+///
+/// Runs after every frame on the sheet is written, so that a `cells` entry can
+/// overwrite data of any frame. All of them are skipped in constant_memory
+/// mode, and named in the warning `apply_frame_features` emits.
+pub(crate) fn apply_cell_options(
+    py: Python<'_>,
+    worksheet: &mut Worksheet,
+    config: &WriteConfig<'_>,
+    opts: &EffectiveOpts<'_>,
+) -> Result<(), String> {
+    if config.constant_memory {
+        return Ok(());
+    }
 
     // Apply merged ranges
     if let Some(ranges) = opts.merged_ranges {
@@ -1005,13 +1101,6 @@ fn apply_worksheet_features(
     if let Some(cmts) = opts.comments {
         if !cmts.is_empty() {
             apply_comments(worksheet, cmts)?;
-        }
-    }
-
-    // Apply data validations
-    if let Some(vals) = opts.validations {
-        if has_data_rows {
-            apply_validations(py, worksheet, columns, data_row_start, data_row_end, vals)?;
         }
     }
 
@@ -1064,7 +1153,7 @@ fn apply_worksheet_features(
         }
     }
 
-    Ok(total_col_count)
+    Ok(())
 }
 
 /// Apply the workbook-level options and write the archive.
@@ -1147,7 +1236,7 @@ mod constant_memory_tests {
     /// constant_memory?" decision instead of defaulting silently.
     #[test]
     fn every_complex_option_is_classified_for_constant_memory() {
-        // The complex options that `apply_worksheet_features` skips under
+        // The complex options that `apply_frame_features` and `apply_cell_options` skip under
         // constant_memory (everything applied only after the data write).
         const EXPECTED_SKIPPED: &[&str] = &[
             "conditional_formats",

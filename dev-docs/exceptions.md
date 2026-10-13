@@ -6,8 +6,8 @@ Moved verbatim from the repository-root `AGENTS.md`, which keeps a one-line inde
 
 `src/errors.rs` owns the public exception classes and is the only place in `src/` that may
 construct a `PyErr` from scratch. Raise with `errors::configuration`,
-`errors::configuration_type`, `errors::input_data`, `errors::file` or
-`errors::workbook_validation`. The classes are built by calling the `type` metaclass rather
+`errors::configuration_type`, `errors::input_data`, `errors::file`,
+`errors::workbook_validation` or `errors::frame_overlap`. The classes are built by calling the `type` metaclass rather
 than with `create_exception!`, because that macro takes a single base and every class here
 needs two or three.
 
@@ -58,6 +58,21 @@ Facts that are expensive to rediscover:
   leaves `str()` untouched. On Windows `raw_os_error()` is a Win32 code, not an errno —
   `ERROR_PATH_NOT_FOUND` is 3, which as POSIX means "no such process" — so `errors::posix_errno`
   passes the number through on Unix and classifies via `io::ErrorKind` elsewhere.
+
+- **`FilePermissionError` is chosen in `errors::file`, by `errno`, and nowhere else.**
+  `EACCES` and `EPERM` are the two numbers CPython maps to `PermissionError`. It is a
+  subclass and not a changed base on `FileError`, so `except PermissionError` does not start
+  catching a missing folder. Measured on Windows with 1.10.0: a target held by an ordinary
+  `open()` and one held with no sharing both give `Access is denied. (os error 5)`, which
+  `posix_errno` reports as 13. On POSIX an open or read-only target file is replaced, because
+  the save moves a temporary file into place; the refusal there needs a read-only folder,
+  which does not stop root, so the tests skip under root. `EPERM` has no test: nothing in the
+  suite can produce it.
+- **`FrameOverlapError` has `FileError` as its second parent for compatibility, not for
+  meaning.** A sheet name used twice in `dfs_to_xlsx` raised `FileError` from the save until
+  several frames could share a sheet. The same call is an overlap now, and
+  `docs/stability.md` does not let an existing failure change its class before 2.0.0, so the
+  class keeps every base the old one had. Drop the `FileError` parent in 2.0.0.
 
 Full reasoning, including the shapes considered and rejected: `docs/roadmap-1.0.md`
 decision D6. User-facing contract: `docs/errors.md`.

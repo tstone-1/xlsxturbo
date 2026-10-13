@@ -42,7 +42,9 @@ struct ErrorTypes {
     configuration_type: Py<PyType>,
     input_data: Py<PyType>,
     file: Py<PyType>,
+    file_permission: Py<PyType>,
     workbook_validation: Py<PyType>,
+    frame_overlap: Py<PyType>,
 }
 
 static ERRORS: PyOnceLock<ErrorTypes> = PyOnceLock::new();
@@ -76,6 +78,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     let value_error = py.get_type::<pyo3::exceptions::PyValueError>();
     let type_error = py.get_type::<pyo3::exceptions::PyTypeError>();
     let os_error = py.get_type::<pyo3::exceptions::PyOSError>();
+    let permission_error = py.get_type::<pyo3::exceptions::PyPermissionError>();
 
     let base = new_exception_class(
         py,
@@ -154,8 +157,8 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          Raised when the output workbook cannot be written (missing directory, \
          permissions, no space) or when a CSV input cannot be opened or read. It also \
          carries every workbook rule the underlying writer checks only while \
-         serialising -- a duplicate sheet name, a chart range naming a sheet that \
-         does not exist -- because those failures are reported by the save. Also an \
+         serialising -- a chart range naming a sheet that does not exist, for one -- \
+         because those failures are reported by the save. Also an \
          `OSError`, which is what makes `except OSError` work, and a `ValueError`, \
          which is what keeps pre-0.19 `except ValueError` handlers working.\n\n\
          `errno` carries the OS error number when the failure had one, so \
@@ -164,6 +167,25 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          `None` on purpose: setting `filename` makes `OSError` reformat `str()` into \
          `[Errno n] strerror: 'filename'`, discarding this library's message, which \
          already names the path.",
+    )?;
+
+    let file_ty = file.bind(py).clone();
+
+    // A subclass, so that nothing changes for a handler that catches `FileError`,
+    // `OSError` or `ValueError`. What it adds is the builtin every other Python
+    // writer raises for this failure: code moved over from `pandas.to_excel`
+    // commonly has `except PermissionError` around the write, to ask the user to
+    // close a workbook that is still open in Excel.
+    let file_permission = new_exception_class(
+        py,
+        "FilePermissionError",
+        &[file_ty.clone(), permission_error],
+        "A filesystem read or write was refused for lack of permission.\n\n\
+         Raised in place of a plain `FileError` when the operating system reports \
+         `EACCES` or `EPERM`: an output workbook that is open in Excel on Windows, a \
+         folder or file the process may not write or read. A `FileError`, and also a \
+         `PermissionError`, so `except PermissionError` written around another \
+         writer's call keeps working. `errno` is set as on every `FileError`.",
     )?;
 
     // The docstring is deliberately not phrased as a count of raise sites: that
@@ -178,9 +200,30 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
          table name, and a `defined_names` entry colliding with a table name. Excel \
          requires both kinds to be unique across a workbook, and each message names \
          the sheet and both names involved. Workbook rules the writer only detects \
-         while serialising, a duplicate sheet name among them, surface as \
-         `FileError` instead. A subclass of `ConfigurationError`, and so also a \
-         `ValueError`.",
+         while serialising surface as `FileError` instead. A subclass of \
+         `ConfigurationError`, and so also a `ValueError`.",
+    )?;
+    let workbook_validation_ty = workbook_validation.bind(py).clone();
+
+    // Two parents, and the second is history rather than meaning. Naming a sheet
+    // twice in `dfs_to_xlsx` reached the writer's save-time check until 1.10.0 and
+    // raised `FileError`. Several entries may now share a sheet, and what is left
+    // of that failure is this one: a repeated name without a `startrow` puts both
+    // frames on row 1. `docs/stability.md` does not let an existing failure change
+    // its class before 2.0.0, so an `except FileError` or `except OSError` around
+    // that call has to keep catching it.
+    let frame_overlap = new_exception_class(
+        py,
+        "FrameOverlapError",
+        &[workbook_validation_ty, file_ty],
+        "Two frames on one sheet share a row.\n\n\
+         Raised by `dfs_to_xlsx` before anything is written, when two entries that \
+         name the same sheet would write to the same rows. The message names both \
+         entries and their rows. A `WorkbookValidationError`, because the \
+         configuration is well-formed and Excel cannot hold it. Also a `FileError`, \
+         for compatibility only: a sheet name used twice raised `FileError` before \
+         several frames could share a sheet, and handlers written for that keep \
+         working. No file is involved and `errno` is `None`.",
     )?;
 
     // `get_or_init` rather than `set`: re-importing the extension must not invalidate a
@@ -194,7 +237,9 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         configuration_type,
         input_data,
         file,
+        file_permission,
         workbook_validation,
+        frame_overlap,
     });
 
     for (name, class) in [
@@ -204,7 +249,9 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
         ("ConfigurationTypeError", &cached.configuration_type),
         ("InputDataError", &cached.input_data),
         ("FileError", &cached.file),
+        ("FilePermissionError", &cached.file_permission),
         ("WorkbookValidationError", &cached.workbook_validation),
+        ("FrameOverlapError", &cached.frame_overlap),
     ] {
         module.add(name, class.bind(py).clone())?;
     }
@@ -249,6 +296,8 @@ impl FileFailure {
 /// POSIX error numbers this crate reports. Named because the literals are
 /// meaningless on sight, and identical on every platform Python runs on.
 pub(crate) mod errno {
+    /// Operation not permitted.
+    pub(crate) const EPERM: i32 = 1;
     /// No such file or directory.
     pub(crate) const ENOENT: i32 = 2;
     /// Permission denied.
@@ -321,8 +370,20 @@ pub(crate) fn input_data(message: impl Into<String>) -> PyErr {
 /// (`Failed to save workbook to 'out.xlsx': ...`, with the path already in it).
 /// Setting `errno` alone leaves `str()` untouched, which is what makes this
 /// additive.
+///
+/// `EACCES` and `EPERM` select `FilePermissionError`, the subclass that is also
+/// a `PermissionError`. They are the two numbers CPython itself maps to that
+/// builtin, so the class agrees with what `open()` raises for the same refusal.
 pub(crate) fn file(failure: FileFailure) -> PyErr {
-    let error = raise(|t| &t.file, failure.message);
+    let refused = matches!(failure.errno, Some(errno::EACCES | errno::EPERM));
+    let error = raise(
+        if refused {
+            |t| &t.file_permission
+        } else {
+            |t| &t.file
+        },
+        failure.message,
+    );
     let Some(code) = failure.errno else {
         return error;
     };
@@ -337,6 +398,12 @@ pub(crate) fn file(failure: FileFailure) -> PyErr {
 /// Well-formed configuration that Excel does not permit. Also a `ValueError`.
 pub(crate) fn workbook_validation(message: impl Into<String>) -> PyErr {
     raise(|t| &t.workbook_validation, message.into())
+}
+
+/// Two frames on one sheet share a row. A `WorkbookValidationError`, and for
+/// compatibility also a `FileError`; see the class in [`register`] for why.
+pub(crate) fn frame_overlap(message: impl Into<String>) -> PyErr {
+    raise(|t| &t.frame_overlap, message.into())
 }
 
 impl From<crate::convert::ConvertError> for PyErr {

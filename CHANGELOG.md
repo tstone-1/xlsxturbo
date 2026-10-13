@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Several entries of `dfs_to_xlsx` may name the same sheet. Each writes its frame at its
+  own `startrow`, so small tables that belong together can share a sheet. Every frame
+  starts in column A. Tables, formats, formula columns, conditional formats and
+  validations belong to the frame that asks for them. `autofit`, `freeze_panes`,
+  `tab_color`, `column_widths` and `row_heights` describe the whole sheet and are set by
+  its first entry; a later entry that sets one raises `ConfigurationError`. A keyword
+  option addressed by cell reference, such as `cells` or `images`, is applied once per
+  sheet. With `constant_memory=True` the frames of a sheet are listed from top to
+  bottom. (#53)
+
+- `FilePermissionError`, a `FileError` that is also a `PermissionError`. It is raised
+  in place of a plain `FileError` when the operating system refuses the read or write
+  (`EACCES` or `EPERM`): an output workbook that is open in Excel on Windows, a folder
+  the process may not write to, a CSV input it may not read. An `except PermissionError`
+  written around `pandas.to_excel` now also catches the same failure from xlsxturbo.
+  Handlers for `FileError`, `OSError` and `ValueError` are unaffected, and `errno` is
+  set as before. (#54)
+- `FrameOverlapError`, raised when two frames on one sheet share a row. See below.
+
+### Changed
+- Two `dfs_to_xlsx` entries with the same sheet name raised `FileError` during the save.
+  The name is now valid. What is still refused is two frames that share a row: that
+  raises `FrameOverlapError` before anything is written, naming both entries and their
+  rows. Two entries without a `startrow` both start in row 1, so this is what a repeated
+  name without an offset raises. `FrameOverlapError` is a `WorkbookValidationError` and,
+  for compatibility, also a `FileError`: an `except FileError`, `except OSError` or
+  `except ValueError` around such a call catches it as before. Its `errno` is `None`. (#53)
+
 ## [1.10.0] - 2026-10-13
 
 ### Added
