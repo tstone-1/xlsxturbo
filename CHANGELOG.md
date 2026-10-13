@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.9.0] - 2026-10-13
 
 ### Added
 - Python 3.15 is supported. The published `abi3` wheel already installs and runs on it;
@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The test suite runs against polars 2. The test range is `polars>=1.44.2,<3`, and one CI
   leg stays on polars 1. On Python 3.15 polars 1.44.2 cannot build a datetime column, so
   use polars 2.0 or newer there; the stability page has the detail.
+
+### Changed
+- Rust dependencies refreshed; the wheels are built with pyo3 0.29.3.
 
 ## [1.8.0] - 2026-09-30
 
