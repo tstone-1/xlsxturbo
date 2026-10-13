@@ -253,7 +253,7 @@ Software.
 
 Applies to:
 
-- [zopfli 0.8.3](https://github.com/zopfli-rs/zopfli)
+- [zopfli 0.8.4](https://github.com/zopfli-rs/zopfli)
 
 ```text
                                  Apache License
@@ -618,7 +618,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.5.1](https://github.com/rust-lang/cc-rs)
+- [cc 1.8.0](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.14](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.106](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -767,7 +767,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [either 1.18.0](https://github.com/rayon-rs/either)
+- [either 1.19.0](https://github.com/rayon-rs/either)
 
 ```text
 Copyright (c) 2015
@@ -1228,12 +1228,12 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [pyo3-build-config 0.29.2](https://github.com/pyo3/pyo3)
-- [pyo3-ffi 0.29.2](https://github.com/pyo3/pyo3)
-- [pyo3-macros-backend 0.29.2](https://github.com/pyo3/pyo3)
-- [pyo3-macros 0.29.2](https://github.com/pyo3/pyo3)
-- [pyo3 0.29.2](https://github.com/pyo3/pyo3)
-- [pyo3 0.29.2](https://github.com/pyo3/pyo3)
+- [pyo3-build-config 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3-ffi 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3-macros-backend 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3-macros 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3 0.29.3](https://github.com/pyo3/pyo3)
 
 ```text
 Copyright (c) 2023-present PyO3 Project and Contributors.  https://github.com/PyO3
@@ -1308,7 +1308,7 @@ SOFTWARE.
 
 Applies to:
 
-- [libc 0.2.189](https://github.com/rust-lang/libc)
+- [libc 0.2.190](https://github.com/rust-lang/libc)
 
 ```text
 Copyright (c) The Rust Project Developers
@@ -1454,9 +1454,9 @@ Applies to:
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.6](https://github.com/dtolnay/syn)
+- [syn 3.0.9](https://github.com/dtolnay/syn)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
-- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -1701,7 +1701,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
 ```text
 UNICODE LICENSE V3

@@ -40,3 +40,12 @@ Five things that cost time to find:
   the test has to skip that edge or it reports a missing notice for a crate we do not ship.
   Every other `cfg(...)` edge is kept, so a Windows-only crate is still covered in a
   macOS-built wheel's notice.
+- **`cargo metadata` resolves features with the dev-dependencies included**, so a crate that
+  only a dev-dependency's feature switches on looks shipped. Seen 2026-10-13: proptest 1.12
+  pulls in rand 0.10, which enables `getrandom/sys_rng`, and that adds `rand_core` under
+  `getrandom`, which tempfile brings into the wheel. cargo-about omitted `rand_core`
+  correctly and the test reported it as shipped without a notice, with no regeneration able
+  to clear it. The test now keeps only crates that
+  `cargo tree -e normal,build --target all` also lists, which resolves features the way a
+  build without tests does. Neither command is enough alone: `cargo tree` prints the
+  `cfg(any())` edge above and so lists `serde_derive`.

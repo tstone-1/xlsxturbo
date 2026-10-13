@@ -50,6 +50,49 @@ SELF_CRATE = "xlsxturbo"
 NEVER_COMPILED = "cfg(any())"
 
 
+def _resolved_without_dev_dependencies() -> set[tuple[str, str]]:
+    """(name, version) of every crate cargo resolves when dev-dependencies are left out.
+
+    ``cargo metadata`` resolves features with the dev-dependencies included, so
+    an optional dependency that only a dev-dependency switches on shows up there
+    as an ordinary edge. The first case: proptest 1.12 pulls in rand 0.10, which
+    enables ``getrandom/sys_rng``, and that feature adds ``rand_core`` beneath
+    ``getrandom`` -- a crate tempfile brings into the wheel. A build of the wheel
+    never enables that feature, cargo-about leaves ``rand_core`` out, and the walk
+    below reported it as shipped without a notice.
+
+    ``cargo tree -e normal,build`` resolves features the way a build without
+    tests does. It cannot replace the walk, because it prints ``cfg(any())``
+    edges and so lists ``serde_derive``; each over-reports in a different place,
+    and ``_shipped_packages`` keeps what both report.
+    """
+    lines = subprocess.run(
+        [  # noqa: S607 - cargo is on PATH by design here
+            "cargo",
+            "tree",
+            "--edges",
+            "normal,build",
+            "--target",
+            "all",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    resolved: set[tuple[str, str]] = set()
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].startswith("v"):
+            resolved.add((parts[0], parts[1][1:]))
+    assert len(resolved) > 20, f"cargo tree listed only {len(resolved)} crates; it is not working"
+    return resolved
+
+
 def _shipped_packages() -> dict[str, set[str]]:
     """Name to versions for every crate compiled into what we distribute.
 
@@ -57,7 +100,9 @@ def _shipped_packages() -> dict[str, set[str]]:
     normal and build dependencies and refusing dev-dependency edges -- proptest
     and its tree compile only into test binaries, so their notices do not belong
     in a file about the wheel. Default features, which is what maturin builds
-    with (it adds ``pyo3/extension-module`` on top).
+    with (it adds ``pyo3/extension-module`` on top). A crate reachable only
+    through a feature that a dev-dependency enables is dropped as well; see
+    ``_resolved_without_dev_dependencies``.
 
     Returns:
         The crate names, excluding xlsxturbo itself, each with the set of
@@ -96,9 +141,10 @@ def _shipped_packages() -> dict[str, set[str]]:
                 queue.append(dep["pkg"])
 
     versions = {pkg["id"]: pkg["version"] for pkg in meta["packages"]}
+    without_dev_features = _resolved_without_dev_dependencies()
     shipped: dict[str, set[str]] = {}
     for pkg_id in seen:
-        if names[pkg_id] != SELF_CRATE:
+        if names[pkg_id] != SELF_CRATE and (names[pkg_id], versions[pkg_id]) in without_dev_features:
             shipped.setdefault(names[pkg_id], set()).add(versions[pkg_id])
     assert len(shipped) > 20, f"the dependency walk found only {len(shipped)} crates; it is not working"
     return shipped
