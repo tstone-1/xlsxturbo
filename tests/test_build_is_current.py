@@ -29,6 +29,7 @@ the moment it is staged, which is before it can reach anyone else.
 
 from __future__ import annotations
 
+import importlib.metadata
 import subprocess
 from pathlib import Path
 
@@ -48,6 +49,18 @@ pytestmark = pytest.mark.skipif(
 # dependency bump or a maturin setting changes the binary without any `.rs` file
 # moving.
 BUILD_INPUT_NAMES = frozenset({"Cargo.toml", "Cargo.lock", "pyproject.toml"})
+
+# The one input cargo never reads. A change to it alone (a trove classifier, a
+# maturin setting) leaves cargo with nothing to compile, so `maturin develop
+# --release` reinstalls the extension file with its old mtime and the advice in
+# the failure message could not clear the failure. Declaring Python 3.15 hit
+# this on 2026-10-13. maturin does rewrite the installed `.dist-info` on every
+# run, so this file is compared against that instead.
+#
+# Only this file. For the Rust inputs the extension's own mtime stays the
+# reference: an installer can rewrite `.dist-info` from a cached build without
+# cargo having run, and that must not make a stale extension look current.
+MATURIN_ONLY_INPUT = "pyproject.toml"
 
 
 def _tracked_build_inputs() -> list[Path]:
@@ -101,6 +114,21 @@ def _extension_path() -> Path:
     return Path(path).resolve()
 
 
+def _install_record_mtime() -> float:
+    """Return when the installed distribution's `RECORD` was last written.
+
+    Returns:
+        The mtime of `xlsxturbo-<version>.dist-info/RECORD`, which every
+        `maturin develop` rewrites, or 0.0 when the distribution has no
+        readable record, so the caller falls back to the extension's mtime.
+    """
+    record = importlib.metadata.distribution("xlsxturbo").locate_file(
+        f"xlsxturbo-{importlib.metadata.version('xlsxturbo')}.dist-info/RECORD"
+    )
+    path = Path(str(record))
+    return path.stat().st_mtime if path.is_file() else 0.0
+
+
 class TestBuildIsCurrent:
     """The extension in the venv matches the sources in the checkout."""
 
@@ -130,11 +158,13 @@ class TestBuildIsCurrent:
         extension = _extension_path()
         assert extension.is_file(), f"no extension module at {extension}"
         built_at = extension.stat().st_mtime
+        installed_at = max(built_at, _install_record_mtime())
 
         newer = [
             path
             for path in _tracked_build_inputs()
-            if path.is_file() and path.stat().st_mtime > built_at
+            if path.is_file()
+            and path.stat().st_mtime > (installed_at if path.name == MATURIN_ONLY_INPUT else built_at)
         ]
 
         assert not newer, (

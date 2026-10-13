@@ -137,6 +137,12 @@ exclude = ["**/__pycache__", "**/.venv", "target"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.10"
+# Checked as Linux on every machine, which is the platform the `python-lint` CI
+# job runs on. Without this pyright takes the host platform, and on Windows it
+# reported 4 errors for Unix-only calls that are guarded at runtime
+# (`resource.getrusage` in the benchmark, `os.set_blocking` in a test skipped on
+# win32), so the documented gate could not pass there while CI was green.
+pythonPlatform = "Linux"
 # Default mode for the project (tests + benchmarks). The shipped library
 # (python/xlsxturbo) is raised to "strict" via the `strict` path list below.
 typeCheckingMode = "standard"

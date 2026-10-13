@@ -200,6 +200,21 @@ Before releasing, review open Dependabot PRs:
 
 Don't release with unreviewed dependency PRs piling up.
 
+**A cargo PR that moves a crate the wheel ships fails CI, and that failure is not about the
+crate.** Dependabot rewrites `Cargo.lock` and cannot regenerate `THIRD-PARTY-LICENSES.md`,
+so `test_the_notice_names_the_versions_we_ship` fails in the `python-test*` jobs and
+fail-fast cancels their other legs. The pyo3 0.29.3 PR did exactly this. Read the failed job
+to confirm that test is the only failure, then take the update on `main` instead of merging
+the PR:
+
+```bash
+cargo update -p <crate>
+git diff --stat -- Cargo.lock
+uv run --no-sync python scripts/gen_third_party_licenses.py --write
+```
+
+Dependabot closes its PR once `main` carries the version.
+
 ### 6. Verify CI Passes
 
 **IMPORTANT:** Before creating a release tag, verify GitHub Actions succeed.

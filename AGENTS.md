@@ -41,7 +41,7 @@
 
 - **The release smoke test runs `pytest tests/` against an installed wheel from outside the checkout, with only `tests/` copied.** So a test module that reads *repository* files — `mkdocs.yml`, the capability matrix, the generator script, the workflows — has nothing to read there and must skip via `tests.helpers.repo_checkout_available()`, not fail. This is invisible in ordinary CI and surfaces only when a tag is pushed: `test_docs_site.py` and `test_capability_matrix.py` were both added after v0.18.0, so v0.19.0 was the first release to run them and all 16 failed. Inside a checkout a missing file stays a hard failure — the guard distinguishes "no repository here" from "the repository is broken". Reproduce the job locally before tagging: `cp -r tests "$TMP/smoke" && cd "$TMP/smoke" && python -m pytest tests/ -q`.
 - Standard local checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release`, `maturin develop --release`, then `pytest tests/`, then `mkdocs build --strict` when anything under `docs/` moved (needs `uv pip install -r requirements-docs.txt` into the venv once; the `dev` extras deliberately do not carry it). `BUILD.md`'s Pre-Push Checklist is the CI-verbatim list; this line is the short form.
-- **`tests/test_build_is_current.py` fails when the built extension is older than any tracked Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`.** A stale `.so` does not error, it measures the wrong code with full confidence: on 2026-09-02 a whole review ran against 1.3.0 code believing it was HEAD, and a later gate run blamed a timing test for what was the build. CI builds immediately before pytest, so the test only ever fires locally, where `maturin develop --release` is the answer. A `git checkout` that touches a `.rs` file trips it on purpose.
+- **`tests/test_build_is_current.py` fails when the built extension is older than any tracked Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`.** A stale `.so` does not error, it measures the wrong code with full confidence: on 2026-09-02 a whole review ran against 1.3.0 code believing it was HEAD, and a later gate run blamed a timing test for what was the build. CI builds immediately before pytest, so the test only ever fires locally, where `maturin develop --release` is the answer. A `git checkout` that touches a `.rs` file trips it on purpose. `pyproject.toml` is compared against the installed `.dist-info/RECORD` rather than the extension file, because cargo never reads it: after a `pyproject.toml`-only change `maturin develop --release` compiles nothing and leaves the extension's mtime alone.
 - Plain `cargo test` must work outside maturin. Keep `pyo3/extension-module` enabled through `pyproject.toml` / maturin, not directly in `Cargo.toml`.
 - Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
@@ -93,6 +93,8 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 
 - *`THIRD-PARTY-LICENSES.md` is generated; never edit it* -- `python scripts/gen_third_party_licenses.py --write`; `tests/test_third_party_licenses.py` checks it both ways.
 - *`cargo install cargo-about` installs nothing and exits 0* -- use `--features cli`; the generator passes `--output-file` on purpose.
+- *A Dependabot cargo PR for a shipped crate fails CI on the notice test, by construction* -- it cannot regenerate the notice; take the update on `main` as `BUILD.md` step 5 describes.
+- *The notice test keeps only crates a dev-free `cargo tree` also lists* -- `cargo metadata` counts crates that only a dev-dependency's feature enables.
 - *PEP 639 `license-files` puts the notice in the wheel only with `maturin>=1.9`* -- an older backend silently drops it. Full text: [dev-docs/license-notice.md](dev-docs/license-notice.md).
 
 ## The Exception Hierarchy (0.19.0+)
@@ -122,6 +124,7 @@ If a tool is missing from the venv, install the dev extras (`uv pip install -e "
 
 Scoping notes (intentional, do not "fix" by widening):
 - pyright runs `typeCheckingMode = "standard"` project-wide, with the shipped library raised to strict via the top-level `strict = ["python/xlsxturbo"]` path list. Do not use `executionEnvironments` + `typeCheckingMode` for this — that key is silently ignored by pyright 1.1.x.
+- pyright sets `pythonPlatform = "Linux"`, the platform of the `python-lint` CI job, so the gate gives the same answer on Windows and macOS. Code under a `sys.platform == "win32"` branch is therefore not type-checked.
 - bandit scans `python/` only; tests and benchmarks are excluded (asserts and non-crypto `random` data generation are expected there).
 - ruff per-file-ignores: `S101` in tests; `S404/S603/S607/S311/T201` in benchmarks. Google docstring convention.
 - When changing the `dev` deps, run `uv lock` (the lockfile is tracked).
