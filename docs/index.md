@@ -101,7 +101,9 @@ tool.
 - **Header styling** - bold, colors, font size for header row
 - **Named tables** - set custom table names
 - **Custom row heights** - set specific heights per row
-- **Freeze panes** - freeze header row for easier scrolling
+- **Freeze panes** - freeze the header row, or freeze at any row and column
+- **Filter buttons without a table** - an autofilter on a plain range
+- **Sheet tab colours** - colour the tabs of a workbook by group
 - **Multi-sheet workbooks** - write multiple DataFrames to one file
 - **Per-sheet options** - override settings per sheet in multi-sheet workbooks
 - **Constant memory mode** - minimize RAM usage for very large files

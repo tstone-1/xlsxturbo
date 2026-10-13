@@ -105,7 +105,7 @@ class TestGeneratorParsers:
         """The hand-listed scalar flags parse out of the warning function."""
         scalars = _load_generator().parse_constant_memory_disabled_scalars()
         assert "table_style" in scalars
-        assert "freeze_panes" in scalars
+        assert "autofit" in scalars
 
     @pytest.mark.parametrize("function", ["df_to_xlsx", "dfs_to_xlsx", "csv_to_xlsx"])
     def test_signature_params_are_identifiers(self, function: str) -> None:

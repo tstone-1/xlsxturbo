@@ -424,22 +424,17 @@ SIGNATURE_CONVERTED = frozenset(
         "header",
         "autofit",
         "table_style",
-        "freeze_panes",
         "table_name",
         "constant_memory",
-        # Typed in the PyO3 signature as `HashMap<String, String>`, so a wrong
-        # inner type is converted -- and rejected -- by the binding before any
-        # xlsxturbo code runs. Verified, not assumed: it is the only dict option
-        # still declared with a concrete Rust map type rather than
-        # `&Bound<PyAny>`.
-        #
-        # `row_heights` used to be listed here beside it, for the same reason,
-        # and is not any more: it now has `extract_row_heights` and appears in
-        # the probe table below. Recorded as a 1.0 consistency question in
-        # docs/roadmap-1.0.md D8, answered by giving it an extractor -- the
-        # binding's conversion accepted a `bool` key and raised `OverflowError`,
-        # an `ArithmeticError`, for a negative or oversized one.
-        "defined_names",
+        "autofilter",
+        # No dict option is listed here any more. `row_heights` and
+        # `defined_names` both were, while the PyO3 signature declared them with
+        # a concrete Rust map type and the binding converted them before any
+        # xlsxturbo code ran. `row_heights` got `extract_row_heights` because
+        # that conversion accepted a `bool` key and raised `OverflowError`, an
+        # `ArithmeticError`, for a negative or oversized one (docs/roadmap-1.0.md
+        # D8). `defined_names` got `extract_defined_names` when the dict options
+        # began to take any mapping. Both appear in the probe table below.
     }
 )
 
@@ -466,6 +461,11 @@ NESTED_TYPE_PROBES: dict[str, dict[str, Any]] = {
     # A scalar, but validated by `extract_startrow` rather than the binding, so
     # a `bool` is refused rather than silently read as row 1.
     "startrow": {"startrow": "2"},
+    # Bool-only in the binding until it began to take a (row, col) tuple; it has
+    # `extract_freeze_panes` now, so a wrong type is classified and named.
+    "freeze_panes": {"freeze_panes": "yes"},
+    "tab_color": {"tab_color": 5},
+    "defined_names": {"defined_names": {"Total": 5}},
 }
 
 

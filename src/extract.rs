@@ -1,9 +1,12 @@
 //! Python extraction functions for converting Python objects to Rust types
 
-use crate::parse::{parse_cell_ref, parse_horizontal_alignment, parse_vertical_alignment};
+use crate::parse::{
+    parse_cell_ref, parse_color, parse_horizontal_alignment, parse_vertical_alignment,
+};
 use crate::types::{
-    pydict_to_hashmap, pytype_name, reject_unknown_keys as types_reject_unknown_keys, CellWrite,
-    ChartConfig, CheckboxConfig, Comment, ConditionalFormatConfigs, Hyperlink, ImageConfig,
+    mapping_as_dict, pydict_to_hashmap, pytype_name,
+    reject_unknown_keys as types_reject_unknown_keys, sequence_as_list, CellWrite, ChartConfig,
+    CheckboxConfig, Comment, ConditionalFormatConfigs, FreezePanes, Hyperlink, ImageConfig,
     MergedRange, RichTextSegment, SheetConfig, SparklineConfig, TextboxConfig, ValidationConfig,
 };
 use indexmap::IndexMap;
@@ -15,6 +18,8 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "autofit",
     "table_style",
     "freeze_panes",
+    "autofilter",
+    "tab_color",
     "startrow",
     "column_widths",
     "row_heights",
@@ -126,14 +131,15 @@ macro_rules! extract_dict_field {
         match $opts.get_item($key) {
             Ok(val) => {
                 if !val.is_none() {
-                    let dict = val.cast::<pyo3::types::PyDict>().map_err(|_| {
+                    // Any mapping, not only a `dict`: see `mapping_as_dict`.
+                    let dict = mapping_as_dict(&val)?.ok_or_else(|| {
                         crate::errors::configuration_type(format!(
                             "sheet option '{}' must be a dict, got {}",
                             $key,
                             pytype_name(&val)
                         ))
                     })?;
-                    let extracted = $extractor(dict)?;
+                    let extracted = $extractor(&dict)?;
                     $config.$field = Some(extracted);
                 }
             }
@@ -152,14 +158,15 @@ macro_rules! extract_list_field {
         match $opts.get_item($key) {
             Ok(val) => {
                 if !val.is_none() {
-                    let list = val.cast::<pyo3::types::PyList>().map_err(|_| {
+                    // Any sequence, not only a `list`: see `sequence_as_list`.
+                    let list = sequence_as_list(&val)?.ok_or_else(|| {
                         crate::errors::configuration_type(format!(
                             "sheet option '{}' must be a list, got {}",
                             $key,
                             pytype_name(&val)
                         ))
                     })?;
-                    let extracted = $extractor(list)?;
+                    let extracted = $extractor(&list)?;
                     $config.$field = Some(extracted);
                 }
             }
@@ -293,7 +300,29 @@ pub(crate) fn extract_sheet_info<'py>(
         // Extract scalar fields
         extract_scalar!(opts, config, "header", header, "a bool");
         extract_scalar!(opts, config, "autofit", autofit, "a bool");
-        extract_scalar!(opts, config, "freeze_panes", freeze_panes, "a bool");
+        extract_scalar!(opts, config, "autofilter", autofilter, "a bool");
+        match opts.get_item("freeze_panes") {
+            Ok(val) if !val.is_none() => {
+                config.freeze_panes =
+                    Some(extract_freeze_panes(&val, "sheet option 'freeze_panes'")?);
+            }
+            Ok(_) => {}
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>(opts.py()) => {}
+            Err(e) => return Err(e),
+        }
+        // Like `table_style`: an explicit None turns a workbook-wide colour off
+        // for this sheet.
+        match opts.get_item("tab_color") {
+            Ok(val) => {
+                config.tab_color = Some(if val.is_none() {
+                    None
+                } else {
+                    Some(extract_tab_color(&val, "sheet option 'tab_color'")?)
+                });
+            }
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyKeyError>(opts.py()) => {}
+            Err(e) => return Err(e),
+        }
         extract_scalar!(opts, config, "table_name", table_name, "a string");
         match opts.get_item("startrow") {
             Ok(val) if !val.is_none() => {
@@ -418,6 +447,31 @@ const MAX_ROW_INDEX: i64 = 1_048_575;
 /// frame itself still fits below the offset is checked when it is written,
 /// where the row count is known.
 pub(crate) fn extract_startrow(value: &Bound<'_, PyAny>, context: &str) -> PyResult<u32> {
+    // Safe: `extract_grid_index` bounds it by 0..=MAX_ROW_INDEX.
+    extract_grid_index(value, context, MAX_ROW_INDEX).map(|row| row as u32)
+}
+
+/// Extract `defined_names`: name -> Excel reference, both strings.
+///
+/// The parameter was a `HashMap<String, String>` in the PyO3 signature until it
+/// began to take any mapping, so the binding converted it and a wrong inner
+/// type raised PyO3's own `TypeError`. That is still a `TypeError` here, and
+/// now one inside the hierarchy that names the entry.
+pub(crate) fn extract_defined_names(
+    dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<HashMap<String, String>> {
+    let mut names = HashMap::with_capacity(dict.len());
+    for (key, value) in dict.iter() {
+        let name: String = extract_typed!(key, "a string", "defined_names: name");
+        let reference: String = extract_typed!(value, "a string", "defined_names['{}']", name);
+        names.insert(name, reference);
+    }
+    Ok(names)
+}
+
+/// Extract a zero-based row or column index: an integer, never a `bool`,
+/// between 0 and `max`.
+fn extract_grid_index(value: &Bound<'_, PyAny>, context: &str, max: i64) -> PyResult<i64> {
     let wrong_type = || {
         crate::errors::configuration_type(format!(
             "{} must be a non-negative integer, got {}",
@@ -428,17 +482,80 @@ pub(crate) fn extract_startrow(value: &Bound<'_, PyAny>, context: &str) -> PyRes
     if value.is_instance_of::<pyo3::types::PyBool>() {
         return Err(wrong_type());
     }
-    let Ok(row) = value.extract::<i64>() else {
+    let Ok(index) = value.extract::<i64>() else {
         return Err(wrong_type());
     };
-    if !(0..=MAX_ROW_INDEX).contains(&row) {
+    if !(0..=max).contains(&index) {
         return Err(crate::errors::configuration(format!(
             "{} must be between 0 and {}, got {}",
-            context, MAX_ROW_INDEX, row
+            context, max, index
         )));
     }
-    // Safe: bounded by 0..=MAX_ROW_INDEX just above.
-    Ok(row as u32)
+    Ok(index)
+}
+
+/// Extract `freeze_panes`: a bool, or `(row, col)` as XlsxWriter's
+/// `freeze_panes(row, col)` takes it -- the zero-based top-left cell of the
+/// scrolling area, so `(4, 1)` keeps four rows and one column in view.
+///
+/// The limits are checked here because rust_xlsxwriter reports a position
+/// outside the grid with a message that names neither the option nor the
+/// value. A `bool` inside the tuple is refused for the reason `startrow`
+/// refuses one: `(True, 0)` would otherwise freeze one row.
+pub(crate) fn extract_freeze_panes(
+    value: &Bound<'_, PyAny>,
+    context: &str,
+) -> PyResult<FreezePanes> {
+    if value.is_instance_of::<pyo3::types::PyTuple>()
+        || value.is_instance_of::<pyo3::types::PyList>()
+    {
+        let len = value.len()?;
+        if len != 2 {
+            return Err(crate::errors::configuration(format!(
+                "{} must be a bool or a (row, col) pair, got {} elements",
+                context, len
+            )));
+        }
+        let row = extract_grid_index(
+            &value.get_item(0)?,
+            &format!("{} row", context),
+            MAX_ROW_INDEX,
+        )?;
+        let col = extract_grid_index(
+            &value.get_item(1)?,
+            &format!("{} column", context),
+            MAX_COLUMN_INDEX,
+        )?;
+        // Safe: both bounded just above.
+        return Ok(FreezePanes::At(row as u32, col as u16));
+    }
+    // `extract::<bool>` rather than a `PyBool` check: it is what the option
+    // accepted while it was bool-only, `numpy.bool_` included.
+    match value.extract::<bool>() {
+        Ok(true) => Ok(FreezePanes::Header),
+        Ok(false) => Ok(FreezePanes::Off),
+        Err(_) => Err(crate::errors::configuration_type(format!(
+            "{} must be a bool or a (row, col) tuple, got {}",
+            context,
+            pytype_name(value)
+        ))),
+    }
+}
+
+/// Extract `tab_color` as `0xRRGGBB`: `'#RRGGBB'` or one of the named colours
+/// every other colour option takes.
+///
+/// Parsed here, not left to the writer: `Worksheet::set_tab_color` ignores a
+/// colour it cannot use, so a typo would give an uncoloured tab and no error.
+pub(crate) fn extract_tab_color(value: &Bound<'_, PyAny>, context: &str) -> PyResult<u32> {
+    let color: String = value.extract().map_err(|_| {
+        crate::errors::configuration_type(format!(
+            "{} must be a color string, got {}",
+            context,
+            pytype_name(value)
+        ))
+    })?;
+    parse_color(&color).map_err(|e| crate::errors::configuration(format!("{}: {}", context, e)))
 }
 
 /// Extract a `column_widths` or `row_heights` value: a real number, never a
@@ -675,8 +792,8 @@ pub(crate) fn extract_conditional_formats(
             "a string column name or pattern",
             "conditional_formats key"
         );
-        // Accept either a single dict or a list of dicts
-        if let Ok(list) = fmt_value.cast::<pyo3::types::PyList>() {
+        // Accept either a single dict or a list (any sequence) of dicts
+        if let Some(list) = sequence_as_list(&fmt_value)? {
             let mut configs = Vec::new();
             for (i, item) in list.iter().enumerate() {
                 let d = item.cast::<pyo3::types::PyDict>().map_err(|_| {
@@ -933,7 +1050,7 @@ pub(crate) fn extract_rich_text(
         let cell_str: String = extract_typed!(cell_ref, "a string cell reference", "rich_text key");
         let mut segments: Vec<RichTextSegment> = Vec::new();
 
-        if let Ok(list) = segments_list.cast::<pyo3::types::PyList>() {
+        if let Some(list) = sequence_as_list(&segments_list)? {
             for (idx, item) in list.iter().enumerate() {
                 // Check if item is a tuple (text, format_dict) or just a string
                 if let Ok(tuple) = item.cast::<pyo3::types::PyTuple>() {

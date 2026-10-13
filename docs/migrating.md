@@ -159,7 +159,9 @@ xlsxturbo.df_to_xlsx(
 ```
 
 Formats are keyed by column name or wildcard pattern, widths by column index, rather than
-by letter. The
+by letter. Three more worksheet calls map one to one: `sheet.freeze_panes(row, col)` is
+`freeze_panes=(row, col)` with the same numbers, `sheet.autofilter(...)` over the written
+range is `autofilter=True`, and `sheet.set_tab_color(...)` is `tab_color=`. The
 full set of options is on [Formatting](formatting.md) and in the
 [capability matrix](capability-matrix.md). Tables, conditional formats, charts and data
 validation are keyword arguments as well; see their pages in the Guide.

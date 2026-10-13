@@ -161,12 +161,14 @@ Argument conversion performed by the Python/Rust binding before xlsxturbo sees t
 raises a plain `TypeError`. Passing a non-string where the signature requires `str` is the
 usual way to hit this. Everything xlsxturbo itself validates is in the hierarchy.
 
-One dict-valued option falls on the binding's side of that line, which is worth knowing
-because its neighbours do not: **`defined_names`** is typed in the signature, so a wrong
-inner type is rejected by the conversion and arrives as a plain `TypeError`.
-`column_widths` and `row_heights` look identical from Python and are read by extractors,
-so the same mistake in either is a `ConfigurationTypeError`. Catch
-`(XlsxTurboError, TypeError)` if you need to treat all option-type mistakes alike.
+No dict-valued option is on the binding's side of that line any more. **`defined_names`**
+was the last one: it was typed in the signature, so a wrong inner type was rejected by the
+conversion and arrived as a plain `TypeError`. It is read by an extractor now, like
+`column_widths` and `row_heights`, and the same mistake is a `ConfigurationTypeError` that
+names the entry. That class is a `TypeError`, so an existing `except TypeError` still
+catches it. The scalar options the signature types (`header`, `autofit`, `table_style`,
+`table_name`, `autofilter`, `constant_memory`, `sheet_name`) still raise the plain one, so
+catch `(XlsxTurboError, TypeError)` if you need to treat all option-type mistakes alike.
 
 `row_heights` was on the binding's side of the line until 1.3.x, and moving it fixed
 more than the class name. The conversion accepted `{True: 40}` — `bool` subclasses `int`

@@ -95,6 +95,31 @@ per-sheet dict, `PathArg` is what `input_path` accepts, and `OutputTarget` (a `P
 shapes and aliases and nothing else, so `import *` brings those in without the typing
 helpers they are built from.
 
+**The dict- and list-valued options are annotated `Mapping` and `Sequence`, and take any
+mapping or sequence.** A `dict` is invariant in its value type, so a parameter declared
+`dict[str, str | int | ...]` refuses a variable you annotated `dict[str, str]`, although
+every value in it is allowed. A `list` is invariant in the same way. `Mapping` and
+`Sequence` are covariant, so the narrow types check:
+
+```python
+notes: dict[str, str] = {"D1": "checked", "D2": "open"}
+links: list[tuple[str, str]] = [("A1", "https://example.com")]
+xlsxturbo.df_to_xlsx(df, "out.xlsx", cells=notes, hyperlinks=links)
+```
+
+At runtime the same options accept a mapping that is not a `dict`, such as a
+`types.MappingProxyType`, and a sequence that is not a `list`, such as a tuple. Each is
+read in its own order. This covers `merged_ranges`, `hyperlinks`, the segment lists in
+`rich_text`, a rule list in `conditional_formats`, and the `sheets` argument of
+`dfs_to_xlsx`. Three details:
+
+- `column_widths` is declared as three mappings (integer keys, string keys, both),
+  because a mapping is invariant in its key type.
+- A string is a sequence of strings to a type checker, so `rich_text={"A1": "plain"}`
+  type-checks. The runtime refuses it; write `["plain"]`.
+- A per-sheet options dict and every nested option dict stay `dict`: they are
+  `TypedDict` shapes.
+
 **Fields the library requires are marked required.** `ImageOptions` needs `path`,
 `ChartOptions` needs `type`, `SparklineOptions` needs `range`, and so on — so a checker
 rejects `images={"D1": {}}` rather than leaving it for the runtime. `ChartSeriesOptions` is
@@ -137,7 +162,7 @@ usually answers the question faster than the stub does:
 
 | Shape | Example options | Keyed by |
 |-------|-----------------|----------|
-| Scalar flag or name | `header`, `autofit`, `table_style`, `freeze_panes` | — |
+| Scalar flag or name | `header`, `autofit`, `table_style`, `freeze_panes`, `autofilter`, `tab_color`, `startrow` | — |
 | Column-keyed mapping | `column_widths` | Column index (`0`), or `"_all"` for every column |
 | Column-keyed mapping | `column_formats` | Column name, or wildcard pattern such as `"price_*"` |
 | Column-keyed mapping | `formula_columns` | The name of the new column the formula fills |

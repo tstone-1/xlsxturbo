@@ -1,6 +1,6 @@
 """A structured, reusable bundle of export options.
 
-``df_to_xlsx`` takes 27 parameters. That is the whole problem this module exists
+``df_to_xlsx`` takes 30 parameters. That is the whole problem this module exists
 to solve: the options are discoverable only by reading a long signature, they
 cannot be built up in pieces, and a set of them cannot be named, stored, or
 passed around::
@@ -28,10 +28,10 @@ alternative.
 **It lowers to keyword arguments; it does not wrap the entry points.** The
 obvious spelling is ``df_to_xlsx(df, path, options=REPORT)``, which needs a
 Python wrapper around the compiled function. That wrapper would have to either
-repeat all 27 parameters -- a hand-maintained duplicate, and duplicated lists
+repeat all 30 parameters -- a hand-maintained duplicate, and duplicated lists
 are what this repository keeps getting caught by -- or collapse them to
 ``**kwargs``, which would replace an explicit, fully typed signature with an
-opaque one. An IDE showing 27 named parameters today would show ``**kwargs``
+opaque one. An IDE showing 30 named parameters today would show ``**kwargs``
 instead. That is the opposite of the goal, so the compiled functions are left
 exactly as they are and every existing call keeps working untouched.
 
@@ -54,6 +54,7 @@ an addition, not a replacement, and nothing here is deprecated.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import date, datetime
 from enum import Enum
@@ -119,9 +120,11 @@ class ExportOptions:
     # Layout
     header: bool = _UNSET
     autofit: bool = _UNSET
-    freeze_panes: bool = _UNSET
-    column_widths: dict[int | str, int | float] | None = _UNSET
-    row_heights: dict[int, int | float] | None = _UNSET
+    freeze_panes: bool | tuple[int, int] = _UNSET
+    autofilter: bool = _UNSET
+    tab_color: str | None = _UNSET
+    column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = _UNSET
+    row_heights: Mapping[int, int | float] | None = _UNSET
 
     # Excel table
     table_style: str | None = _UNSET
@@ -129,31 +132,31 @@ class ExportOptions:
 
     # Formatting
     header_format: HeaderFormat | None = _UNSET
-    column_formats: dict[str, ColumnFormat] | None = _UNSET
-    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = _UNSET
+    column_formats: Mapping[str, ColumnFormat] | None = _UNSET
+    conditional_formats: Mapping[str, ConditionalFormat | Sequence[ConditionalFormat]] | None = _UNSET
 
     # Content
-    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = _UNSET
-    formula_columns: dict[str, str] | None = _UNSET
-    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = _UNSET
-    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = _UNSET
-    comments: dict[str, str | CommentOptions] | None = _UNSET
-    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = _UNSET
-    validations: dict[str, ValidationOptions] | None = _UNSET
+    cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = _UNSET
+    formula_columns: Mapping[str, str] | None = _UNSET
+    merged_ranges: Sequence[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = _UNSET
+    hyperlinks: Sequence[tuple[str, str] | tuple[str, str, str]] | None = _UNSET
+    comments: Mapping[str, str | CommentOptions] | None = _UNSET
+    rich_text: Mapping[str, Sequence[tuple[str, RichTextFormat] | str]] | None = _UNSET
+    validations: Mapping[str, ValidationOptions] | None = _UNSET
 
     # Media and charts
-    images: dict[str, str | ImageOptions] | None = _UNSET
-    checkboxes: dict[str, bool | CheckboxOptions] | None = _UNSET
-    textboxes: dict[str, str | TextboxOptions] | None = _UNSET
-    charts: dict[str, ChartOptions] | None = _UNSET
-    sparklines: dict[str, SparklineOptions] | None = _UNSET
+    images: Mapping[str, str | ImageOptions] | None = _UNSET
+    checkboxes: Mapping[str, bool | CheckboxOptions] | None = _UNSET
+    textboxes: Mapping[str, str | TextboxOptions] | None = _UNSET
+    charts: Mapping[str, ChartOptions] | None = _UNSET
+    sparklines: Mapping[str, SparklineOptions] | None = _UNSET
 
     # Placement
     startrow: int = _UNSET
 
     # Workbook-level: accepted by the entry points, not by a per-sheet dict.
     constant_memory: bool = _UNSET
-    defined_names: dict[str, str] | None = _UNSET
+    defined_names: Mapping[str, str] | None = _UNSET
 
     def as_kwargs(self) -> dict[str, Any]:
         """Return the set options as keyword arguments for the entry points.

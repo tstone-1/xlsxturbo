@@ -31,7 +31,6 @@ xlsxturbo.dfs_to_xlsx([
 
 **Note:** Constant memory mode emits a `RuntimeWarning` and disables some features that require random access:
 - `table_style` (Excel tables)
-- `freeze_panes`
 - `row_heights`
 - `autofit`
 - `conditional_formats`
@@ -48,4 +47,6 @@ xlsxturbo.dfs_to_xlsx([
 - `sparklines`
 - `cells`
 
-Plain `column_widths`, `header_format`, and `column_formats` remain supported.
+Plain `column_widths`, `header_format`, and `column_formats` remain supported. So do
+`freeze_panes`, `autofilter`, `tab_color` and `startrow`, which are properties of the sheet
+and need no second pass over the rows.

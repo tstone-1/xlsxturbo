@@ -64,7 +64,10 @@ Available per-sheet options:
 - `header` (bool): Include column names as header row
 - `autofit` (bool): Automatically adjust column widths
 - `table_style` (str|None): Excel table style or None to disable
-- `freeze_panes` (bool): Freeze header row
+- `freeze_panes` (bool or (row, col)): Freeze the header row, or freeze at a chosen cell
+- `autofilter` (bool): Filter buttons on the header row, without a table
+- `tab_color` (str|None): Sheet tab colour, or None to remove the workbook-wide colour
+- `startrow` (int): Zero-based row of the header
 - `column_widths` (dict): Custom column widths
 - `row_heights` (dict): Custom row heights
 - `table_name` (str): Custom Excel table name
@@ -83,3 +86,19 @@ Available per-sheet options:
 - `charts` (dict): Native Excel charts (cell_ref -> chart options)
 - `sparklines` (dict): Mini in-cell charts (location ref -> sparkline options; range key = grouped)
 - `cells` (dict): Arbitrary cell writes (cell_ref -> value or {value, num_format})
+
+## Sheet tab colours
+
+Set `tab_color` per sheet to colour the tabs by group. A sheet without the option keeps
+the default tab.
+
+```python
+xlsxturbo.dfs_to_xlsx([
+    (inputs,  "Inputs",  {"tab_color": "#4472C4"}),
+    (results, "Results", {"tab_color": "#70AD47"}),
+    (legend,  "Legend"),
+], "report.xlsx")
+```
+
+As a keyword argument, `tab_color` colours every sheet. A per-sheet value overrides it,
+and a per-sheet `None` removes it for that sheet.

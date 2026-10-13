@@ -95,6 +95,20 @@ def _check_freeze_panes(path: str, _factory: PathFactory) -> None:
     assert ws.freeze_panes == "A2"
 
 
+def _check_autofilter(path: str, _factory: PathFactory) -> None:
+    """autofilter=True must put a filter over the header and the data rows."""
+    xlsxturbo.df_to_xlsx(_base_df(), path, autofilter=True)
+    assert active_ws(load_workbook(path)).auto_filter.ref == "A1:B4"
+
+
+def _check_tab_color(path: str, _factory: PathFactory) -> None:
+    """tab_color must colour the sheet tab."""
+    xlsxturbo.df_to_xlsx(_base_df(), path, tab_color="#4472C4")
+    color = active_ws(load_workbook(path)).sheet_properties.tabColor
+    assert color is not None
+    assert color.rgb == "FF4472C4"
+
+
 def _check_startrow(path: str, _factory: PathFactory) -> None:
     """startrow=2 must put the header on row 3 and leave rows 1-2 empty."""
     assert xlsxturbo.df_to_xlsx(_base_df(), path, startrow=2) == (4, 2)
@@ -267,6 +281,8 @@ COVERAGE: dict[str, Callable[[str, PathFactory], None]] = {
     "table_name": _check_table_name,
     "freeze_panes": _check_freeze_panes,
     "startrow": _check_startrow,
+    "autofilter": _check_autofilter,
+    "tab_color": _check_tab_color,
     "constant_memory": _check_constant_memory,
     "column_widths": _check_column_widths,
     "row_heights": _check_row_heights,

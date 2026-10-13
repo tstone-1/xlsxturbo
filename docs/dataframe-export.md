@@ -58,6 +58,58 @@ xlsxturbo.df_to_xlsx(
 In `dfs_to_xlsx`, `startrow` is a workbook default that each sheet can override in its
 options dict. It also works with `constant_memory=True`.
 
+## Freezing rows and columns
+
+`freeze_panes=True` freezes the header row. To keep a key column in view as well, or to
+freeze at another row, pass `(row, col)`: the zero-based cell that becomes the top-left
+corner of the scrolling area, as in XlsxWriter's `freeze_panes(row, col)`.
+
+```python
+# The header row and the first column stay in view
+xlsxturbo.df_to_xlsx(df, "wide.xlsx", freeze_panes=(1, 1))
+
+# Three title rows, the header below them, and the first column
+xlsxturbo.df_to_xlsx(df, "matrix.xlsx", startrow=3, freeze_panes=(4, 1))
+```
+
+`True` follows `startrow` and does nothing with `header=False`. A tuple is taken as
+given, so it does not move with `startrow`. `(0, 0)` freezes nothing.
+
+## Filter buttons without a table
+
+`autofilter=True` puts filter buttons on the header row and leaves the range a plain
+range. Use it when the sheet must not contain an Excel table: a title in merged cells
+above the header, a reader that does not accept tables, or a table name that is already
+taken.
+
+```python
+xlsxturbo.df_to_xlsx(df, "list.xlsx", autofilter=True)
+```
+
+- The filter covers the header row and the data rows, `formula_columns` included, and it
+  follows `startrow`. A frame without rows gets the buttons on the header row alone.
+- Only the buttons are added. No filter condition is set and no row is hidden.
+- `autofilter=True` with a `table_style` raises `ConfigurationError`, because a table
+  has its own filter. So does `autofilter=True` with `header=False`: the first data row
+  would carry the buttons and drop out of the filter.
+
+For filter buttons with banded rows and a named range, use an [Excel table](tables.md).
+
+## Sheet tab colour
+
+`tab_color` colours the sheet tab. It takes `'#RRGGBB'` or one of the colour names the
+format options take, such as `'red'`.
+
+```python
+xlsxturbo.df_to_xlsx(df, "out.xlsx", tab_color="#4472C4")
+```
+
+To colour tabs by group, set it per sheet: see
+[Multi-sheet workbooks](multi-sheet-workbooks.md#sheet-tab-colours).
+
+`freeze_panes`, `autofilter` and `tab_color` are properties of the sheet and not cell
+writes, so all three also work with `constant_memory=True`.
+
 ## Writing to memory instead of a file
 
 `output_path` also accepts a binary file-like object: `io.BytesIO`, a file opened with

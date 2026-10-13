@@ -12,7 +12,7 @@ use crate::parse::{
 };
 use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
-    WriteConfig,
+    FreezePanes, WriteConfig,
 };
 use crate::workbook::{apply_defined_names, save_to, Destination};
 use crate::write::{
@@ -21,7 +21,7 @@ use crate::write::{
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use rayon::prelude::*;
-use rust_xlsxwriter::{Format, Table, Workbook, Worksheet};
+use rust_xlsxwriter::{Color, Format, Table, Workbook, Worksheet};
 use std::collections::HashMap;
 use std::fs::File;
 
@@ -497,6 +497,8 @@ pub(crate) fn write_sheet_data(
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
 ) -> Result<(u32, u16), String> {
+    reject_autofilter_conflicts(config)?;
+
     // Create formats
     let date_format = Format::new().set_num_format(DATE_NUM_FORMAT);
     let datetime_format = Format::new().set_num_format(DATETIME_NUM_FORMAT);
@@ -530,6 +532,8 @@ pub(crate) fn write_sheet_data(
     // Track max content lengths for autofit+cap (only when both are active)
     let track_widths = config.autofit && opts.column_widths.is_some_and(|w| w.contains_key("_all"));
     let mut max_lens = vec![0usize; columns.len()];
+    // Header lengths on their own, for the filter-button allowance below.
+    let mut header_lens = vec![0usize; columns.len()];
 
     // Refuse a frame that would run off the bottom of the grid below `startrow`
     // before writing any of it, with a message that names the offset.
@@ -557,6 +561,7 @@ pub(crate) fn write_sheet_data(
             if track_widths {
                 // Char count, not byte count: width is a visual estimate.
                 max_lens[col_idx] = col_name.chars().count();
+                header_lens[col_idx] = max_lens[col_idx];
             }
             if let Some(ref fmt) = header_fmt {
                 worksheet
@@ -642,11 +647,23 @@ pub(crate) fn write_sheet_data(
             .ok_or("Row count exceeds u32 limit")?;
     }
 
-    // Convert tracked content lengths to approximate Excel column widths
+    // Convert tracked content lengths to approximate Excel column widths. A
+    // header cell that carries a filter button needs room for it beside the
+    // text, or the button covers the last characters of the name.
+    let button_allowance = if header_has_filter_buttons(config, row_count, columns.len()) {
+        FILTER_BUTTON_WIDTH
+    } else {
+        0.0
+    };
     let content_widths: Vec<f64> = if track_widths {
         max_lens
             .iter()
-            .map(|&len| (len as f64 + 1.0).max(8.43))
+            .zip(&header_lens)
+            .map(|(&len, &header_len)| {
+                let content = len as f64 + 1.0;
+                let header = header_len as f64 + 1.0 + button_allowance;
+                content.max(header).max(8.43)
+            })
             .collect()
     } else {
         Vec::new()
@@ -669,6 +686,99 @@ pub(crate) fn write_sheet_data(
 
     // Rows written, not the last row index: the offset is not part of the frame.
     Ok((row_idx - config.startrow, total_col_count))
+}
+
+/// Width of a filter button, in the character units column widths are given in.
+///
+/// rust_xlsxwriter's own `autofit()` adds 16 pixels to a header cell that
+/// carries one, at 7 pixels per character of the default font. The capped
+/// autofit path estimates widths here instead of calling `autofit()`, and left
+/// that allowance out until it was measured: for an 18-character header it
+/// produced a width of 19 where the crate produces 22.43. Rendered in Excel, an
+/// all-capitals header lost its last character behind the button at the old
+/// width and shows in full with the allowance.
+const FILTER_BUTTON_WIDTH: f64 = 16.0 / 7.0;
+
+/// Whether the header cells of this sheet carry filter buttons: a plain-range
+/// autofilter, or an Excel table under the gate `apply_worksheet_features`
+/// creates one by.
+fn header_has_filter_buttons(config: &WriteConfig<'_>, row_count: usize, col_count: usize) -> bool {
+    if !config.include_header || config.constant_memory || col_count == 0 {
+        return false;
+    }
+    config.autofilter || (config.table_style.is_some() && row_count > 0)
+}
+
+/// Refuse the two `autofilter` combinations that cannot mean what they say,
+/// before a single cell is written.
+///
+/// A table brings its own filter, and rust_xlsxwriter refuses the overlap only
+/// once the table is on the sheet, in words that name neither option. Without
+/// a header row the first data row would carry the buttons and drop out of the
+/// filtered range, which is never what was asked for.
+fn reject_autofilter_conflicts(config: &WriteConfig<'_>) -> Result<(), String> {
+    if !config.autofilter {
+        return Ok(());
+    }
+    if config.table_style.is_some() {
+        return Err(
+            "autofilter=True cannot be combined with table_style: an Excel table has its own \
+             filter buttons. Drop one of the two."
+                .to_string(),
+        );
+    }
+    if !config.include_header {
+        return Err(
+            "autofilter=True needs the header row: with header=False the first data row would \
+             carry the filter buttons and be left out of the filter."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Apply the three options that are sheet properties rather than cell writes:
+/// tab colour, freeze panes and the plain-range autofilter.
+///
+/// None of them revisits a row, so they also apply under `constant_memory`
+/// (measured against rust_xlsxwriter 0.99.0: `<tabColor>`, `<pane>` and
+/// `<autoFilter>` are all written for a constant-memory worksheet when set
+/// after the data).
+///
+/// `filter_col_count` is the number of columns the filter spans. Unlike a
+/// table it includes the formula columns: a plain range has no reason to stop
+/// short of them, and a row of filter buttons that ends two columns early
+/// reads as a defect. A frame with no data rows gets a header-only filter,
+/// which Excel accepts; a frame with no columns gets none.
+fn apply_sheet_properties(
+    worksheet: &mut Worksheet,
+    config: &WriteConfig<'_>,
+    last_row_idx: u32,
+    filter_col_count: u16,
+) -> Result<(), String> {
+    if let Some(rgb) = config.tab_color {
+        worksheet.set_tab_color(Color::RGB(rgb));
+    }
+
+    let freeze_at = match config.freeze_panes {
+        FreezePanes::Off => None,
+        // Follows `startrow`; nothing to freeze below when no header is written.
+        FreezePanes::Header => config.include_header.then_some((config.startrow + 1, 0)),
+        FreezePanes::At(row, col) => Some((row, col)),
+    };
+    if let Some((row, col)) = freeze_at {
+        worksheet
+            .set_freeze_panes(row, col)
+            .map_err(|e| format!("Failed to freeze panes: {}", e))?;
+    }
+
+    if config.autofilter && filter_col_count > 0 {
+        let last_row = last_row_idx.saturating_sub(1).max(config.startrow);
+        worksheet
+            .autofilter(config.startrow, 0, last_row, filter_col_count - 1)
+            .map_err(|e| format!("Failed to add autofilter: {}", e))?;
+    }
+    Ok(())
 }
 
 pub(crate) fn write_configured_sheet(
@@ -711,9 +821,6 @@ fn warn_constant_memory_skips(
     if config.table_style.is_some() {
         disabled.push("table_style");
     }
-    if config.freeze_panes {
-        disabled.push("freeze_panes");
-    }
     if config.autofit {
         disabled.push("autofit");
     }
@@ -754,8 +861,9 @@ fn warn_constant_memory_skips(
 /// Handles: table formatting, formula columns, conditional formats, freeze panes,
 /// column widths/autofit, row heights, merged ranges, hyperlinks, comments,
 /// validations, rich text, images, checkboxes, textboxes, native Excel charts,
-/// sparklines, and arbitrary cell writes. All features except column widths,
-/// header format, and column formats are skipped in constant_memory mode.
+/// sparklines, and arbitrary cell writes. In constant_memory mode only column
+/// widths, header format, column formats and the sheet properties (tab colour,
+/// freeze panes, autofilter) are applied; everything else is skipped.
 #[allow(clippy::too_many_arguments)]
 fn apply_worksheet_features(
     py: Python<'_>,
@@ -770,13 +878,15 @@ fn apply_worksheet_features(
     opts: &EffectiveOpts<'_>,
     content_widths: &[f64],
 ) -> Result<u16, String> {
-    // In constant_memory mode, only column widths (without autofit) are supported.
+    // In constant_memory mode, only column widths (without autofit) and the
+    // sheet properties are supported.
     // Warn about every other requested feature right here, next to the skip.
     if config.constant_memory {
         warn_constant_memory_skips(py, sheet_name, config, opts)?;
         if let Some(widths) = opts.column_widths {
             apply_column_widths(worksheet, col_count, widths)?;
         }
+        apply_sheet_properties(worksheet, config, last_row_idx, col_count)?;
         return Ok(col_count);
     }
 
@@ -844,12 +954,9 @@ fn apply_worksheet_features(
         }
     }
 
-    // Freeze panes (freeze header row)
-    if config.freeze_panes && config.include_header {
-        worksheet
-            .set_freeze_panes(config.startrow + 1, 0)
-            .map_err(|e| format!("Failed to freeze panes: {}", e))?;
-    }
+    // Tab colour, freeze panes and the plain-range autofilter. After the
+    // formula columns, so the filter spans them.
+    apply_sheet_properties(worksheet, config, last_row_idx, total_col_count)?;
 
     // Apply custom column widths and/or autofit
     if let Some(widths) = opts.column_widths {

@@ -30,6 +30,7 @@ compiled extension, so it is safe to import from anywhere.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from os import PathLike
 from typing import Literal, Protocol, TypedDict
@@ -486,24 +487,28 @@ class SheetOptions(TypedDict, total=False):
     header: bool
     autofit: bool
     table_style: str | None
-    freeze_panes: bool
+    freeze_panes: bool | tuple[int, int]  # True: below the header; (row, col): at that cell
+    autofilter: bool  # Filter buttons on the header row, without a table
+    tab_color: str | None  # '#RRGGBB' or a named colour; None removes a workbook-wide colour
     startrow: int  # Zero-based sheet row of the header; rows above stay free
-    column_widths: dict[int | str, int | float] | None  # Keys: int index or '_all'
-    row_heights: dict[int, int | float] | None
+    # Keys: int index or '_all'. Three mappings, because a mapping is invariant in its key
+    # type: `Mapping[int | str, float]` alone refuses a `dict[int, float]`.
+    column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None
+    row_heights: Mapping[int, int | float] | None
     table_name: str | None
     header_format: HeaderFormat | None
-    column_formats: dict[str, ColumnFormat] | None  # Pattern -> format ('prefix*', '*suffix', '*contains*', exact)
-    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None  # Column -> config
-    formula_columns: dict[str, str] | None  # Column name -> Excel formula template with {row} placeholder
-    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text[, format])
-    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url[, display_text])
-    comments: dict[str, str | CommentOptions] | None  # Cell ref -> comment text or options
-    validations: dict[str, ValidationOptions] | None  # Column name/pattern -> validation options
-    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> segments
-    images: dict[str, str | ImageOptions] | None  # Cell ref -> image path or options
-    checkboxes: dict[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
-    textboxes: dict[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
-    charts: dict[str, ChartOptions] | None  # Cell ref -> native Excel chart options
-    sparklines: dict[str, SparklineOptions] | None  # Location ref -> sparkline options
+    column_formats: Mapping[str, ColumnFormat] | None  # Pattern -> format ('prefix*', '*suffix', '*contains*', exact)
+    conditional_formats: Mapping[str, ConditionalFormat | Sequence[ConditionalFormat]] | None  # Column -> config
+    formula_columns: Mapping[str, str] | None  # Column name -> Excel formula template with {row} placeholder
+    merged_ranges: Sequence[tuple[str, str] | tuple[str, str, HeaderFormat]] | None  # (range, text[, format])
+    hyperlinks: Sequence[tuple[str, str] | tuple[str, str, str]] | None  # (cell, url[, display_text])
+    comments: Mapping[str, str | CommentOptions] | None  # Cell ref -> comment text or options
+    validations: Mapping[str, ValidationOptions] | None  # Column name/pattern -> validation options
+    rich_text: Mapping[str, Sequence[tuple[str, RichTextFormat] | str]] | None  # Cell ref -> segments
+    images: Mapping[str, str | ImageOptions] | None  # Cell ref -> image path or options
+    checkboxes: Mapping[str, bool | CheckboxOptions] | None  # Cell ref -> checked state or options
+    textboxes: Mapping[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
+    charts: Mapping[str, ChartOptions] | None  # Cell ref -> native Excel chart options
+    sparklines: Mapping[str, SparklineOptions] | None  # Location ref -> sparkline options
     # Cell ref -> value or options
-    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None
+    cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None

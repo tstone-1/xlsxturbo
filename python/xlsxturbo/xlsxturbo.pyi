@@ -7,6 +7,7 @@ so that ``from xlsxturbo.xlsxturbo import HeaderFormat`` keeps type-checking for
 code written before they moved.
 """
 
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 
 from xlsxturbo.types import (
@@ -154,28 +155,30 @@ def df_to_xlsx(
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
-    freeze_panes: bool = False,
-    column_widths: dict[int | str, int | float] | None = None,
+    freeze_panes: bool | tuple[int, int] = False,
+    column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
-    row_heights: dict[int, int | float] | None = None,
+    row_heights: Mapping[int, int | float] | None = None,
     constant_memory: bool = False,
-    column_formats: dict[str, ColumnFormat] | None = None,
-    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
-    formula_columns: dict[str, str] | None = None,
-    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
-    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
-    comments: dict[str, str | CommentOptions] | None = None,
-    validations: dict[str, ValidationOptions] | None = None,
-    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
-    images: dict[str, str | ImageOptions] | None = None,
-    checkboxes: dict[str, bool | CheckboxOptions] | None = None,
-    textboxes: dict[str, str | TextboxOptions] | None = None,
-    charts: dict[str, ChartOptions] | None = None,
-    defined_names: dict[str, str] | None = None,
-    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
-    sparklines: dict[str, SparklineOptions] | None = None,
+    column_formats: Mapping[str, ColumnFormat] | None = None,
+    conditional_formats: Mapping[str, ConditionalFormat | Sequence[ConditionalFormat]] | None = None,
+    formula_columns: Mapping[str, str] | None = None,
+    merged_ranges: Sequence[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
+    hyperlinks: Sequence[tuple[str, str] | tuple[str, str, str]] | None = None,
+    comments: Mapping[str, str | CommentOptions] | None = None,
+    validations: Mapping[str, ValidationOptions] | None = None,
+    rich_text: Mapping[str, Sequence[tuple[str, RichTextFormat] | str]] | None = None,
+    images: Mapping[str, str | ImageOptions] | None = None,
+    checkboxes: Mapping[str, bool | CheckboxOptions] | None = None,
+    textboxes: Mapping[str, str | TextboxOptions] | None = None,
+    charts: Mapping[str, ChartOptions] | None = None,
+    defined_names: Mapping[str, str] | None = None,
+    cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
+    sparklines: Mapping[str, SparklineOptions] | None = None,
     startrow: int = 0,
+    autofilter: bool = False,
+    tab_color: str | None = None,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
 
@@ -193,7 +196,12 @@ def df_to_xlsx(
             column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
-        freeze_panes: Freeze the header row for easier scrolling (default: False).
+        freeze_panes: ``True`` freezes the header row (default: False). A ``(row, col)``
+            tuple freezes at that zero-based cell instead, as XlsxWriter's
+            ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
+            area, so ``(4, 1)`` keeps four rows and one column in view. ``True``
+            follows ``startrow`` and does nothing with header=False; a tuple is
+            taken as given.
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
             An integer key must be a non-negative index within Excel's column range
             (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
@@ -207,11 +215,12 @@ def df_to_xlsx(
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode for minimal RAM usage (default: False).
-            When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
+            When enabled, emits RuntimeWarning and disables: table_style,
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
             images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
-            header_format, and column_formats remain supported.
+            header_format, column_formats, freeze_panes, autofilter and tab_color remain
+            supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             First matching pattern wins (order preserved).
@@ -270,6 +279,15 @@ def df_to_xlsx(
             table, freeze panes, formula columns, conditional formats and validations
             move with the frame. The returned row count does not include the offset.
             Example: startrow=2 with cells={'A1': 'Q3 report'}
+        autofilter: Put filter buttons on the header row of the written range, without
+            making it an Excel table (default: False). The range is the header row and
+            the data rows, formula columns included, and it follows ``startrow``. Only
+            the buttons are added; no rows are hidden. Raises ConfigurationError
+            together with ``table_style`` (a table has its own filter) and with
+            header=False.
+        tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
+            (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
+            per sheet in the options dict, where None removes the workbook-wide colour.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -294,33 +312,35 @@ def df_to_xlsx(
     """
 
 def dfs_to_xlsx(
-    sheets: list[tuple[object, str] | tuple[object, str, SheetOptions]],
+    sheets: Sequence[tuple[object, str] | tuple[object, str, SheetOptions]],
     output_path: OutputTarget,
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
-    freeze_panes: bool = False,
-    column_widths: dict[int | str, int | float] | None = None,
+    freeze_panes: bool | tuple[int, int] = False,
+    column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
-    row_heights: dict[int, int | float] | None = None,
+    row_heights: Mapping[int, int | float] | None = None,
     constant_memory: bool = False,
-    column_formats: dict[str, ColumnFormat] | None = None,
-    conditional_formats: dict[str, ConditionalFormat | list[ConditionalFormat]] | None = None,
-    formula_columns: dict[str, str] | None = None,
-    merged_ranges: list[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
-    hyperlinks: list[tuple[str, str] | tuple[str, str, str]] | None = None,
-    comments: dict[str, str | CommentOptions] | None = None,
-    validations: dict[str, ValidationOptions] | None = None,
-    rich_text: dict[str, list[tuple[str, RichTextFormat] | str]] | None = None,
-    images: dict[str, str | ImageOptions] | None = None,
-    checkboxes: dict[str, bool | CheckboxOptions] | None = None,
-    textboxes: dict[str, str | TextboxOptions] | None = None,
-    charts: dict[str, ChartOptions] | None = None,
-    defined_names: dict[str, str] | None = None,
-    cells: dict[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
-    sparklines: dict[str, SparklineOptions] | None = None,
+    column_formats: Mapping[str, ColumnFormat] | None = None,
+    conditional_formats: Mapping[str, ConditionalFormat | Sequence[ConditionalFormat]] | None = None,
+    formula_columns: Mapping[str, str] | None = None,
+    merged_ranges: Sequence[tuple[str, str] | tuple[str, str, HeaderFormat]] | None = None,
+    hyperlinks: Sequence[tuple[str, str] | tuple[str, str, str]] | None = None,
+    comments: Mapping[str, str | CommentOptions] | None = None,
+    validations: Mapping[str, ValidationOptions] | None = None,
+    rich_text: Mapping[str, Sequence[tuple[str, RichTextFormat] | str]] | None = None,
+    images: Mapping[str, str | ImageOptions] | None = None,
+    checkboxes: Mapping[str, bool | CheckboxOptions] | None = None,
+    textboxes: Mapping[str, str | TextboxOptions] | None = None,
+    charts: Mapping[str, ChartOptions] | None = None,
+    defined_names: Mapping[str, str] | None = None,
+    cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
+    sparklines: Mapping[str, SparklineOptions] | None = None,
     startrow: int = 0,
+    autofilter: bool = False,
+    tab_color: str | None = None,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
 
@@ -336,7 +356,12 @@ def dfs_to_xlsx(
             left at Excel's default width). Add an '_all' entry in
             column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
-        freeze_panes: Freeze the header row (default: False).
+        freeze_panes: ``True`` freezes the header row (default: False). A ``(row, col)``
+            tuple freezes at that zero-based cell instead, as XlsxWriter's
+            ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
+            area, so ``(4, 1)`` keeps four rows and one column in view. ``True``
+            follows ``startrow`` and does nothing with header=False; a tuple is
+            taken as given.
         column_widths: Dict mapping column index to width. Use '_all' to cap all columns.
             An integer key must be a non-negative index within Excel's column range
             (0..=16383); a negative key, a key beyond 16383, or a non-integer/non-'_all'
@@ -350,11 +375,12 @@ def dfs_to_xlsx(
         header_format: Dict of header cell formatting options.
         row_heights: Dict mapping row index to height in points.
         constant_memory: Use streaming mode (default: False).
-            When enabled, emits RuntimeWarning and disables: table_style, freeze_panes,
+            When enabled, emits RuntimeWarning and disables: table_style,
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
             images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
-            header_format, and column_formats remain supported.
+            header_format, column_formats, freeze_panes, autofilter and tab_color remain
+            supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             Every pattern must match at least one column or ValueError is raised.
@@ -396,6 +422,15 @@ def dfs_to_xlsx(
             table, freeze panes, formula columns, conditional formats and validations
             move with the frame. The returned row count does not include the offset.
             Example: startrow=2 with cells={'A1': 'Q3 report'}
+        autofilter: Put filter buttons on the header row of the written range, without
+            making it an Excel table (default: False). The range is the header row and
+            the data rows, formula columns included, and it follows ``startrow``. Only
+            the buttons are added; no rows are hidden. Raises ConfigurationError
+            together with ``table_style`` (a table has its own filter) and with
+            header=False.
+        tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
+            (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
+            per sheet in the options dict, where None removes the workbook-wide colour.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

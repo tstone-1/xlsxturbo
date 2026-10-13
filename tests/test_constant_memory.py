@@ -83,12 +83,12 @@ class TestConstantMemoryWarning:
                 df, tmp_xlsx,
                 constant_memory=True,
                 table_style="Medium2",
-                freeze_panes=True,
+                autofit=True,
             )
             assert len(w) == 1
             assert issubclass(w[0].category, RuntimeWarning)
             assert "table_style" in str(w[0].message)
-            assert "freeze_panes" in str(w[0].message)
+            assert "autofit" in str(w[0].message)
 
     def test_constant_memory_no_warning_when_clean(self, tmp_xlsx: str) -> None:
         """constant_memory=True without incompatible options emits no warning."""
@@ -103,7 +103,7 @@ class TestConstantMemoryWarning:
 
         `present_complex_options` excludes present-but-empty collections, since
         they have nothing to apply and thus nothing for constant_memory to
-        skip. `freeze_panes=True` is included alongside the empty `comments`
+        skip. `autofit=True` is included alongside the empty `comments`
         dict so the warning still fires (proving the empty dict isn't just
         suppressing the whole warning) while confirming 'comments' is absent
         from its message.
@@ -115,11 +115,11 @@ class TestConstantMemoryWarning:
                 [(df, "S1", {"comments": {}})],
                 tmp_xlsx,
                 constant_memory=True,
-                freeze_panes=True,
+                autofit=True,
             )
             assert len(w) == 1
             message = str(w[0].message)
-            assert "freeze_panes" in message
+            assert "autofit" in message
             assert "comments" not in message
 
     def test_dfs_to_xlsx_two_sheets_each_warn_once(self, tmp_xlsx: str) -> None:

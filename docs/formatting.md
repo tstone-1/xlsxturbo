@@ -196,6 +196,9 @@ xlsxturbo.df_to_xlsx(df, "fitted.xlsx", autofit=True, column_widths={'_all': 25}
 
 When `autofit=True` is combined with `column_widths` that names specific columns and has no `'_all'` key, the named columns get their explicit widths and every other column is autofitted to its content. Add `'_all'` back in to cap the autofitted columns instead of leaving them uncapped.
 
+A header that carries a filter button, from a `table_style` or from `autofilter=True`, is
+fitted with room for the button beside its text. The cap still applies.
+
 ## Merged Cells
 
 Merge cell ranges to create headers, titles, or grouped labels:

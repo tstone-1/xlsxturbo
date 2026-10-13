@@ -3,6 +3,9 @@
 An Excel table gives the written range a name, an autofilter, banded rows, and one of
 61 built-in styles. It is the cheapest way to make an export look deliberate.
 
+If you want the filter buttons and nothing else, `autofilter=True` adds them to a plain
+range: see [Filter buttons without a table](dataframe-export.md#filter-buttons-without-a-table).
+
 ## Excel Tables with Styling
 
 ```python

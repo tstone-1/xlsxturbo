@@ -1,6 +1,6 @@
 # Reusable option bundles
 
-`df_to_xlsx` takes 27 parameters. That is fine for a call with two options and
+`df_to_xlsx` takes 30 parameters. That is fine for a call with two options and
 unpleasant for a call with ten — and it gives you nowhere to put a set of options
 you want to use more than once.
 
@@ -27,9 +27,9 @@ nothing is deprecated — if you pass two options, keep passing two options.
 
 `df_to_xlsx(df, path, options=REPORT)` would read better, and it would cost more
 than it is worth. The compiled function would need a Python wrapper, and that
-wrapper would either repeat all 27 parameters — a second copy to keep in step —
+wrapper would either repeat all 30 parameters — a second copy to keep in step —
 or collapse them to `**kwargs`, which is what your editor would then show you
-instead of 27 named, typed parameters.
+instead of 30 named, typed parameters.
 
 Since the point of this type is discoverability, trading the signature's
 discoverability for it would be a bad deal. So the entry points are untouched and

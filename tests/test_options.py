@@ -38,6 +38,9 @@ SAMPLE_VALUES: dict[str, Any] = {
     "header": True,
     "autofit": True,
     "freeze_panes": True,
+    # False: the bundle below also sets `table_style`, and a table has its own filter.
+    "autofilter": False,
+    "tab_color": "#4472C4",
     "startrow": 2,
     "column_widths": {0: 30},
     "row_heights": {0: 22},

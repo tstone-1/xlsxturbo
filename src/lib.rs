@@ -162,18 +162,47 @@ impl<'py> OutputArg<'py> {
     }
 }
 
-/// Helper: cast a PyAny to PyDict or raise TypeError with a clear message.
+/// Helper: take a dict, or any other mapping as a dict (see
+/// `types::mapping_as_dict`), or raise TypeError with a clear message.
 fn require_dict<'py>(
     value: &Bound<'py, PyAny>,
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
-    value.cast::<pyo3::types::PyDict>().cloned().map_err(|_| {
+    types::mapping_as_dict(value)?.ok_or_else(|| {
         errors::configuration_type(format!(
             "expected dict for '{}', got {}",
             param_name,
             pytype_name(value)
         ))
     })
+}
+
+/// Extract the `defined_names` kwarg from any mapping.
+fn extract_defined_names_kwarg(
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<HashMap<String, String>>> {
+    match value {
+        Some(v) if !v.is_none() => require_dict(v, "defined_names")
+            .and_then(|d| extract::extract_defined_names(&d))
+            .map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// Extract the `freeze_panes` keyword argument; `None` means off.
+fn extract_freeze_panes_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<types::FreezePanes> {
+    match value {
+        Some(v) if !v.is_none() => extract::extract_freeze_panes(v, "freeze_panes"),
+        _ => Ok(types::FreezePanes::Off),
+    }
+}
+
+/// Extract the `tab_color` keyword argument; `None` means no colour.
+fn extract_tab_color_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<u32>> {
+    match value {
+        Some(v) if !v.is_none() => extract::extract_tab_color(v, "tab_color").map(Some),
+        _ => Ok(None),
+    }
 }
 
 /// Extract the `row_heights` kwarg, which both entry points take as a raw
@@ -201,12 +230,13 @@ fn extract_startrow_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<u32> {
     }
 }
 
-/// Helper: cast a PyAny to PyList or raise TypeError with a clear message.
+/// Helper: take a list, or any other sequence as a list (see
+/// `types::sequence_as_list`), or raise TypeError with a clear message.
 fn require_list<'py>(
     value: &Bound<'py, PyAny>,
     param_name: &str,
 ) -> PyResult<Bound<'py, pyo3::types::PyList>> {
-    value.cast::<pyo3::types::PyList>().cloned().map_err(|_| {
+    types::sequence_as_list(value)?.ok_or_else(|| {
         errors::configuration_type(format!(
             "expected list for '{}', got {}",
             param_name,
@@ -422,7 +452,11 @@ fn csv_to_xlsx(
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
-///     freeze_panes: Freeze the header row for easier scrolling (default: False)
+///     freeze_panes: True freezes the header row (default: False). A (row, col) tuple
+///                   freezes at that zero-based cell instead, as XlsxWriter's
+///                   freeze_panes(row, col) does: it is the top-left cell of the scrolling
+///                   area, so (4, 1) keeps four rows and one column in view. True follows
+///                   startrow and does nothing with header=False; a tuple is taken as given.
 ///     column_widths: Dict mapping column index (0-based) or "_all" to width in characters
 ///                    (default: None). Example: {0: 20, 1: 15, 3: 30} sets widths for columns
 ///                    A, B, and D. An integer key must be a non-negative index within Excel's
@@ -441,11 +475,12 @@ fn csv_to_xlsx(
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///                  Example: {0: 20, 5: 30} sets heights for specific rows
 ///     constant_memory: Use constant memory mode for large files (default: False).
-///                      Emits a RuntimeWarning and disables: table_style, freeze_panes,
+///                      Emits a RuntimeWarning and disables: table_style,
 ///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
 ///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
 ///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
-///                      Plain column_widths, header_format, and column_formats remain supported.
+///                      Plain column_widths, header_format, column_formats, freeze_panes,
+///                      autofilter and tab_color remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -506,6 +541,14 @@ fn csv_to_xlsx(
 ///               absolute sheet positions, and so do row_heights keys. The table, freeze
 ///               panes, formula columns, conditional formats and validations move with
 ///               the frame. The returned row count does not include the offset.
+///     autofilter: Put filter buttons on the header row of the written range, without
+///                 making it an Excel table (default: False). The range is the header row
+///                 and the data rows, formula columns included, and it follows startrow.
+///                 Only the buttons are added; no rows are hidden. Raises
+///                 ConfigurationError together with table_style (a table has its own
+///                 filter) and with header=False.
+///     tab_color: Colour of the sheet tab: "#RRGGBB" or a named colour such as "red"
+///                (default: None).
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -548,7 +591,7 @@ fn csv_to_xlsx(
     header = true,
     autofit = false,
     table_style = None,
-    freeze_panes = false,
+    freeze_panes = None,
     column_widths = None,
     table_name = None,
     header_format = None,
@@ -570,6 +613,8 @@ fn csv_to_xlsx(
     cells = None,
     sparklines = None,
     startrow = None,
+    autofilter = false,
+    tab_color = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
@@ -580,7 +625,7 @@ fn df_to_xlsx<'py>(
     header: bool,
     autofit: bool,
     table_style: Option<&str>,
-    freeze_panes: bool,
+    freeze_panes: Option<&Bound<'py, PyAny>>,
     column_widths: Option<&Bound<'py, PyAny>>,
     table_name: Option<String>,
     header_format: Option<&Bound<'py, PyAny>>,
@@ -598,14 +643,19 @@ fn df_to_xlsx<'py>(
     checkboxes: Option<&Bound<'py, PyAny>>,
     textboxes: Option<&Bound<'py, PyAny>>,
     charts: Option<&Bound<'py, PyAny>>,
-    defined_names: Option<HashMap<String, String>>,
+    defined_names: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
     startrow: Option<&Bound<'py, PyAny>>,
+    autofilter: bool,
+    tab_color: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let output = OutputArg::from_py(output_path)?;
     require_supported_dataframe(df, None)?;
     let startrow = extract_startrow_kwarg(startrow)?;
+    let freeze_panes = extract_freeze_panes_kwarg(freeze_panes)?;
+    let tab_color = extract_tab_color_kwarg(tab_color)?;
+    let defined_names = extract_defined_names_kwarg(defined_names)?;
     let row_heights = extract_row_heights_kwarg(row_heights)?;
     let opts = extract_options(&RawOptions {
         column_widths,
@@ -662,6 +712,8 @@ fn df_to_xlsx<'py>(
         autofit,
         table_style,
         freeze_panes,
+        autofilter,
+        tab_color,
         startrow,
         table_name: table_name.as_deref(),
         row_heights: row_heights.as_ref(),
@@ -699,7 +751,7 @@ fn version() -> &'static str {
 ///             - (DataFrame, sheet_name) - uses global defaults
 ///             - (DataFrame, sheet_name, options_dict) - per-sheet overrides
 ///             Options dict keys: header, autofit, table_style, freeze_panes,
-///             column_widths, row_heights, table_name, header_format, column_formats,
+///             autofilter, tab_color, column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
 ///             comments, validations, rich_text, images, checkboxes, textboxes, charts,
 ///             sparklines, cells, startrow
@@ -714,7 +766,11 @@ fn version() -> &'static str {
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
-///     freeze_panes: Freeze the header row for easier scrolling (default: False)
+///     freeze_panes: True freezes the header row (default: False). A (row, col) tuple
+///                   freezes at that zero-based cell instead, as XlsxWriter's
+///                   freeze_panes(row, col) does: it is the top-left cell of the scrolling
+///                   area, so (4, 1) keeps four rows and one column in view. True follows
+///                   startrow and does nothing with header=False; a tuple is taken as given.
 ///     column_widths: Dict mapping column index or "_all" to width in characters (default: None)
 ///                    Example: {0: 20, "_all": 50} sets col A to 20, caps others at 50. An
 ///                    integer key must be a non-negative index within Excel's column range
@@ -732,11 +788,12 @@ fn version() -> &'static str {
 ///                    Example: {"bold": True, "bg_color": "#4F81BD", "font_color": "white"}
 ///     row_heights: Dict mapping row index (0-based) to height in points (default: None)
 ///     constant_memory: Use constant memory mode for large files (default: False).
-///                      Emits a RuntimeWarning and disables: table_style, freeze_panes,
+///                      Emits a RuntimeWarning and disables: table_style,
 ///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
 ///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
 ///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
-///                      Plain column_widths, header_format, and column_formats remain supported.
+///                      Plain column_widths, header_format, column_formats, freeze_panes,
+///                      autofilter and tab_color remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -777,6 +834,14 @@ fn version() -> &'static str {
 ///               absolute sheet positions, and so do row_heights keys. The table, freeze
 ///               panes, formula columns, conditional formats and validations move with
 ///               the frame. The returned row count does not include the offset.
+///     autofilter: Put filter buttons on the header row of the written range, without
+///                 making it an Excel table (default: False). The range is the header row
+///                 and the data rows, formula columns included, and it follows startrow.
+///                 Only the buttons are added; no rows are hidden. Raises
+///                 ConfigurationError together with table_style (a table has its own
+///                 filter) and with header=False.
+///     tab_color: Colour of the sheet tab: "#RRGGBB" or a named colour such as "red"
+///                (default: None).
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -820,7 +885,7 @@ fn version() -> &'static str {
     header = true,
     autofit = false,
     table_style = None,
-    freeze_panes = false,
+    freeze_panes = None,
     column_widths = None,
     table_name = None,
     header_format = None,
@@ -842,6 +907,8 @@ fn version() -> &'static str {
     cells = None,
     sparklines = None,
     startrow = None,
+    autofilter = false,
+    tab_color = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
@@ -851,7 +918,7 @@ fn dfs_to_xlsx<'py>(
     header: bool,
     autofit: bool,
     table_style: Option<&str>,
-    freeze_panes: bool,
+    freeze_panes: Option<&Bound<'py, PyAny>>,
     column_widths: Option<&Bound<'py, PyAny>>,
     table_name: Option<String>,
     header_format: Option<&Bound<'py, PyAny>>,
@@ -869,10 +936,12 @@ fn dfs_to_xlsx<'py>(
     checkboxes: Option<&Bound<'py, PyAny>>,
     textboxes: Option<&Bound<'py, PyAny>>,
     charts: Option<&Bound<'py, PyAny>>,
-    defined_names: Option<HashMap<String, String>>,
+    defined_names: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
     startrow: Option<&Bound<'py, PyAny>>,
+    autofilter: bool,
+    tab_color: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let output = OutputArg::from_py(output_path)?;
     if sheets.is_empty() {
@@ -882,6 +951,9 @@ fn dfs_to_xlsx<'py>(
     }
     let row_heights = extract_row_heights_kwarg(row_heights)?;
     let startrow = extract_startrow_kwarg(startrow)?;
+    let freeze_panes = extract_freeze_panes_kwarg(freeze_panes)?;
+    let tab_color = extract_tab_color_kwarg(tab_color)?;
+    let defined_names = extract_defined_names_kwarg(defined_names)?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
     let mut table_names: HashMap<String, ClaimedTableName> = HashMap::new();
@@ -981,6 +1053,8 @@ fn dfs_to_xlsx<'py>(
             autofit: effective_autofit,
             table_style: effective_table_style.as_deref(),
             freeze_panes: effective_freeze_panes,
+            autofilter: sheet_config.autofilter.unwrap_or(autofilter),
+            tab_color: sheet_config.tab_color.unwrap_or(tab_color),
             startrow: sheet_config.startrow.unwrap_or(startrow),
             table_name: effective_table_name.as_deref(),
             row_heights: effective_row_heights,

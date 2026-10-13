@@ -19,7 +19,7 @@ drift from the implementation -- see `scripts/gen_capability_matrix.py`.
 | `header` | yes | yes | -- | yes | applies |
 | `autofit` | yes | yes | -- | yes | skipped |
 | `table_style` | yes | yes | -- | yes | skipped |
-| `freeze_panes` | yes | yes | -- | yes | skipped |
+| `freeze_panes` | yes | yes | -- | yes | applies |
 | `column_widths` | yes | yes | -- | yes | applies |
 | `table_name` | yes | yes | -- | yes | applies (inert) |
 | `header_format` | yes | yes | -- | yes | applies |
@@ -41,6 +41,8 @@ drift from the implementation -- see `scripts/gen_capability_matrix.py`.
 | `cells` | yes | yes | -- | yes | skipped |
 | `sparklines` | yes | yes | -- | yes | skipped |
 | `startrow` | yes | yes | -- | yes | applies |
+| `autofilter` | yes | yes | -- | yes | applies |
+| `tab_color` | yes | yes | -- | yes | applies |
 | `parallel` | -- | -- | yes | -- | applies |
 | `date_order` | -- | -- | yes | -- | applies |
 
@@ -52,9 +54,9 @@ reduced-feature version of the DataFrame path: to format a CSV export, read it i
 DataFrame and use `df_to_xlsx`.
 
 `constant_memory=True` keeps 3 of the feature options (`column_widths`, `header_format`, `column_formats`) and skips
-17. Those three are the ones applied while rows are being written; everything
+16. Those three are the ones applied while rows are being written; everything
 else needs to revisit a cell after the fact, which streaming output cannot do. A new
 option defaults to skipped, so this list only grows deliberately.
 
-Of the 28 options, 23 can be overridden per sheet in `dfs_to_xlsx`. The rest are
+Of the 30 options, 25 can be overridden per sheet in `dfs_to_xlsx`. The rest are
 workbook-wide.

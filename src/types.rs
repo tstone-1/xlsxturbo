@@ -485,6 +485,58 @@ pub(crate) fn pydict_to_hashmap(
     pydict_to_hashmap_str(dict, context).map_err(crate::errors::configuration_type)
 }
 
+/// A `dict` as it is, or any other `collections.abc.Mapping` copied into one.
+///
+/// `None` means the value is not a mapping at all, which the caller reports
+/// with its own message. The dict-valued options are annotated `Mapping`
+/// because `dict` is invariant in its value type: a caller's `dict[str, str]`
+/// is refused by a type checker for a parameter declared
+/// `dict[str, str | int | ...]`. An annotation may not promise more than the
+/// function takes, so a `types.MappingProxyType` or a `collections.UserDict`
+/// has to work here too. The copy keeps the mapping's iteration order, which
+/// feeds the generated XML.
+pub(crate) fn mapping_as_dict<'py>(
+    value: &Bound<'py, PyAny>,
+) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+    if let Ok(dict) = value.cast::<pyo3::types::PyDict>() {
+        return Ok(Some(dict.clone()));
+    }
+    let Ok(mapping) = value.cast::<pyo3::types::PyMapping>() else {
+        return Ok(None);
+    };
+    let dict = pyo3::types::PyDict::new(value.py());
+    dict.update(mapping)?;
+    Ok(Some(dict))
+}
+
+/// A `list` as it is, or any other `collections.abc.Sequence` copied into one.
+///
+/// The counterpart of [`mapping_as_dict`] for the list-valued options, which
+/// are annotated `Sequence` for the same reason: `list` is invariant, so a
+/// caller's `list[tuple[str, str]]` is refused for a parameter declared
+/// `list[tuple[str, str] | tuple[str, str, str]]`. `None` means the value is
+/// not a sequence. A `str` and a `bytes` are sequences to Python and are
+/// refused here: `rich_text={"A1": "plain"}` would otherwise be read as five
+/// one-character segments.
+pub(crate) fn sequence_as_list<'py>(
+    value: &Bound<'py, PyAny>,
+) -> PyResult<Option<Bound<'py, pyo3::types::PyList>>> {
+    if let Ok(list) = value.cast::<pyo3::types::PyList>() {
+        return Ok(Some(list.clone()));
+    }
+    if value.is_instance_of::<pyo3::types::PyString>()
+        || value.is_instance_of::<pyo3::types::PyBytes>()
+        || value.cast::<pyo3::types::PySequence>().is_err()
+    {
+        return Ok(None);
+    }
+    let list = pyo3::types::PyList::empty(value.py());
+    for item in value.try_iter()? {
+        list.append(item?)?;
+    }
+    Ok(Some(list))
+}
+
 /// `String`-currency form of [`pydict_to_hashmap`], for the apply layer.
 ///
 /// Apply-time code re-reads nested option dicts and returns `Result<_, String>`,
@@ -602,7 +654,9 @@ pub(crate) struct SheetConfig {
     pub(crate) header: Option<bool>,
     pub(crate) autofit: Option<bool>,
     pub(crate) table_style: Option<Option<String>>, // None = use default, Some(None) = explicitly no style
-    pub(crate) freeze_panes: Option<bool>,
+    pub(crate) freeze_panes: Option<FreezePanes>,
+    pub(crate) autofilter: Option<bool>,
+    pub(crate) tab_color: Option<Option<u32>>, // None = use default, Some(None) = explicitly no colour
     pub(crate) startrow: Option<u32>,
     pub(crate) column_widths: Option<HashMap<String, f64>>, // Keys: "0", "1", "_all" for global cap
     pub(crate) table_name: Option<String>,
@@ -629,6 +683,20 @@ pub(crate) struct SheetConfig {
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
+/// Where a sheet's panes are frozen.
+///
+/// `Header` is `freeze_panes=True`: the row below the header, which follows
+/// `startrow` and does nothing on a sheet written without a header. `At` is
+/// the `(row, col)` form, the top-left cell of the scrolling area, taken as
+/// given whether or not there is a header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FreezePanes {
+    #[default]
+    Off,
+    Header,
+    At(u32, u16),
+}
+
 /// Scalar configuration for writing a single sheet.
 /// Groups the simple config fields to reduce parameter counts in write_sheet_data
 /// and apply_worksheet_features.
@@ -636,7 +704,11 @@ pub(crate) struct WriteConfig<'a> {
     pub(crate) include_header: bool,
     pub(crate) autofit: bool,
     pub(crate) table_style: Option<&'a str>,
-    pub(crate) freeze_panes: bool,
+    pub(crate) freeze_panes: FreezePanes,
+    /// Filter buttons on the header row of a plain range (no table).
+    pub(crate) autofilter: bool,
+    /// Sheet tab colour as `0xRRGGBB`.
+    pub(crate) tab_color: Option<u32>,
     /// Zero-based sheet row of the header (or of the first data row without one).
     pub(crate) startrow: u32,
     pub(crate) table_name: Option<&'a str>,

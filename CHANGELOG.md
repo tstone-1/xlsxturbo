@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `freeze_panes` also takes `(row, col)`: the zero-based top-left cell of the scrolling
+  area, as XlsxWriter's `freeze_panes(row, col)` takes it. `(1, 1)` keeps the header row
+  and the first column in view. `True` keeps its meaning. A tuple is taken as given, also
+  with `header=False`; a position outside the grid is refused by name. (#49)
+- `tab_color` in `df_to_xlsx` and `dfs_to_xlsx` (also per sheet): the colour of the sheet
+  tab, as `'#RRGGBB'` or a named colour. A per-sheet `None` removes a workbook-wide
+  colour. A colour that cannot be read is refused. (#50)
+- `autofilter` in `df_to_xlsx` and `dfs_to_xlsx` (also per sheet): filter buttons on the
+  header row of a plain range, with no Excel table. The filter covers the header and the
+  data rows, formula columns included, and follows `startrow`. Together with a
+  `table_style` or with `header=False` it raises `ConfigurationError`. (#51)
+- The dict-valued options accept any mapping, for example a `types.MappingProxyType`,
+  and the list-valued ones any sequence, for example a tuple: `merged_ranges`,
+  `hyperlinks`, the segment lists in `rich_text` and a rule list in
+  `conditional_formats`. Each is read in its own order. A string is still refused where
+  a list is expected. (#52)
+
+### Changed
+- The dict-valued options are annotated `Mapping` and the list-valued ones `Sequence`, in
+  the stubs, in `SheetOptions` and in `ExportOptions`; `sheets` in `dfs_to_xlsx` is a
+  `Sequence` too. A variable annotated with a narrower type, such as `dict[str, str]`
+  for `cells` or `list[tuple[str, str]]` for `hyperlinks`, now passes a strict type
+  checker. `column_widths` is declared as three mappings, so `dict[int, float]` and
+  `dict[str, int]` pass as well. (#52)
+- With `autofit=True` and a `column_widths` `'_all'` cap, a header that carries a filter
+  button (from a `table_style` or from `autofilter=True`) is fitted about 2.3 characters
+  wider, to leave room for the button. In Excel an all-capitals header such as
+  `PRODUCT_CATEGORY_ID` lost its last character behind the button before and now shows
+  in full. Existing files with a table and such a cap get slightly wider columns where
+  the header is the longest entry. The cap still applies. The fit counts characters, so
+  a header of very wide letters can still be cut.
+- `freeze_panes`, `autofilter` and `tab_color` work with `constant_memory=True`.
+  `freeze_panes` was skipped there with a warning before, although it never needed a
+  second pass over the rows.
+- A non-string name or reference in `defined_names` raises `ConfigurationTypeError`
+  naming the entry. It raised a plain `TypeError` before; `ConfigurationTypeError` is a
+  `TypeError`, so existing handlers still catch it.
+
 ## [1.9.0] - 2026-10-13
 
 ### Added
