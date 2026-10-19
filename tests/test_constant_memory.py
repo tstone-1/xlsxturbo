@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -11,6 +12,41 @@ import xlsxturbo
 from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
 
 pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+
+
+class TestUnwritableTempFolder:
+    """A constant_memory sheet needs a temporary file, and failing to make one is a FileError.
+
+    rust_xlsxwriter panicked here before 0.100.0, which reached Python as
+    ``PanicException`` -- a ``BaseException`` that ``except Exception`` does not catch.
+    The folder is not the caller's option, so it must not be a ``ConfigurationError``.
+    """
+
+    @pytest.fixture
+    def missing_temp(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Point every variable the OS consults for its temp folder at a folder that does not exist."""
+        absent = tmp_path / "no-such-temp"
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            monkeypatch.setenv(name, str(absent))
+        return absent
+
+    def test_df_to_xlsx(self, missing_temp: Path, tmp_path: Path) -> None:
+        """The single-sheet entry point raises FileError naming the folder."""
+        with pytest.raises(xlsxturbo.FileError, match="temporary file") as caught:
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_path / "out.xlsx", constant_memory=True)
+        assert not isinstance(caught.value, xlsxturbo.ConfigurationError)
+        assert "no-such-temp" in str(caught.value)
+
+    def test_dfs_to_xlsx(self, missing_temp: Path, tmp_path: Path) -> None:
+        """The multi-sheet entry point classifies it the same way."""
+        with pytest.raises(xlsxturbo.FileError, match="temporary file") as caught:
+            xlsxturbo.dfs_to_xlsx([(pd.DataFrame({"A": [1]}), "Data")], tmp_path / "out.xlsx", constant_memory=True)
+        assert not isinstance(caught.value, xlsxturbo.ConfigurationError)
+        assert "no-such-temp" in str(caught.value)
+
+    def test_control_a_standard_sheet_needs_no_temp_file(self, missing_temp: Path, tmp_path: Path) -> None:
+        """Without constant_memory the same environment writes the file."""
+        assert xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_path / "out.xlsx") == (2, 1)
 
 
 class TestConstantMemoryMode:

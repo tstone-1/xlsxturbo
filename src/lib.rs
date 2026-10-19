@@ -1271,7 +1271,10 @@ fn dfs_to_xlsx<'py>(
         let config = write_config(index);
 
         let worksheet = if entry.first == index {
-            add_named_worksheet(&mut workbook, sheet, constant_memory).map_err(in_sheet)?
+            add_named_worksheet(&mut workbook, sheet, constant_memory).map_err(|e| match e {
+                ConvertError::Config(message) => in_sheet(message),
+                ConvertError::File(failure) => errors::file(failure),
+            })?
         } else {
             workbook
                 .worksheet_from_name(sheet)

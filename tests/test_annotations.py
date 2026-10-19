@@ -183,6 +183,26 @@ class TestComments:
         assert comment.author == "John"
         wb.close()
 
+    def test_each_comment_keeps_its_own_author(self, tmp_xlsx: str) -> None:
+        """With several authors, every note names the author it was given.
+
+        rust_xlsxwriter before 0.100.0 (upstream #198) numbered the authors in one
+        order and looked them up in another, so 1.11.0 wrote Zed, Amy, Zed as
+        Author, Zed, Author. One author, as above, cannot show this.
+        """
+        df = pd.DataFrame({"A": [1, 2, 3]})
+        authors = {"A2": "Zed", "A3": "Amy", "A4": "Zed"}
+        xlsxturbo.df_to_xlsx(
+            df,
+            tmp_xlsx,
+            comments={ref: {"text": f"note {ref}", "author": who} for ref, who in authors.items()},
+        )
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        written = {ref: ws[ref].comment.author for ref in authors}
+        wb.close()
+        assert written == authors
+
     def test_comment_dict_unknown_key_raises(self, tmp_xlsx: str) -> None:
         """A typo'd/extra key in the comment dict form is rejected, not silently dropped."""
         df = pd.DataFrame({"A": [1]})

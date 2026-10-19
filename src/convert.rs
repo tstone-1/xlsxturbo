@@ -812,20 +812,40 @@ fn apply_tab_color_and_freeze(
 }
 
 /// Add a worksheet with the given name to the workbook.
+///
+/// A `constant_memory` worksheet stages its rows in a temporary file, created
+/// here. Failing to create it is [`ConvertError::File`]: the temporary folder
+/// is not the caller's option. rust_xlsxwriter panicked on it before 0.100.0.
 pub(crate) fn add_named_worksheet<'w>(
     workbook: &'w mut Workbook,
     sheet_name: &str,
     constant_memory: bool,
-) -> Result<&'w mut Worksheet, String> {
+) -> Result<&'w mut Worksheet, ConvertError> {
     let worksheet = if constant_memory {
-        workbook.add_worksheet_with_constant_memory()
+        workbook
+            .add_worksheet_with_constant_memory()
+            .map_err(|e| ConvertError::File(temp_file_failure(sheet_name, &e)))?
     } else {
         workbook.add_worksheet()
     };
-    worksheet
-        .set_name(sheet_name)
-        .map_err(|e| format!("Failed to set sheet name '{}': {}", sheet_name, e))?;
+    worksheet.set_name(sheet_name).map_err(|e| {
+        ConvertError::Config(format!("Failed to set sheet name '{}': {}", sheet_name, e))
+    })?;
     Ok(worksheet)
+}
+
+/// Classify a failure to create a `constant_memory` worksheet's temporary file.
+///
+/// rust_xlsxwriter reports it as `XlsxError::TempFileError(String)`, which names
+/// the folder but has dropped the `io::Error`, so there is no `errno` to carry.
+fn temp_file_failure(sheet_name: &str, error: &rust_xlsxwriter::XlsxError) -> FileFailure {
+    FileFailure {
+        message: format!(
+            "Failed to create the temporary file for constant_memory sheet '{}': {}",
+            sheet_name, error
+        ),
+        errno: None,
+    }
 }
 
 /// Write a sheet that holds one frame: all three steps of [`write_frame`].
@@ -836,17 +856,19 @@ pub(crate) fn write_configured_sheet(
     sheet_name: &str,
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
-) -> Result<(u32, u16), String> {
+) -> Result<(u32, u16), ConvertError> {
     let worksheet = add_named_worksheet(workbook, sheet_name, config.constant_memory)?;
-    let frame = write_frame(py, worksheet, sheet_name, df, config, &opts)?;
+    let frame =
+        write_frame(py, worksheet, sheet_name, df, config, &opts).map_err(ConvertError::Config)?;
     finish_sheet(
         worksheet,
         config,
         &opts,
         frame.col_count,
         &frame.content_widths,
-    )?;
-    apply_cell_options(py, worksheet, config, &opts)?;
+    )
+    .map_err(ConvertError::Config)?;
+    apply_cell_options(py, worksheet, config, &opts).map_err(ConvertError::Config)?;
     Ok((frame.rows, frame.total_cols))
 }
 
@@ -1212,8 +1234,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
         sheet_name,
         config,
         opts.as_effective(),
-    )
-    .map_err(ConvertError::Config)?;
+    )?;
 
     finish_workbook(py, &mut workbook, defined_names, output)?;
 

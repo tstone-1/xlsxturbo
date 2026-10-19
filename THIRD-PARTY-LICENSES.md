@@ -12,9 +12,9 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 | License | Crates |
 | --- | ---: |
-| MIT License | 91 |
+| MIT License | 94 |
 | Apache License 2.0 | 3 |
-| Unicode License v3 | 1 |
+| Unicode License v3 | 2 |
 | zlib License | 1 |
 
 ## Crates
@@ -547,6 +547,42 @@ limitations under the License.
 
 Applies to:
 
+- [cfg_aliases 0.2.2](https://github.com/katharostech/cfg_aliases)
+
+```text
+# 3rd Party Notices
+
+The `cfg_aliases!` macro uses a lot of the code from [`tectonic_cfg_support::target_cfg!`] macro which is under the following license:
+
+[`tectonic_cfg_support::target_cfg!`]: https://github.com/tectonic-typesetting/tectonic/blob/f2439b936470ad27bdf92882064bc4702ee01899/cfg_support/src/lib.rs#L166
+
+    tectonic_cfg_support is licensed under the MIT License.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the “Software”), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+---
+
+```
+
+### MIT License
+
+Applies to:
+
 - [rayon-core 1.13.0](https://github.com/rayon-rs/rayon)
 - [rayon 1.12.0](https://github.com/rayon-rs/rayon)
 
@@ -618,9 +654,9 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.8.0](https://github.com/rust-lang/cc-rs)
+- [cc 1.9.0](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
-- [find-msvc-tools 0.1.14](https://github.com/rust-lang/cc-rs)
+- [find-msvc-tools 0.1.15](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.106](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - [wasm-bindgen-macro-support 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
 - [wasm-bindgen-macro 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
@@ -838,7 +874,7 @@ DEALINGS IN THE SOFTWARE.
 Applies to:
 
 - [heck 0.5.0](https://github.com/withoutboats/heck)
-- [unicode-normalization 0.1.25](https://github.com/unicode-rs/unicode-normalization)
+- [unicode-normalization 0.1.26](https://github.com/unicode-rs/unicode-normalization)
 
 ```text
 Copyright (c) 2015 The Rust Project Developers
@@ -1016,7 +1052,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [equivalent 1.0.2](https://github.com/indexmap-rs/equivalent)
+- [equivalent 1.0.3](https://github.com/indexmap-rs/equivalent)
 
 ```text
 Copyright (c) 2016--2023
@@ -1308,7 +1344,7 @@ SOFTWARE.
 
 Applies to:
 
-- [libc 0.2.190](https://github.com/rust-lang/libc)
+- [libc 0.2.191](https://github.com/rust-lang/libc)
 
 ```text
 Copyright (c) The Rust Project Developers
@@ -1374,9 +1410,28 @@ SOFTWARE.
 
 Applies to:
 
+- [cfg_aliases 0.2.2](https://github.com/katharostech/cfg_aliases)
+
+```text
+MIT License
+
+Copyright (c) 2020 Katharos Technology
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+```
+
+### MIT License
+
+Applies to:
+
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.99.1](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.100.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1534,7 +1589,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 8.6.0](https://github.com/zip-rs/zip2)
+- [zip 9.0.5](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
@@ -1573,6 +1628,37 @@ Applies to:
 The MIT License (MIT)
 
 Copyright (c) 2015 Andrew Gallant
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+```
+
+### MIT License
+
+Applies to:
+
+- [nix 0.31.3](https://github.com/nix-rust/nix)
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Carl Lerche + nix-rust Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1702,6 +1788,7 @@ DEALINGS IN THE SOFTWARE.
 Applies to:
 
 - [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
+- [unicode-normalization 0.1.26](https://github.com/unicode-rs/unicode-normalization)
 
 ```text
 UNICODE LICENSE V3

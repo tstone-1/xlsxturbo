@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2026-10-19
+
+### Fixed
+- Comments with more than one author named the wrong author: three notes by Zed, Amy and
+  Zed were written as Author, Zed and Author. Each note now names its own author.
+  The defect was in rust_xlsxwriter (upstream #198), fixed by the update to 0.100.0.
+- `constant_memory=True` with no writable temporary folder (a `TMPDIR`, `TEMP` or `TMP`
+  pointing at a folder that does not exist) crashed with `PanicException`, which
+  `except Exception` does not catch. It now raises `FileError`, naming the folder.
+
+### Changed
+- rust_xlsxwriter 0.99.1 -> 0.100.0, which also moves the zip crate from 8.6 to 9.0.
+
 ## [1.11.0] - 2026-10-13
 
 ### Added
