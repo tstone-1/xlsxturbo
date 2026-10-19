@@ -516,6 +516,7 @@ NESTED_TYPE_PROBES: dict[str, dict[str, Any]] = {
     # `extract_freeze_panes` now, so a wrong type is classified and named.
     "freeze_panes": {"freeze_panes": "yes"},
     "tab_color": {"tab_color": 5},
+    "compression_level": {"compression_level": "6"},
     "defined_names": {"defined_names": {"Total": 5}},
 }
 

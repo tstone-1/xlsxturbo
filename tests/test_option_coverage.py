@@ -109,6 +109,20 @@ def _check_tab_color(path: str, _factory: PathFactory) -> None:
     assert color.rgb == "FF4472C4"
 
 
+def _check_compression_level(path: str, factory: PathFactory) -> None:
+    """compression_level=1 must compress the sheet less than the default level."""
+    df = pd.DataFrame({"n": range(5000), "s": [f"row {i % 50}" for i in range(5000)]})
+    default = factory()
+    xlsxturbo.df_to_xlsx(df, default)
+    xlsxturbo.df_to_xlsx(df, path, compression_level=1)
+
+    def packed(target: str) -> int:
+        with zipfile.ZipFile(target) as archive:
+            return archive.getinfo("xl/worksheets/sheet1.xml").compress_size
+
+    assert packed(path) > packed(default)
+
+
 def _check_startrow(path: str, _factory: PathFactory) -> None:
     """startrow=2 must put the header on row 3 and leave rows 1-2 empty."""
     assert xlsxturbo.df_to_xlsx(_base_df(), path, startrow=2) == (4, 2)
@@ -283,6 +297,7 @@ COVERAGE: dict[str, Callable[[str, PathFactory], None]] = {
     "startrow": _check_startrow,
     "autofilter": _check_autofilter,
     "tab_color": _check_tab_color,
+    "compression_level": _check_compression_level,
     "constant_memory": _check_constant_memory,
     "column_widths": _check_column_widths,
     "row_heights": _check_row_heights,

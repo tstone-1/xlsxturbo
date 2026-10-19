@@ -451,6 +451,29 @@ pub(crate) fn extract_startrow(value: &Bound<'_, PyAny>, context: &str) -> PyRes
     extract_grid_index(value, context, MAX_ROW_INDEX).map(|row| row as u32)
 }
 
+/// Extract `compression_level`: an integer from 1 to 9, never a `bool`.
+pub(crate) fn extract_compression_level(value: &Bound<'_, PyAny>) -> PyResult<u8> {
+    let wrong_type = || {
+        crate::errors::configuration_type(format!(
+            "compression_level must be an integer from 1 to 9, got {}",
+            pytype_name(value)
+        ))
+    };
+    if value.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(wrong_type());
+    }
+    let Ok(level) = value.extract::<i64>() else {
+        return Err(wrong_type());
+    };
+    match u8::try_from(level) {
+        Ok(level) if (1..=9).contains(&level) => Ok(level),
+        _ => Err(crate::errors::configuration(format!(
+            "compression_level must be between 1 and 9, got {}",
+            level
+        ))),
+    }
+}
+
 /// Extract `defined_names`: name -> Excel reference, both strings.
 ///
 /// The parameter was a `HashMap<String, String>` in the PyO3 signature until it

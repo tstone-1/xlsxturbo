@@ -138,6 +138,7 @@ class TestGeneratorParsers:
         assert "sheet_name" in df, "df_to_xlsx names its single sheet"
         assert "sheet_name" not in dfs, "dfs_to_xlsx names sheets per tuple, not globally"
         assert len(csv) < len(df), "csv_to_xlsx should have a much smaller surface than df_to_xlsx"
-        assert not (df & csv) - {"sheet_name", "output_path"}, (
+        # compression_level is shared on purpose: it is a property of the saved file.
+        assert not (df & csv) - {"sheet_name", "output_path", "compression_level"}, (
             "csv_to_xlsx unexpectedly shares feature options with df_to_xlsx"
         )

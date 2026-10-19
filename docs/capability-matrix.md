@@ -43,12 +43,13 @@ drift from the implementation -- see `scripts/gen_capability_matrix.py`.
 | `startrow` | yes | yes | -- | yes | applies |
 | `autofilter` | yes | yes | -- | yes | applies |
 | `tab_color` | yes | yes | -- | yes | applies |
+| `compression_level` | yes | yes | yes | -- | applies |
 | `parallel` | -- | -- | yes | -- | applies |
 | `date_order` | -- | -- | yes | -- | applies |
 
 ## What the shape of this table says
 
-`csv_to_xlsx` takes 3 options (`sheet_name`, `parallel`, `date_order`) and none of the
+`csv_to_xlsx` takes 4 options (`sheet_name`, `parallel`, `date_order`, `compression_level`) and none of the
 formatting or feature options. CSV conversion is a straight-through fast path, not a
 reduced-feature version of the DataFrame path: to format a CSV export, read it into a
 DataFrame and use `df_to_xlsx`.
@@ -58,5 +59,5 @@ DataFrame and use `df_to_xlsx`.
 else needs to revisit a cell after the fact, which streaming output cannot do. A new
 option defaults to skipped, so this list only grows deliberately.
 
-Of the 30 options, 25 can be overridden per sheet in `dfs_to_xlsx`. The rest are
+Of the 31 options, 25 can be overridden per sheet in `dfs_to_xlsx`. The rest are
 workbook-wide.

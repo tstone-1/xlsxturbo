@@ -65,6 +65,13 @@ proper error) is what turns "empty names panic" from an assertion into a measure
 statement about pyo3 panic handling made from memory rather than from a test. Review the
 draft against the packet of what you actually ran, not against what you believe.
 
+**Open: [#213](https://github.com/jmcnamara/rust_xlsxwriter/issues/213)** (2026-10-19) --
+since 0.100.0 a failed temporary file is `XlsxError::TempFileError(String)`, which drops the
+`io::Error`; `set_tempdir()` returned `IoError` with its kind in 0.99.1. So
+`convert::temp_file_failure` sets no `errno`, and a temporary folder the process may not
+write raises `FileError` where everything else raises `FilePermissionError`. Pinned in
+`tests/upstream_defect.rs`, which names what to change when it goes red.
+
 ## Name validation is ours now — upstream has drawn its line
 
 On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of
@@ -177,3 +184,32 @@ about several common characters, `?` and `€` among them. Excel's own name vali
 and answers in a fraction of a second per name, and it rejects names that a clean file load
 accepts, so it is the better of the two oracles. The measured character surveys behind that claim
 are in the #189 thread.
+
+## Zip compression level — measured before exposing it
+
+rust_xlsxwriter 0.100.0 added `Workbook::set_zip_compression_level(1..=9)`; the default
+is 6. xlsxturbo exposes it as `compression_level` since 1.12.0; the measurement through
+xlsxturbo is on `docs/performance.md`. The crate only prints a warning to stderr for a
+level outside 1 to 9 and keeps 6, which is why `extract_compression_level` validates it.
+Measured 2026-10-19 on the Windows desktop
+against the crate directly, not through xlsxturbo: a seeded 10-column frame (ints,
+floats, 20 repeated strings, unique ids), `save_to_buffer`, levels interleaved, median
+of 9 rounds after a warmup.
+
+| level | save, 100k rows | save, 500k rows | size vs level 6 |
+|------:|----------------:|----------------:|----------------:|
+| 1 | 232 ms | 1444 ms | +57% |
+| 3 | 302 ms | 1804 ms | +8% |
+| 5 | 391 ms | 2273 ms | +0.4% |
+| 6 (default) | 503 ms | 2889 ms | 7.96 MiB / 40.0 MiB |
+| 7 | 746 ms | 4162 ms | -4% |
+| 8 | 2040 ms | 10534 ms | -5% |
+| 9 | 1139 ms | 5905 ms | +0.1% |
+
+Level 1 halves the save; level 5 saves about a fifth of it for a file 0.4% larger. 9 is
+faster than 8 and no smaller than 6, so it is never the right choice for this data. The
+save is roughly 58% of a `df_to_xlsx` call (the GIL-release measurement in
+`finish_workbook`), which predicted that level 1 would cut a whole call by about a third.
+Measured through xlsxturbo it cut `df_to_xlsx` by 28% and `csv_to_xlsx` by 34%: the
+estimate was close for the CSV path and a little high for the DataFrame path, where reading
+values out of the frame takes a larger share.

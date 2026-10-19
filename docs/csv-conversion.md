@@ -60,6 +60,8 @@ codes, for machines without Python: `cargo build --release` writes
   - `mdy` or `us`: US format (01-02-2024 = January 2)
   - `dmy` or `eu`: European format (01-02-2024 = February 1)
 - `-p, --parallel`: Use multi-core CSV processing (faster for large files, uses more memory)
+- `-c, --compression-level <LEVEL>`: Zip compression level, 1 (fastest, largest file) to 9
+  (default: 6). See [Compression level](performance.md#compression-level).
 - `-v, --verbose`: Show progress information on stderr
 - `-V, --version`: Print the version and exit
 
@@ -68,7 +70,8 @@ codes, for machines without Python: `cargo build --release` writes
 - `0`: the conversion succeeded; `OK <rows> <cols>` is printed to stdout.
 - `1`: the conversion was attempted and failed (an unreadable input, an output path that
   cannot be written, malformed CSV). The reason is printed to stderr.
-- `2`: the command line itself was wrong, an invalid `--date-order` included. This is the
+- `2`: the command line itself was wrong, an invalid `--date-order` or
+  `--compression-level` included. This is the
   same code clap uses for the usage errors it rejects itself, so a script can tell "you
   typed the command wrong" from "the conversion failed" without parsing stderr.
 

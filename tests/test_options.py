@@ -41,6 +41,7 @@ SAMPLE_VALUES: dict[str, Any] = {
     # False: the bundle below also sets `table_style`, and a table has its own filter.
     "autofilter": False,
     "tab_color": "#4472C4",
+    "compression_level": 1,
     "startrow": 2,
     "column_widths": {0: 30},
     "row_heights": {0: 22},

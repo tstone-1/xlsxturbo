@@ -85,6 +85,7 @@ Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py 
 - *When rust_xlsxwriter is what is wrong, file it at jmcnamara/rust_xlsxwriter alongside the local workaround* -- #185 and #186 were each fixed within a day of filing. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#upstream-defects-belong-upstream--file-them).
 - *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
 - *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
+- *Open: #213, `TempFileError` drops the `io::Error`* -- a refused temporary folder is `FileError`, not `FilePermissionError`; `tests/upstream_defect.rs` pins it.
 
 ## Name validation is ours now — upstream has drawn its line
 
@@ -95,6 +96,10 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 - *A table/defined-name collision is a pre-check, not a save failure* -- `claimed_table_name` (`src/convert.rs`) owns the gate both pre-checks use; any new save-time rule upstream is a pre-check candidate.
 - *`sanitize_table_name` normalises to NFC, never NFKC, before the screen* -- Thai/Hindi marks are still rewritten on purpose; a denylist flip needs the mirror audit, not reading.
 - *The allowlist must stay at least as wide as the crate's denylist* -- on every bump, account for each rule in `utility::check_name`; re-pin the empty-name message tests, do not reinstate the screen.
+
+## Zip compression level
+
+- *Zip compression level — measured before exposing it* -- exposed as `compression_level` in 1.12.0; the crate only warns on stderr for a level outside 1-9, so we validate it. Level 1 cut `df_to_xlsx` by 28%. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#zip-compression-level--measured-before-exposing-it).
 
 ## The bundled license notice
 

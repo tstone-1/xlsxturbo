@@ -56,6 +56,24 @@ def _date_order(value: str) -> str:
     return lowered
 
 
+def _compression_level(value: str) -> int:
+    """Accept a zip compression level from 1 to 9, as ``csv_to_xlsx`` does.
+
+    Args:
+        value: The ``--compression-level`` argument.
+
+    Returns:
+        The level as an integer.
+
+    Raises:
+        argparse.ArgumentTypeError: For anything else, so it is reported as a
+            usage error (exit 2), as the Rust binary reports it.
+    """
+    if value.isdigit() and 1 <= int(value) <= 9:
+        return int(value)
+    raise argparse.ArgumentTypeError(f"must be an integer from 1 to 9, got {value!r}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser.
 
@@ -88,6 +106,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use multi-core parallel processing (faster for large files, uses more memory)",
     )
+    parser.add_argument(
+        "-c",
+        "--compression-level",
+        type=_compression_level,
+        default=6,
+        metavar="LEVEL",
+        help="Zip compression level, 1 (fastest, largest file) to 9 (default: 6)",
+    )
     parser.add_argument("-V", "--version", action="version", version=f"xlsxturbo {version()}")
     return parser
 
@@ -111,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Sheet:  {args.sheet_name}", file=sys.stderr)
         print(f"Dates:  {args.date_order}", file=sys.stderr)
         print(f"Parallel: {args.parallel}", file=sys.stderr)
+        print(f"Compression: {args.compression_level}", file=sys.stderr)
 
     start = time.perf_counter()
     try:
@@ -120,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             sheet_name=args.sheet_name,
             parallel=args.parallel,
             date_order=args.date_order,
+            compression_level=args.compression_level,
         )
     except XlsxTurboError as error:
         print(f"Error: {error}", file=sys.stderr)

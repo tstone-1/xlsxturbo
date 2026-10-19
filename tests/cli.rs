@@ -358,3 +358,55 @@ fn non_default_date_order_exits_zero() {
     let _ = fs::remove_file(&csv);
     let _ = fs::remove_file(&xlsx);
 }
+
+/// `--compression-level` reaches the writer: level 1 gives a larger file than 9.
+#[test]
+fn compression_level_flag_changes_the_file_size() {
+    let csv = temp_path("level", "csv");
+    let fast = temp_path("level1", "xlsx");
+    let small = temp_path("level9", "xlsx");
+    let rows: String = (0..5000)
+        .map(|i| format!("{},row {}\n", i, i % 50))
+        .collect();
+    fs::write(&csv, format!("n,s\n{rows}")).unwrap();
+
+    for (path, level) in [(&fast, "1"), (&small, "9")] {
+        let output = Command::new(bin())
+            .arg(&csv)
+            .arg(path)
+            .arg("--compression-level")
+            .arg(level)
+            .output()
+            .expect("failed to run xlsxturbo binary");
+        assert!(output.status.success(), "level {level}: {:?}", output);
+    }
+    let (fast_len, small_len) = (
+        fs::metadata(&fast).unwrap().len(),
+        fs::metadata(&small).unwrap().len(),
+    );
+    assert!(
+        fast_len > small_len,
+        "level 1: {fast_len} bytes, level 9: {small_len}"
+    );
+
+    for path in [&csv, &fast, &small] {
+        let _ = fs::remove_file(path);
+    }
+}
+
+/// A level outside 1 to 9 is a usage error, exit 2, as in the Python command.
+#[test]
+fn invalid_compression_level_is_a_usage_error() {
+    for level in ["0", "10", "x"] {
+        let output = Command::new(bin())
+            .arg("in.csv")
+            .arg("out.xlsx")
+            .arg("-c")
+            .arg(level)
+            .output()
+            .expect("failed to run xlsxturbo binary");
+        assert_eq!(output.status.code(), Some(2), "level {level}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("from 1 to 9"), "stderr was: {:?}", stderr);
+    }
+}

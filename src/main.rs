@@ -51,6 +51,20 @@ struct Args {
     /// Use multi-core parallel processing (faster for large files, uses more memory)
     #[arg(short, long)]
     parallel: bool,
+
+    /// Zip compression level, 1 (fastest, largest file) to 9 (default: 6)
+    #[arg(short, long, value_name = "LEVEL", default_value = "6", value_parser = parse_compression_level)]
+    compression_level: u8,
+}
+
+/// Parse `--compression-level`. A named function rather than clap's
+/// `value_parser!(u8).range(1..=9)` inline, because `TestParityWithRustBinary`
+/// in `tests/test_cli.py` reads each `#[arg(...)]` only up to its first `)`.
+fn parse_compression_level(value: &str) -> Result<u8, String> {
+    match value.parse::<u8>() {
+        Ok(level) if (1..=9).contains(&level) => Ok(level),
+        _ => Err(format!("must be an integer from 1 to 9, got '{}'", value)),
+    }
 }
 
 fn main() {
@@ -78,6 +92,7 @@ fn main() {
         eprintln!("Sheet:  {}", args.sheet_name);
         eprintln!("Dates:  {:?}", date_order);
         eprintln!("Parallel: {}", args.parallel);
+        eprintln!("Compression: {}", args.compression_level);
     }
 
     let start = Instant::now();
@@ -88,6 +103,7 @@ fn main() {
             xlsxturbo_core::Destination::Path(&args.output),
             &args.sheet_name,
             date_order,
+            Some(args.compression_level),
         )
     } else {
         xlsxturbo_core::convert_csv_to_xlsx(
@@ -95,6 +111,7 @@ fn main() {
             xlsxturbo_core::Destination::Path(&args.output),
             &args.sheet_name,
             date_order,
+            Some(args.compression_level),
         )
     };
 

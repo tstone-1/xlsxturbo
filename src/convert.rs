@@ -118,6 +118,7 @@ fn convert_csv(
     input_path: &str,
     output: Destination<'_>,
     sheet_name: &str,
+    compression_level: Option<u8>,
     write_rows: impl FnOnce(
         &mut Worksheet,
         &mut csv::Reader<File>,
@@ -128,6 +129,7 @@ fn convert_csv(
     let mut csv_reader = open_csv_reader(input_path)?;
 
     let mut workbook = rust_xlsxwriter::Workbook::new();
+    set_compression_level(&mut workbook, compression_level);
     let worksheet = workbook.add_worksheet();
     worksheet
         .set_name(sheet_name)
@@ -191,11 +193,13 @@ pub fn convert_csv_to_xlsx(
     output: Destination<'_>,
     sheet_name: &str,
     date_order: DateOrder,
+    compression_level: Option<u8>,
 ) -> Result<(u32, u16), ConvertError> {
     convert_csv(
         input_path,
         output,
         sheet_name,
+        compression_level,
         |worksheet, csv_reader, date_format, datetime_format| {
             let mut row_count: u32 = 0;
             let mut col_count: u16 = 0;
@@ -261,11 +265,13 @@ pub fn convert_csv_to_xlsx_parallel(
     output: Destination<'_>,
     sheet_name: &str,
     date_order: DateOrder,
+    compression_level: Option<u8>,
 ) -> Result<(u32, u16), ConvertError> {
     convert_csv(
         input_path,
         output,
         sheet_name,
+        compression_level,
         |worksheet, csv_reader, date_format, datetime_format| {
             let mut row_count: u32 = 0;
             let mut col_count: u16 = 0;
@@ -837,7 +843,10 @@ pub(crate) fn add_named_worksheet<'w>(
 /// Classify a failure to create a `constant_memory` worksheet's temporary file.
 ///
 /// rust_xlsxwriter reports it as `XlsxError::TempFileError(String)`, which names
-/// the folder but has dropped the `io::Error`, so there is no `errno` to carry.
+/// the folder but has dropped the `io::Error`, so there is no `errno` to carry
+/// and a refused folder is a plain `FileError`. Reported upstream as
+/// jmcnamara/rust_xlsxwriter#213; `tests/upstream_defect.rs` goes red when it is
+/// fixed.
 fn temp_file_failure(sheet_name: &str, error: &rust_xlsxwriter::XlsxError) -> FileFailure {
     FileFailure {
         message: format!(
@@ -1178,6 +1187,19 @@ pub(crate) fn apply_cell_options(
     Ok(())
 }
 
+/// The options that describe the whole workbook rather than a sheet.
+///
+/// Both DataFrame entry points pass them to [`finish_workbook`] together, so a
+/// new workbook-wide option is one field here rather than one more parameter
+/// on every function between the binding and the save.
+#[derive(Clone, Copy)]
+pub(crate) struct WorkbookOptions<'a> {
+    pub(crate) defined_names: Option<&'a HashMap<String, String>>,
+    /// Zip compression level, already validated to 1..=9; `None` is the
+    /// writer's default, 6.
+    pub(crate) compression_level: Option<u8>,
+}
+
 /// Apply the workbook-level options and write the archive.
 ///
 /// Everything that happens once per *workbook* rather than once per sheet lives
@@ -1194,10 +1216,11 @@ pub(crate) fn apply_cell_options(
 pub(crate) fn finish_workbook(
     py: Python<'_>,
     workbook: &mut Workbook,
-    defined_names: Option<&HashMap<String, String>>,
+    options: WorkbookOptions<'_>,
     output: Destination<'_>,
 ) -> Result<(), ConvertError> {
-    apply_defined_names(workbook, defined_names).map_err(ConvertError::Config)?;
+    apply_defined_names(workbook, options.defined_names).map_err(ConvertError::Config)?;
+    set_compression_level(workbook, options.compression_level);
 
     // Serialising and compressing the archive touches no Python object, so the
     // GIL is dead weight for what measured as ~58% of a `df_to_xlsx` call.
@@ -1215,6 +1238,16 @@ pub(crate) fn finish_workbook(
     Ok(())
 }
 
+/// Set the zip compression level of the saved file; `None` keeps the writer's
+/// default, 6. The level is validated where it is read (1 to 9), because
+/// rust_xlsxwriter only prints a warning to stderr for a level outside that
+/// range and keeps the default.
+fn set_compression_level(workbook: &mut Workbook, level: Option<u8>) {
+    if let Some(level) = level {
+        workbook.set_zip_compression_level(level);
+    }
+}
+
 /// Convert a DataFrame (pandas or polars) to XLSX format
 pub(crate) fn convert_dataframe_to_xlsx(
     py: Python<'_>,
@@ -1223,7 +1256,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
     sheet_name: &str,
     config: &WriteConfig<'_>,
     opts: &ExtractedOptions,
-    defined_names: Option<&HashMap<String, String>>,
+    options: WorkbookOptions<'_>,
 ) -> Result<(u32, u16), ConvertError> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
 
@@ -1236,7 +1269,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
         opts.as_effective(),
     )?;
 
-    finish_workbook(py, &mut workbook, defined_names, output)?;
+    finish_workbook(py, &mut workbook, options, output)?;
 
     Ok(result)
 }

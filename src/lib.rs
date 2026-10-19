@@ -26,7 +26,7 @@ pub use workbook::Destination;
 
 use convert::{
     add_named_worksheet, apply_cell_options, claimed_table_name, convert_dataframe_to_xlsx,
-    dataframe_row_count, finish_sheet, finish_workbook, write_frame, FrameOutcome,
+    dataframe_row_count, finish_sheet, finish_workbook, write_frame, FrameOutcome, WorkbookOptions,
 };
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
@@ -199,6 +199,15 @@ fn extract_freeze_panes_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<type
     match value {
         Some(v) if !v.is_none() => extract::extract_freeze_panes(v, "freeze_panes"),
         _ => Ok(types::FreezePanes::Off),
+    }
+}
+
+/// Extract the `compression_level` keyword argument; `None` keeps the
+/// writer's default, level 6.
+fn extract_compression_level_kwarg(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<u8>> {
+    match value {
+        Some(v) if !v.is_none() => extract::extract_compression_level(v).map(Some),
+        _ => Ok(None),
     }
 }
 
@@ -527,6 +536,8 @@ fn sheet_extent(frames: &[&FrameOutcome]) -> (u16, Vec<f64>) {
 ///                 "auto" - ISO first, then European (DMY), then US (MDY)
 ///                 "mdy" or "us" - US format: 01-02-2024 = January 2nd
 ///                 "dmy" or "eu" - European format: 01-02-2024 = February 1st
+///     compression_level: Zip compression level of the file, 1 (fastest, largest)
+///                        to 9 (default: None, which is level 6).
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -548,7 +559,7 @@ fn sheet_extent(frames: &[&FrameOutcome]) -> (u16, Vec<f64>) {
 ///     >>> # For large files, use parallel processing:
 ///     >>> rows, cols = xlsxturbo.csv_to_xlsx("big.csv", "out.xlsx", parallel=True)
 #[pyfunction]
-#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false, date_order = "auto"))]
+#[pyo3(signature = (input_path, output_path, sheet_name = "Sheet1", parallel = false, date_order = "auto", compression_level = None))]
 fn csv_to_xlsx(
     py: Python<'_>,
     input_path: &Bound<'_, PyAny>,
@@ -556,6 +567,7 @@ fn csv_to_xlsx(
     sheet_name: &str,
     parallel: bool,
     date_order: &str,
+    compression_level: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let input_path = path_arg_to_string(input_path, "input_path")?;
     let output = OutputArg::from_py(output_path)?;
@@ -566,6 +578,7 @@ fn csv_to_xlsx(
             date_order
         ))
     })?;
+    let compression_level = extract_compression_level_kwarg(compression_level)?;
 
     // No Python objects are touched below this point, so release the GIL for
     // the (potentially rayon-parallel) pure-Rust conversion work.
@@ -573,9 +586,21 @@ fn csv_to_xlsx(
     let destination = output.destination(&mut buffer);
     let result = py.detach(|| {
         if parallel {
-            convert_csv_to_xlsx_parallel(&input_path, destination, &sheet_name, order)
+            convert_csv_to_xlsx_parallel(
+                &input_path,
+                destination,
+                &sheet_name,
+                order,
+                compression_level,
+            )
         } else {
-            convert_csv_to_xlsx(&input_path, destination, &sheet_name, order)
+            convert_csv_to_xlsx(
+                &input_path,
+                destination,
+                &sheet_name,
+                order,
+                compression_level,
+            )
         }
     })?;
     output.deliver(&buffer)?;
@@ -698,6 +723,8 @@ fn csv_to_xlsx(
 ///                 filter) and with header=False.
 ///     tab_color: Colour of the sheet tab: "#RRGGBB" or a named colour such as "red"
 ///                (default: None).
+///     compression_level: Zip compression level of the file, 1 (fastest, largest)
+///                        to 9 (default: None, which is level 6).
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -764,6 +791,7 @@ fn csv_to_xlsx(
     startrow = None,
     autofilter = false,
     tab_color = None,
+    compression_level = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn df_to_xlsx<'py>(
@@ -798,9 +826,11 @@ fn df_to_xlsx<'py>(
     startrow: Option<&Bound<'py, PyAny>>,
     autofilter: bool,
     tab_color: Option<&Bound<'py, PyAny>>,
+    compression_level: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(u32, u16)> {
     let output = OutputArg::from_py(output_path)?;
     require_supported_dataframe(df, None)?;
+    let compression_level = extract_compression_level_kwarg(compression_level)?;
     let startrow = extract_startrow_kwarg(startrow)?;
     let freeze_panes = extract_freeze_panes_kwarg(freeze_panes)?;
     let tab_color = extract_tab_color_kwarg(tab_color)?;
@@ -877,7 +907,10 @@ fn df_to_xlsx<'py>(
         sheet_name,
         &config,
         &opts,
-        defined_names.as_ref(),
+        WorkbookOptions {
+            defined_names: defined_names.as_ref(),
+            compression_level,
+        },
     )?;
     output.deliver(&buffer)?;
     Ok(result)
@@ -995,6 +1028,8 @@ fn version() -> &'static str {
 ///                 filter) and with header=False.
 ///     tab_color: Colour of the sheet tab: "#RRGGBB" or a named colour such as "red"
 ///                (default: None).
+///     compression_level: Zip compression level of the file, 1 (fastest, largest)
+///                        to 9 (default: None, which is level 6).
 ///     defined_names: Dict mapping name to Excel reference for workbook-level defined names (default: None).
 ///                    Example: {"MyRange": "=Sheet1!$A$1:$D$100"}
 ///     cells: Dict mapping cell refs to values for arbitrary cell writes (default: None).
@@ -1062,6 +1097,7 @@ fn version() -> &'static str {
     startrow = None,
     autofilter = false,
     tab_color = None,
+    compression_level = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn dfs_to_xlsx<'py>(
@@ -1095,6 +1131,7 @@ fn dfs_to_xlsx<'py>(
     startrow: Option<&Bound<'py, PyAny>>,
     autofilter: bool,
     tab_color: Option<&Bound<'py, PyAny>>,
+    compression_level: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<(u32, u16)>> {
     let output = OutputArg::from_py(output_path)?;
     if sheets.is_empty() {
@@ -1107,6 +1144,7 @@ fn dfs_to_xlsx<'py>(
     let freeze_panes = extract_freeze_panes_kwarg(freeze_panes)?;
     let tab_color = extract_tab_color_kwarg(tab_color)?;
     let defined_names = extract_defined_names_kwarg(defined_names)?;
+    let compression_level = extract_compression_level_kwarg(compression_level)?;
     let mut workbook = Workbook::new();
     let mut stats = Vec::new();
     let mut table_names: HashMap<String, ClaimedTableName> = HashMap::new();
@@ -1323,7 +1361,10 @@ fn dfs_to_xlsx<'py>(
     finish_workbook(
         py,
         &mut workbook,
-        defined_names.as_ref(),
+        WorkbookOptions {
+            defined_names: defined_names.as_ref(),
+            compression_level,
+        },
         output.destination(&mut buffer),
     )?;
     output.deliver(&buffer)?;

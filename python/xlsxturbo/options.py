@@ -95,7 +95,7 @@ _UNSET: Any = _Unset.TOKEN
 # Options the workbook accepts but a per-sheet dict does not. Kept as the
 # difference from the field list rather than as a second copy of it, so
 # `as_sheet_options` cannot drift from the dataclass.
-_WORKBOOK_ONLY = frozenset({"constant_memory", "defined_names"})
+_WORKBOOK_ONLY = frozenset({"constant_memory", "defined_names", "compression_level"})
 
 
 @dataclass(frozen=True)
@@ -157,6 +157,7 @@ class ExportOptions:
     # Workbook-level: accepted by the entry points, not by a per-sheet dict.
     constant_memory: bool = _UNSET
     defined_names: Mapping[str, str] | None = _UNSET
+    compression_level: int = _UNSET
 
     def as_kwargs(self) -> dict[str, Any]:
         """Return the set options as keyword arguments for the entry points.

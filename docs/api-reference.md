@@ -172,7 +172,7 @@ usually answers the question faster than the stub does:
 
 | Shape | Example options | Keyed by |
 |-------|-----------------|----------|
-| Scalar flag or name | `header`, `autofit`, `table_style`, `freeze_panes`, `autofilter`, `tab_color`, `startrow` | — |
+| Scalar flag or name | `header`, `autofit`, `table_style`, `freeze_panes`, `autofilter`, `tab_color`, `startrow`, `compression_level` | — |
 | Column-keyed mapping | `column_widths` | Column index (`0`), or `"_all"` for every column |
 | Column-keyed mapping | `column_formats` | Column name, or wildcard pattern such as `"price_*"` |
 | Column-keyed mapping | `formula_columns` | The name of the new column the formula fills |

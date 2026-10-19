@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-10-19
+
+### Added
+- `compression_level`, the zip compression of the saved file, from 1 (fastest, largest)
+  to 9; the default stays 6. Accepted by `df_to_xlsx`, `dfs_to_xlsx`, `csv_to_xlsx` and
+  `ExportOptions`, and by both commands as `-c` / `--compression-level`. Level 1 made a
+  100,000-row `df_to_xlsx` 28% faster and `csv_to_xlsx` 34% faster, for a file 68% larger;
+  level 5 was 12-16% faster for a file 0.2% larger. A level outside 1 to 9 raises
+  `ConfigurationError`, a value that is not an integer `ConfigurationTypeError`. It is a
+  workbook option, so a per-sheet options dict refuses it.
+
 ## [1.11.1] - 2026-10-19
 
 ### Fixed

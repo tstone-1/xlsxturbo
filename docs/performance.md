@@ -93,6 +93,35 @@ Each call writes its own file and shares nothing, so no locking is needed on you
 they run. `csv_to_xlsx` has released the GIL for its whole conversion since it was written,
 and scales further because of it.
 
+## Compression level
+
+Compressing the archive is a large part of every save. `compression_level` sets the zip
+compression from 1 (fastest, largest file) to 9; the default is 6. It is accepted by
+`df_to_xlsx`, `dfs_to_xlsx` and `csv_to_xlsx`, and by the command as `-c` /
+`--compression-level`. It changes only how the file is packed: Excel reads every level the
+same.
+
+```python
+xlsxturbo.df_to_xlsx(df, "report.xlsx", compression_level=1)
+```
+
+Measured on Windows 11, AMD Ryzen (32 threads), Python 3.14.6, xlsxturbo 1.12.0: a seeded
+100,000-row frame of seven columns (integers, floats, 20 repeated strings, unique ids,
+booleans, dates), written to `io.BytesIO`, levels interleaved, median of 9 runs after a
+warmup.
+
+| Level | `df_to_xlsx` | `csv_to_xlsx` | File size |
+|------:|-------------:|--------------:|----------:|
+| 6 (default) | 603 ms | 504 ms | 5.2 MiB |
+| 5 | 528 ms (-12%) | 425 ms (-16%) | +0.2% |
+| 3 | 474 ms (-21%) | 376 ms (-25%) | +8% |
+| 1 | 434 ms (-28%) | 335 ms (-34%) | +68% |
+
+Level 5 is close to free: almost the same file, about an eighth faster. Level 1 suits files
+that are read once and deleted, or that go straight into another archive. Levels 7 to 9 are
+slower than 6 for a file at most a few percent smaller; with data like this, level 9 is no
+smaller than 6.
+
 ## Benchmarking
 
 Run the included benchmark scripts:

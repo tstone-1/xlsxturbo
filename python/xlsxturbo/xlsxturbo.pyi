@@ -127,6 +127,7 @@ def csv_to_xlsx(
     sheet_name: str = "Sheet1",
     parallel: bool = False,
     date_order: DateOrder = "auto",
+    compression_level: int = 6,
 ) -> tuple[int, int]:
     """Convert a CSV file to XLSX format with automatic type detection.
 
@@ -142,6 +143,8 @@ def csv_to_xlsx(
             "auto" - ISO first, then European (DMY), then US (MDY).
             "mdy" or "us" - US format: 01-02-2024 = January 2nd.
             "dmy" or "eu" - European format: 01-02-2024 = February 1st.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
+            Level 1 is the fastest and gives the largest file; see the performance page.
 
     Note:
         String cells preserve surrounding whitespace (e.g. " padded " is
@@ -195,6 +198,7 @@ def df_to_xlsx(
     startrow: int = 0,
     autofilter: bool = False,
     tab_color: str | None = None,
+    compression_level: int = 6,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
 
@@ -304,6 +308,8 @@ def df_to_xlsx(
         tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
             (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
             per sheet in the options dict, where None removes the workbook-wide colour.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
+            Level 1 is the fastest and gives the largest file; see the performance page.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -357,6 +363,7 @@ def dfs_to_xlsx(
     startrow: int = 0,
     autofilter: bool = False,
     tab_color: str | None = None,
+    compression_level: int = 6,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
 
@@ -451,6 +458,8 @@ def dfs_to_xlsx(
         tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
             (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
             per sheet in the options dict, where None removes the workbook-wide colour.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
+            Level 1 is the fastest and gives the largest file; see the performance page.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
