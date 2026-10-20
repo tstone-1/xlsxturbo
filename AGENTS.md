@@ -3,7 +3,7 @@
 ## Shared Memory Policy
 
 - `AGENTS.md` is the canonical shared memory for Codex and other coding agents in this repository.
-- Claude Code loads this file through the root `CLAUDE.md`.
+- Claude Code loads this file itself; there is no `CLAUDE.md`, and adding one stops that unless it imports `@AGENTS.md`.
 - Durable project knowledge, workflows, commands, architecture notes, and recurring pitfalls belong here.
 - Do not store durable project knowledge only in Claude auto memory.
 - Keep entries concise, specific, and verifiable. Prefer updating existing sections over appending duplicate notes.
