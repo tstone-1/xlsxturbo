@@ -72,6 +72,15 @@ since 0.100.0 a failed temporary file is `XlsxError::TempFileError(String)`, whi
 write raises `FileError` where everything else raises `FilePermissionError`. Pinned in
 `tests/upstream_defect.rs`, which names what to change when it goes red.
 
+Fixed upstream in `4966f122f2` (2026-10-20, not yet released): the variant is now
+`TempFileError(PathBuf, std::io::Error)` and `source()` returns the `io::Error`. Measured on
+Windows against that commit: a missing folder gives `NotFound`, a write-denied folder
+`PermissionDenied` (`raw_os_error` 5, a Win32 code), through both `set_tempdir()` and
+`add_worksheet_with_constant_memory()` with `TMP` pointed at the folder. `posix_errno` maps
+by `kind()` on Windows, so the planned switch to `FileFailure::from_io` yields
+`FilePermissionError` there too. A file given as the folder reports `NotFound` on Windows, not
+`NotADirectory` as on Unix. The issue stays open until we report back.
+
 ## Name validation is ours now — upstream has drawn its line
 
 On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of
