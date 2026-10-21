@@ -1379,7 +1379,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [crc32fast 1.5.2](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.3](https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License
@@ -1431,7 +1431,7 @@ Applies to:
 
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.100.0](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.101.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1510,7 +1510,7 @@ Applies to:
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
 - [syn 3.0.9](https://github.com/dtolnay/syn)
-- [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
+- [typed-path 0.12.4](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
 ```text

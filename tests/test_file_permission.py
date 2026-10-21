@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import errno
 import os
+import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -48,6 +49,58 @@ def _refused_target(tmp_path: Path) -> Iterator[Path]:
         yield folder / "out.xlsx"
     finally:
         folder.chmod(0o755)
+
+
+def _icacls(folder: Path, *args: str) -> None:
+    """Change a folder's ACL with the icacls that ships with Windows."""
+    subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["icacls", str(folder), *args],  # noqa: S607 - icacls is in System32 on every Windows
+        check=True,
+        capture_output=True,
+    )
+
+
+@contextmanager
+def _refused_folder(tmp_path: Path) -> Iterator[Path]:
+    """Yield a folder in which no file can be created while the context is open."""
+    folder = tmp_path / "refused"
+    folder.mkdir()
+    if sys.platform == "win32":
+        # Deny ACEs bind administrators too; S-1-1-0 is Everyone in every locale.
+        everyone = "*S-1-1-0"
+        _icacls(folder, "/deny", f"{everyone}:(OI)(CI)(W)")
+        try:
+            yield folder
+        finally:
+            _icacls(folder, "/remove:d", everyone)
+        return
+    if os.geteuid() == 0:
+        pytest.skip("root is not refused by a read-only folder")
+    folder.chmod(0o555)
+    try:
+        yield folder
+    finally:
+        folder.chmod(0o755)
+
+
+class TestRefusedTempFolder:
+    """A constant_memory sheet's temporary file, refused by the OS, is a FilePermissionError.
+
+    It was a plain FileError until rust_xlsxwriter 0.101.0 kept the ``io::Error``
+    (upstream #213).
+    """
+
+    def test_the_class_and_errno(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exactly FilePermissionError with errno EACCES, naming the folder."""
+        with _refused_folder(tmp_path) as folder:
+            for name in ("TMPDIR", "TEMP", "TMP"):
+                monkeypatch.setenv(name, str(folder))
+            with pytest.raises(PermissionError) as caught:
+                xlsxturbo.df_to_xlsx(_frame(), tmp_path / "out.xlsx", constant_memory=True)
+        assert type(caught.value) is xlsxturbo.FilePermissionError
+        assert caught.value.errno == errno.EACCES
+        assert "temporary file" in str(caught.value)
+        assert folder.name in str(caught.value)
 
 
 class TestRefusedWrite:

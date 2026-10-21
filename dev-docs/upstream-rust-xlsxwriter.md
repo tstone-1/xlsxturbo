@@ -65,7 +65,7 @@ proper error) is what turns "empty names panic" from an assertion into a measure
 statement about pyo3 panic handling made from memory rather than from a test. Review the
 draft against the packet of what you actually ran, not against what you believe.
 
-**Open: [#213](https://github.com/jmcnamara/rust_xlsxwriter/issues/213)** (2026-10-19) --
+**Closed: [#213](https://github.com/jmcnamara/rust_xlsxwriter/issues/213)** (2026-10-19) --
 since 0.100.0 a failed temporary file is `XlsxError::TempFileError(String)`, which drops the
 `io::Error`; `set_tempdir()` returned `IoError` with its kind in 0.99.1. So
 `convert::temp_file_failure` sets no `errno`, and a temporary folder the process may not
@@ -80,6 +80,12 @@ Windows against that commit: a missing folder gives `NotFound`, a write-denied f
 by `kind()` on Windows, so the planned switch to `FileFailure::from_io` yields
 `FilePermissionError` there too. A file given as the folder reports `NotFound` on Windows, not
 `NotADirectory` as on Unix. The issue stays open until we report back.
+
+Released in 0.101.0 (2026-10-20) and taken the next day: `temp_file_failure` maps the
+`io::Error` through `FileFailure::from_io`, `tests/upstream_defect.rs` is deleted, and
+`tests/test_file_permission.py::TestRefusedTempFolder` covers the refused folder (an `icacls`
+deny for Everyone on Windows, `chmod 0o555` on POSIX). Reverting the mapping turns that test
+and the `ENOENT` assertion in `tests/test_constant_memory.py` red.
 
 ## Name validation is ours now — upstream has drawn its line
 

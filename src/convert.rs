@@ -842,18 +842,22 @@ pub(crate) fn add_named_worksheet<'w>(
 
 /// Classify a failure to create a `constant_memory` worksheet's temporary file.
 ///
-/// rust_xlsxwriter reports it as `XlsxError::TempFileError(String)`, which names
-/// the folder but has dropped the `io::Error`, so there is no `errno` to carry
-/// and a refused folder is a plain `FileError`. Reported upstream as
-/// jmcnamara/rust_xlsxwriter#213; `tests/upstream_defect.rs` goes red when it is
-/// fixed.
+/// rust_xlsxwriter reports it as `XlsxError::TempFileError(folder, io::Error)`
+/// since 0.101.0 (jmcnamara/rust_xlsxwriter#213), so the `errno` comes from the
+/// `io::Error` and a folder the process may not write is a `FilePermissionError`.
 fn temp_file_failure(sheet_name: &str, error: &rust_xlsxwriter::XlsxError) -> FileFailure {
-    FileFailure {
-        message: format!(
-            "Failed to create the temporary file for constant_memory sheet '{}': {}",
-            sheet_name, error
-        ),
-        errno: None,
+    let context = format!(
+        "Failed to create the temporary file for constant_memory sheet '{}'",
+        sheet_name
+    );
+    match error {
+        rust_xlsxwriter::XlsxError::TempFileError(folder, io) => {
+            FileFailure::from_io(format!("{} in '{}'", context, folder.display()), io)
+        }
+        other => FileFailure {
+            message: format!("{}: {}", context, other),
+            errno: None,
+        },
     }
 }
 

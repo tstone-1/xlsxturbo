@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-10-21
+
+### Fixed
+- `constant_memory=True` with a temporary folder the process may not write raised a plain
+  `FileError` with no `errno`, so `except PermissionError` missed it. It now raises
+  `FilePermissionError` with `errno` `EACCES`, like every other refused write. A temporary
+  folder that does not exist stays `FileError`, now with `errno` `ENOENT`. Fixed upstream in
+  rust_xlsxwriter (#213), taken with the update to 0.101.0.
+
+### Changed
+- rust_xlsxwriter 0.100.0 -> 0.101.0.
+
 ## [1.12.0] - 2026-10-19
 
 ### Added
@@ -750,12 +762,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points share one config and must move together; Dependabot files one PR per path, so
   each of its three PRs failed with `Loaded a configuration file for version '4.37.6', but
   running version '4.37.4'` and none could pass alone.
-- Unreleased work now accumulates under `## [Unreleased]` in this file, and gains its
+- Unreleased work now accumulates under `## [1.12.1] - 2026-10-21` in this file, and gains its
   version number and date only at release time. The previous convention wrote the version
   in early (`## [1.1.2] - Unreleased`), which `release-notes.sh` matches — it tests
   `## [<version>]` as a prefix and ignores the rest of the line — so a tag pushed before
   the date was filled in would have published a GitHub Release whose notes say Unreleased,
-  with no job failing. `## [Unreleased]` matches no tag and fails the release job instead.
+  with no job failing. `## [1.12.1] - 2026-10-21` matches no tag and fails the release job instead.
   `BUILD.md` step 2 and `tests/test_ci_config.py::TestChangelogHeadings` now say so.
 
 ## [1.1.1] - 2026-08-06

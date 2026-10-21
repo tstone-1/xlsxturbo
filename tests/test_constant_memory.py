@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import warnings
 from pathlib import Path
 
@@ -20,6 +21,8 @@ class TestUnwritableTempFolder:
     rust_xlsxwriter panicked here before 0.100.0, which reached Python as
     ``PanicException`` -- a ``BaseException`` that ``except Exception`` does not catch.
     The folder is not the caller's option, so it must not be a ``ConfigurationError``.
+    A missing folder is ``ENOENT`` and so not a ``FilePermissionError``; the refused
+    folder is in ``test_file_permission.py``.
     """
 
     @pytest.fixture
@@ -34,7 +37,8 @@ class TestUnwritableTempFolder:
         """The single-sheet entry point raises FileError naming the folder."""
         with pytest.raises(xlsxturbo.FileError, match="temporary file") as caught:
             xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_path / "out.xlsx", constant_memory=True)
-        assert not isinstance(caught.value, xlsxturbo.ConfigurationError)
+        assert type(caught.value) is xlsxturbo.FileError
+        assert caught.value.errno == errno.ENOENT
         assert "no-such-temp" in str(caught.value)
 
     def test_dfs_to_xlsx(self, missing_temp: Path, tmp_path: Path) -> None:

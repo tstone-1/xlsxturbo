@@ -85,7 +85,7 @@ Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py 
 - *When rust_xlsxwriter is what is wrong, file it at jmcnamara/rust_xlsxwriter alongside the local workaround* -- #185 and #186 were each fixed within a day of filing. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#upstream-defects-belong-upstream--file-them).
 - *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
 - *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
-- *Open: #213, `TempFileError` drops the `io::Error`* -- a refused temporary folder is `FileError`, not `FilePermissionError`; `tests/upstream_defect.rs` pins it. Fixed upstream in `4966f122f2`, unreleased; take it with the next rust_xlsxwriter release.
+- *Closed: #213, `TempFileError` drops the `io::Error`* -- fixed in rust_xlsxwriter 0.101.0; `temp_file_failure` now maps the `io::Error`, so a refused temporary folder is `FilePermissionError`. No open upstream defect is pinned now.
 
 ## Name validation is ours now — upstream has drawn its line
 
