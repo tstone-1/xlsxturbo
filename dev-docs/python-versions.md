@@ -64,7 +64,11 @@ Two things about testing it, because a GIL release is only observable through ti
 - **`TestSaveReleasesTheGil` is the guard, and it was mutation-checked per call site.** The
   threshold is 0.80x with best-of-3 legs and a 4-core skip, chosen to sit in the middle of a
   measured 0.43-vs-0.98 gap rather than close to either side. If it ever flakes, widen the
-  threshold — do not delete it.
+  threshold — do not delete it. First flake, 2026-10-21 on the 1.12.1 release commit:
+  `python-test-windows (3.12)`, `df_to_xlsx` leg, 0.233s against 0.291s (0.801x), the first
+  failure in 30 `main` runs; a re-run of the failed jobs passed. Left at 0.80 on that one
+  data point; if Windows misses again, 0.85 still sits well below the 0.95-0.98 of a missing
+  `py.detach`.
 - ⚠ **A wall-clock assertion is invalid under `-Cinstrument-coverage`, and this repo runs
   the whole pytest suite that way.** On an instrumented build four threads are *slower* than
   one — 1.693s against 1.347s on a 32-core machine where the ordinary build gives 0.43x — so
