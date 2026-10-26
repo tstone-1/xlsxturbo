@@ -654,7 +654,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.9.0](https://github.com/rust-lang/cc-rs)
+- [cc 1.10.0](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.15](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.106](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -1264,12 +1264,12 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [pyo3-build-config 0.29.3](https://github.com/pyo3/pyo3)
-- [pyo3-ffi 0.29.3](https://github.com/pyo3/pyo3)
-- [pyo3-macros-backend 0.29.3](https://github.com/pyo3/pyo3)
-- [pyo3-macros 0.29.3](https://github.com/pyo3/pyo3)
-- [pyo3 0.29.3](https://github.com/pyo3/pyo3)
-- [pyo3 0.29.3](https://github.com/pyo3/pyo3)
+- [pyo3-build-config 0.30.1](https://github.com/pyo3/pyo3)
+- [pyo3-ffi 0.30.1](https://github.com/pyo3/pyo3)
+- [pyo3-macros-backend 0.30.1](https://github.com/pyo3/pyo3)
+- [pyo3-macros 0.30.1](https://github.com/pyo3/pyo3)
+- [pyo3 0.30.1](https://github.com/pyo3/pyo3)
+- [pyo3 0.30.1](https://github.com/pyo3/pyo3)
 
 ```text
 Copyright (c) 2023-present PyO3 Project and Contributors.  https://github.com/PyO3
@@ -1510,7 +1510,7 @@ Applies to:
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
 - [syn 3.0.9](https://github.com/dtolnay/syn)
-- [typed-path 0.12.4](https://github.com/chipsenkbeil/typed-path)
+- [typed-path 0.13.0](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
 ```text
@@ -1589,7 +1589,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.0.5](https://github.com/zip-rs/zip2)
+- [zip 9.1.2](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
