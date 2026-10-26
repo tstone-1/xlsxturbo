@@ -57,7 +57,10 @@ while IFS= read -r line; do
     else
         printf '[OK]   %-46s %s == %s\n' "$repo_with_path" "${sha:0:10}" "$label"
     fi
-done < <(grep -hoE "uses: [^@[:space:]]+@[0-9a-f]{40} # .*" .github/workflows/*.yml | sort -u)
+# De-duplicated with awk, not `sort -u`: Git's bash started from PowerShell puts
+# C:\Windows\system32 ahead of /usr/bin, so `sort` is Windows sort.exe, which
+# rejects -u and feeds the loop nothing.
+done < <(grep -hoE "uses: [^@[:space:]]+@[0-9a-f]{40} # .*" .github/workflows/*.yml | awk '!seen[$0]++')
 
 echo "---"
 echo "checked=$checked failed=$failed skipped=$skipped"
