@@ -176,7 +176,7 @@ class ExportOptions:
     def as_sheet_options(self) -> SheetOptions:
         """Return the set options as a per-sheet dict for ``dfs_to_xlsx``.
 
-        Drops the two workbook-level options, which a per-sheet dict rejects as
+        Drops the workbook-level options, which a per-sheet dict rejects as
         unknown keys. Dropping them silently is the right call here: it lets one
         bundle serve both call shapes, which is the point of the type.
 

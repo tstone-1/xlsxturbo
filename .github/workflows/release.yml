@@ -113,9 +113,9 @@ jobs:
   # Software bill of materials.
   #
   # The Rust SBOM is the meaningful one: the crates in Cargo.lock are what is
-  # statically linked into the shipped extension module. The Python side is
-  # deliberately thin -- the wheel declares no runtime dependencies -- so it is
-  # generated for completeness, not because it carries much.
+  # statically linked into the shipped extension module. The wheel declares no
+  # Python runtime dependencies. Do not inventory the SBOM generator environment:
+  # it describes the build tooling, not the released package.
   sbom:
     runs-on: ubuntu-latest
     steps:
@@ -126,14 +126,9 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-
       - name: Generate Rust SBOM (CycloneDX, cargo-cyclonedx 0.5.9)
         run: |
-          # Pinned for the same reason cyclonedx-bom below is, and it matters
-          # more here: this job runs only on a tag, `github-release` needs its
+          # Pinned: this job runs only on a tag, `github-release` needs its
           # `sbom` artifact, and a breaking cargo-cyclonedx release would fail
           # the GitHub Release step after PyPI publish has already happened.
           # `--locked` pins the tool's dependencies, not the tool -- the version
@@ -145,14 +140,6 @@ jobs:
           mkdir -p sbom
           # cargo-cyclonedx writes per-manifest files next to each Cargo.toml.
           find . -name '*.cdx.json' -not -path './target/*' -exec cp {} sbom/ \;
-
-      - name: Generate Python SBOM (CycloneDX)
-        run: |
-          # Pinned: this was unpinned, floated to 7.x, and the v0.19.0 release
-          # failed on `unrecognized arguments: --outfile` -- 7.x renamed it to
-          # `-o/--output-file`. Revisit when 8.x lands.
-          pip install "cyclonedx-bom>=7,<8"
-          cyclonedx-py environment --output-format JSON -o sbom/python-environment.cdx.json
 
       - name: List SBOMs
         run: ls -la sbom/

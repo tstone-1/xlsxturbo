@@ -5,10 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.12.2] - 2026-10-29
+
+### Fixed
+- Interleaved frames on different sheets now validate automatic table names in worksheet
+  order. Valid exports previously rejected as duplicate names now succeed; actual
+  collisions now raise `WorkbookValidationError` before saving instead of `FileError`.
+- Conditional-format numeric thresholds now reject NaN and infinity with
+  `ConfigurationError` instead of serializing them as non-numeric formula tokens.
+- Corrected the `ExportOptions.as_sheet_options()` docstring's stale option count.
+
+Fixed upstream in rust_xlsxwriter 0.102.0, taken with the update:
+- A text rule in `conditional_formats` (`contains`, `begins_with`, ...) whose value held a
+  double quote wrote an invalid formula, and one with non-ASCII text used the wrong length.
+- Conditional format rule priorities now follow the order the rules were given in when
+  ranges repeat.
+- Placing many comments, images or charts on a sheet with `row_heights` or `column_widths`
+  took quadratic time.
 
 ### Changed
-- pyo3 0.29.3 -> 0.30.1, zip 9.0.5 -> 9.1.2.
+- Removed the Python release SBOM that inventoried generator tooling rather than the
+  released package. The Rust dependency SBOM remains attached to releases.
+- pyo3 0.29.3 -> 0.30.1, zip 9.0.5 -> 9.1.3, rust_xlsxwriter 0.101.0 -> 0.102.0.
 
 ## [1.12.1] - 2026-10-21
 

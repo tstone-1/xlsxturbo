@@ -22,6 +22,34 @@ pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for 
 class TestConditionalFormatting:
     """Tests for conditional formatting feature (v0.8.0)."""
 
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+    @pytest.mark.parametrize("field", ["value", "min_value", "max_value"])
+    def test_numeric_thresholds_require_finite_values(self, tmp_xlsx: str, field: str, value: float) -> None:
+        """Non-finite thresholds must not become formula identifiers."""
+        rule: ConditionalFormat
+        if field == "value":
+            rule = {"type": "cell", "criteria": "greater_than", "value": value}
+        else:
+            rule = {"type": "cell", "criteria": "between", "min_value": 0, "max_value": 1}
+            if field == "min_value":
+                rule["min_value"] = value
+            else:
+                rule["max_value"] = value
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"conditional_formats\['a'\].*{field}.*finite"):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [0, 1]}), tmp_xlsx, conditional_formats={"a": rule})
+
+    @pytest.mark.parametrize("value", [0, 1, "ERROR"])
+    def test_finite_and_string_comparisons_keep_their_formulas(self, tmp_xlsx: str, value: int | str) -> None:
+        """Rejecting non-finite numbers preserves numeric and quoted string rules."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"a": [0, 1]}), tmp_xlsx,
+            conditional_formats={"a": {"type": "cell", "criteria": "equal_to", "value": value}},
+        )
+        ws = active_ws(load_workbook(tmp_xlsx))
+        rules = list(ws.conditional_formatting)
+        expected = f'"{value}"' if isinstance(value, str) else str(value)
+        assert ws.conditional_formatting[rules[0]][0].formula == [expected]
+
     def test_2_color_scale(self, tmp_xlsx: str) -> None:
         """Verify 2-color scale conditional format."""
         df = pd.DataFrame({"Score": [10, 50, 90]})

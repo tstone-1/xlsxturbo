@@ -1431,7 +1431,7 @@ Applies to:
 
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.101.0](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.102.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
@@ -1505,7 +1505,7 @@ Applies to:
 - [portable-atomic 1.15.0](https://github.com/taiki-e/portable-atomic)
 - [proc-macro2 1.0.107](https://github.com/dtolnay/proc-macro2)
 - [quote 1.0.47](https://github.com/dtolnay/quote)
-- [rustix 1.1.5](https://github.com/bytecodealliance/rustix)
+- [rustix 1.1.6](https://github.com/bytecodealliance/rustix)
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
@@ -1589,7 +1589,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.1.2](https://github.com/zip-rs/zip2)
+- [zip 9.1.3](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)

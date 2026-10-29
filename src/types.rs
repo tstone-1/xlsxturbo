@@ -369,9 +369,9 @@ impl<'py, 'm> OptionMap<'py, 'm> {
             .ok_or_else(|| format!("{}: missing '{}' key", self.context, key))
     }
 
-    /// Extract a required f64 field: missing/`None` is an error naming the key.
-    pub(crate) fn required_f64(&self, key: &str) -> Result<f64, String> {
-        self.f64(key)?
+    /// Extract a required finite f64: missing/`None` is an error naming the key.
+    pub(crate) fn required_finite_f64(&self, key: &str) -> Result<f64, String> {
+        self.finite_f64(key)?
             .ok_or_else(|| format!("{}: missing '{}' key", self.context, key))
     }
 

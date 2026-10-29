@@ -1214,48 +1214,6 @@ fn dfs_to_xlsx<'py>(
             .cloned()
             .or_else(|| table_name.clone());
 
-        // A table is only actually created when there's at least one data row
-        // and one column (see the gate in `apply_frame_features`), so an
-        // empty DataFrame never claims a table name here either — otherwise
-        // two empty sheets sharing a table name would false-positive as a
-        // conflict.
-        if let Some(sanitized) = claimed_table_name(
-            &df,
-            constant_memory,
-            effective_header,
-            effective_table_style.as_deref(),
-            effective_table_name.as_deref(),
-            next_table_id,
-        )
-        .map_err(|e| errors::input_data(format!("sheet '{}': {}", sheet_name, e)))?
-        {
-            next_table_id += 1;
-            let auto = effective_table_name.is_none();
-            // `to_lowercase`, not `to_ascii_lowercase`: this fold has to match
-            // the writer's own uniqueness check exactly, and rust_xlsxwriter
-            // folds names with `to_lowercase`. A narrower fold under-reaches --
-            // sanitization keeps every alphanumeric codepoint, so 'TÄBLE' and
-            // 'täble' both reach the workbook, pass this check, and collide
-            // during the save, where the message names neither sheet. A wider
-            // one would refuse names Excel accepts, which is the more expensive
-            // direction.
-            let key = sanitized.to_lowercase();
-            let claim = ClaimedTableName {
-                name: sanitized,
-                sheet: sheet_name.clone(),
-                auto,
-            };
-            if let Some(previous) = table_names.insert(key, claim) {
-                return Err(errors::workbook_validation(format!(
-                    "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook.{}",
-                    previous.name,
-                    previous.sheet,
-                    sheet_name,
-                    workbook::auto_table_name_hint(previous.auto || auto)
-                )));
-            }
-        }
-
         entries.push(SheetEntry {
             df,
             header: effective_header,
@@ -1270,6 +1228,56 @@ fn dfs_to_xlsx<'py>(
             config: sheet_config,
             first,
         });
+    }
+
+    // The writer assigns IDs in worksheet order, then frame order within a
+    // worksheet, even when the caller interleaves entries for different sheets.
+    // Stable sorting by the first entry reproduces that order without changing
+    // the order in which frames are written.
+    let mut table_entries: Vec<_> = entries.iter().collect();
+    table_entries.sort_by_key(|entry| entry.first);
+    for entry in table_entries {
+        // A table is only actually created when there's at least one data row
+        // and one column (see the gate in `apply_frame_features`), so an
+        // empty DataFrame never claims a table name here either — otherwise
+        // two empty sheets sharing a table name would false-positive as a
+        // conflict.
+        if let Some(sanitized) = claimed_table_name(
+            &entry.df,
+            constant_memory,
+            entry.header,
+            entry.table_style.as_deref(),
+            entry.table_name.as_deref(),
+            next_table_id,
+        )
+        .map_err(|e| errors::input_data(format!("sheet '{}': {}", entry.name, e)))?
+        {
+            next_table_id += 1;
+            let auto = entry.table_name.is_none();
+            // `to_lowercase`, not `to_ascii_lowercase`: this fold has to match
+            // the writer's own uniqueness check exactly, and rust_xlsxwriter
+            // folds names with `to_lowercase`. A narrower fold under-reaches --
+            // sanitization keeps every alphanumeric codepoint, so 'TÄBLE' and
+            // 'täble' both reach the workbook, pass this check, and collide
+            // during the save, where the message names neither sheet. A wider
+            // one would refuse names Excel accepts, which is the more expensive
+            // direction.
+            let key = sanitized.to_lowercase();
+            let claim = ClaimedTableName {
+                name: sanitized,
+                sheet: entry.name.clone(),
+                auto,
+            };
+            if let Some(previous) = table_names.insert(key, claim) {
+                return Err(errors::workbook_validation(format!(
+                    "Duplicate table name '{}' for sheets '{}' and '{}'. Excel table names must be unique within a workbook.{}",
+                    previous.name,
+                    previous.sheet,
+                    entry.name,
+                    workbook::auto_table_name_hint(previous.auto || auto)
+                )));
+            }
+        }
     }
 
     check_frame_layout(&entries, constant_memory)?;

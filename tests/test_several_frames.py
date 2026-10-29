@@ -248,6 +248,29 @@ class TestWholeSheetOptions:
 class TestFrameBoundOptions:
     """Tables, formats, formulas and rules belong to the frame that asks for them."""
 
+    @pytest.mark.parametrize("explicit", [False, True])
+    def test_interleaved_table_names_follow_sheet_order(self, tmp_xlsx: str, explicit: bool) -> None:
+        """Interleaving sheets does not change the writer's table numbering."""
+        middle: SheetOptions = {"table_name": "Table3"} if explicit else {}
+        sheets = [(_summary(), "A"), (_summary(), "B", middle), (_summary(), "A", {"startrow": 5})]
+        xlsxturbo.dfs_to_xlsx(sheets, tmp_xlsx, table_style="Medium2")
+        wb = load_workbook(tmp_xlsx)
+        assert dict(wb["A"].tables.items()) == {"Table1": "A1:B3", "Table2": "A6:B8"}
+        assert dict(wb["B"].tables.items()) == {"Table3": "A1:B3"}
+
+    @pytest.mark.parametrize("defined_name", [False, True])
+    def test_interleaved_table_collision_is_validated_before_save(self, tmp_xlsx: str, defined_name: bool) -> None:
+        """Both table and defined-name collisions use the actual automatic names."""
+        middle: SheetOptions = {"table_name": "Other" if defined_name else "Table2"}
+        sheets = [(_summary(), "A"), (_summary(), "B", middle), (_summary(), "A", {"startrow": 5})]
+        Path(tmp_xlsx).write_bytes(b"previous export")
+        with pytest.raises(xlsxturbo.WorkbookValidationError, match=r"Table2|table2"):
+            xlsxturbo.dfs_to_xlsx(
+                sheets, tmp_xlsx, table_style="Medium2",
+                defined_names={"Table2": "=A!$A$1"} if defined_name else None,
+            )
+        assert Path(tmp_xlsx).read_bytes() == b"previous export"
+
     def test_two_tables_on_one_sheet(self, tmp_xlsx: str) -> None:
         """Each frame becomes its own table, over its own range."""
         sheets = [
@@ -259,7 +282,7 @@ class TestFrameBoundOptions:
         assert dict(tables.items()) == {"Figures": "A1:B3", "Reasons": "A6:B8"}
 
     def test_a_workbook_wide_table_style_gives_each_frame_a_table(self, tmp_xlsx: str) -> None:
-        """The keyword is a default per frame; the tables are auto-named in list order."""
+        """The keyword is a default per frame; tables follow frame order within a sheet."""
         xlsxturbo.dfs_to_xlsx(_two_frames(), tmp_xlsx, table_style="Medium2")
         tables = load_workbook(tmp_xlsx)["Summary"].tables
         assert dict(tables.items()) == {"Table1": "A1:B3", "Table2": "A6:B8"}

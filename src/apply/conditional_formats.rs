@@ -285,12 +285,12 @@ fn apply_cell_conditional(
     // Range rules (require numeric min_value/max_value)
     if let Some(rule) = match criteria_lower.as_str() {
         "between" => Some(ConditionalFormatCellRule::Between(
-            view.required_f64("min_value")?,
-            view.required_f64("max_value")?,
+            view.required_finite_f64("min_value")?,
+            view.required_finite_f64("max_value")?,
         )),
         "not_between" | "not between" => Some(ConditionalFormatCellRule::NotBetween(
-            view.required_f64("min_value")?,
-            view.required_f64("max_value")?,
+            view.required_finite_f64("min_value")?,
+            view.required_finite_f64("max_value")?,
         )),
         _ => None,
     } {
@@ -319,6 +319,13 @@ fn apply_cell_conditional(
     macro_rules! make_rule {
         ($variant:ident) => {
             if let Ok(v) = bound.extract::<f64>() {
+                if !v.is_finite() {
+                    return Err(format!(
+                        "{}: 'value' must be a finite number, got {}",
+                        view.context(),
+                        v
+                    ));
+                }
                 ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::$variant(v))
             } else if let Ok(s) = bound.extract::<String>() {
                 ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::$variant(s))

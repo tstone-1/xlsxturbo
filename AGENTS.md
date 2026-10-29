@@ -97,6 +97,16 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 - *`sanitize_table_name` normalises to NFC, never NFKC, before the screen* -- Thai/Hindi marks are still rewritten on purpose; a denylist flip needs the mirror audit, not reading.
 - *The allowlist must stay at least as wide as the crate's denylist* -- on every bump, account for each rule in `utility::check_name`; re-pin the empty-name message tests, do not reinstate the screen.
 
+## Multi-frame name validation
+
+- Automatic table IDs follow worksheet order, then frame order within each sheet,
+  not global entry order. Keep name preflight in that same order; interleaved A/B/A
+  entries must cover explicit names and defined-name collisions in regression tests.
+- Conditional-format numeric thresholds must be finite in both single-value and range
+  comparisons. Preserve the separate string-comparison path.
+- Release SBOMs describe shipped Rust dependencies. The wheel has no Python runtime
+  dependencies; inventorying the generator environment does not describe the wheel.
+
 ## Zip compression level
 
 - *Zip compression level — measured before exposing it* -- exposed as `compression_level` in 1.12.0; the crate only warns on stderr for a level outside 1-9, so we validate it. Level 1 cut `df_to_xlsx` by 28%. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#zip-compression-level--measured-before-exposing-it).

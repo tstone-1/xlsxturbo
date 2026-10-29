@@ -264,7 +264,7 @@ After pushing the tag:
    - **windows** (x64)
    - **macos** (x86_64, aarch64)
    - **sdist**
-   - **sbom** - CycloneDX SBOMs for the Rust and Python sides, attached to the release
+   - **sbom** - CycloneDX SBOM for the Rust dependencies linked into the extension, attached to the release
    - **smoke-test** - one leg per published wheel, each on a runner of that wheel's own
      architecture (ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest,
      macos-15-intel). Each asserts the downloaded wheel's platform tag before running

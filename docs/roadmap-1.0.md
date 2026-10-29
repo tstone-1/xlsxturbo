@@ -487,8 +487,8 @@ Python one, so if its leg proves unstable, drop that matrix entry rather than th
       alongside the existing `id-token: write`. Runs **before** publish, so the
       attestation covers the exact bytes that go to PyPI
 - [x] New `sbom` job: `cargo cyclonedx` for the Rust tree (the crates actually linked
-      into the extension — this is the meaningful one) plus `cyclonedx-py` for the
-      Python environment, which is thin by design since the wheel has no runtime deps
+      into the extension). The Python environment inventory was removed: it described
+      the generator tooling, not the released wheel, which has no Python runtime dependencies.
 - [x] New `github-release` job creating the GitHub Release for each tag, with the wheels
       and SBOMs attached
 

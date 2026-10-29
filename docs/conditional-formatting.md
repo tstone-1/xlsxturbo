@@ -82,6 +82,9 @@ conditional_formats={
 conditional_formats={'score': {'type': 'cell', 'criteria': 'between', 'min_value': 0, 'max_value': 50, 'format': {'bg_color': '#FF0000'}}}
 ```
 
+Numeric comparison thresholds must be finite. NaN and positive or negative infinity
+raise `ConfigurationError`; string comparison values remain supported.
+
 **Available criteria for `cell` type:**
 
 | Criteria | Value keys | Description |
