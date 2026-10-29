@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Python 3.10 support.** It reached upstream end of life in October 2026. `pip` handles
+  the drop without any action on your part: a 3.10 interpreter resolves to 1.12.2, which
+  stays on PyPI and keeps working. Move to 3.11 or newer to receive further releases. As
+  with 3.9 in 1.1.0, a dropped Python version is a minor release under the
+  [stability policy](https://tstone-1.github.io/xlsxturbo/stability/).
+
+  By the end, the 3.10 CI legs tested older libraries rather than this one: the current
+  pandas, polars and numpy publish no 3.10 wheels, so those legs ran pandas 2.3.3, polars
+  2.0.0 and numpy 2.2.6 while every other leg ran pandas 3.1, polars 2.1 and numpy 2.4 or
+  newer.
+
 ### Changed
+- Wheels are now `abi3-py311` rather than `abi3-py310`; one wheel per platform still serves
+  every supported version, 3.11 through 3.15.
+- CI runs the test suite on Python 3.11, 3.12 and 3.15 on Linux and on 3.11 and 3.12 on
+  Windows and macOS, where it ran 3.10 before.
 - `benchmarks/benchmark.py` rotates the order of the compared libraries by one place per
   run. Before, xlsxturbo always ran first and pandas + openpyxl always last.
 - New `benchmarks/benchmark_compression.py` and `benchmarks/benchmark_threads.py` generate
@@ -18,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `benchmarks/benchmark_parallel.py` checks that both modes write the same workbook and
   has a `--markdown` output.
 - The performance page is re-measured with xlsxturbo 1.12.2, polars 2.1.0 and pandas 3.1.0.
-  A new section compares Python 3.14.10 with 3.15.2 on one machine.
+  A new section compares every supported Python (3.11-3.15) on four machines. xlsxturbo's
+  time varies by at most 4% between them, while the other libraries are 9-13% faster on
+  3.15 than on 3.14 on Windows and 0-4% on macOS.
 
 ## [1.12.2] - 2026-10-29
 

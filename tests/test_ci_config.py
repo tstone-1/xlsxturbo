@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+import tomllib
 
 import pytest
 import yaml
@@ -351,31 +352,15 @@ class TestBothMajorsOfATwoMajorRangeAreExercised:
 
 def _project_version() -> str:
     """The version declared in pyproject.toml's `[project]` table."""
-    text = PYPROJECT.read_text(encoding="utf-8")
-    section = re.split(r"^\[project\]$", text, maxsplit=1, flags=re.MULTILINE)
-    assert len(section) == 2, "pyproject.toml has no [project] table"
-    body = re.split(r"^\[", section[1], maxsplit=1, flags=re.MULTILINE)[0]
-    match = re.search(r'^version\s*=\s*"([^"]+)"', body, re.MULTILINE)
-    assert match, "could not read a version out of pyproject.toml's [project] table"
-    return match.group(1)
+    return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
 
 
 def _locked_version(package: str) -> str:
-    """The version `uv.lock` records for `package`.
-
-    Read with a regex rather than `tomllib`, which arrived in 3.11 while this
-    project still supports 3.10, and rather than a third-party TOML parser,
-    which would have to be declared in requirements-test.txt for one field.
-    """
-    blocks = UV_LOCK.read_text(encoding="utf-8").split("[[package]]")
-    assert len(blocks) > 1, "uv.lock declares no packages"
-    for block in blocks[1:]:
-        if not re.search(rf'^name = "{re.escape(package)}"$', block, re.MULTILINE):
-            continue
-        match = re.search(r'^version = "([^"]+)"$', block, re.MULTILINE)
-        assert match, f"uv.lock's {package} entry records no version"
-        return match.group(1)
-    raise AssertionError(f"uv.lock has no [[package]] entry for {package}")
+    """The version `uv.lock` records for `package`."""
+    lock = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
+    versions = [entry["version"] for entry in lock.get("package", []) if entry["name"] == package]
+    assert versions, f"uv.lock has no [[package]] entry for {package}"
+    return versions[0]
 
 
 class TestTheLockfileTracksTheProjectVersion:

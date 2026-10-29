@@ -158,25 +158,38 @@ several cores. It helps, but by a few percent rather than a multiple:
 The other machines measured 1.08x (Mac mini), 1.06x (Ryzen 9, 32 threads) and 1.05x
 (Ryzen 5, 12 threads), so more cores did not raise the gain.
 
-## Python 3.15
+## Python versions
 
-The interpreter makes almost no difference to xlsxturbo, because the time is spent in Rust.
-Two venvs on one machine, identical except for the interpreter (the same xlsxturbo wheel,
-the same package versions), ran the styled comparison in three interleaved rounds:
+xlsxturbo takes the same time on every supported interpreter, because the work is done in
+Rust. The pure-Python libraries it is compared with do not, so its lead over them depends on
+the Python version. Each machine ran the styled comparison once per supported version, in
+three rounds with the order of the interpreters rotated by one place per round. Each cell
+gives xlsxturbo's time and how many times longer pandas + openpyxl took:
 
-| Library | Python 3.14.10 | Python 3.15.2 | Change |
-|---------|---------------:|--------------:|-------:|
-| **xlsxturbo** | 3.68 s | 3.64 s | -1.1% |
-| polars | 13.16 s | 13.21 s | +0.4% |
-| pandas + xlsxwriter | 21.54 s | 21.38 s | -0.7% |
-| pandas + openpyxl | 31.62 s | 30.45 s | -3.7% |
+| Python | MacBook Pro | Mac mini | Ryzen 5 | Ryzen 9 |
+|--------|-------------|----------|---------|---------|
+| 3.11.18 | 3.68 s, 8.2x | 4.22 s, 8.4x | 6.97 s, 8.8x | 5.63 s, 8.7x |
+| 3.12.16 | 3.68 s, 8.7x | 4.15 s, 8.9x | 6.87 s, 9.2x | 5.49 s, 9.3x |
+| 3.13.18 | 3.69 s, 8.8x | 4.17 s, 9.0x | 6.93 s, 9.0x | 5.52 s, 9.1x |
+| 3.14.10 | 3.69 s, 8.6x | 4.19 s, 8.7x | 7.01 s, 8.7x | 5.57 s, 8.8x |
+| 3.15.2 | 3.64 s, 8.4x | 4.15 s, 8.4x | 6.97 s, 7.8x | 5.41 s, 7.9x |
 
-*Test system: MacBook Pro (Apple M5, 10 CPUs); xlsxturbo 1.12.2, pandas 3.1.0, polars 2.1.0, numpy 2.5.4, openpyxl 3.1.5, xlsxwriter 3.3.1, pyarrow 26.0.0. 100,000 rows x 50 columns, `--styled`; median of three rounds, each the median of 3 runs after a warmup, with the interpreter that went first alternating between rounds. Every round's largest standard deviation was at most 1.2% of its median.*
+xlsxturbo's time varies by at most 4% across the five versions on any machine. Python 3.15
+made the other libraries faster than 3.14 did, by much more on Windows than on macOS:
 
-Only pandas + openpyxl, the one pure-Python writer, got measurably faster on 3.15, and it
-was faster in every round, so xlsxturbo's lead over it shrinks from 8.6x to 8.4x. Peak
-memory was the same on both interpreters to within 4 MB for every library, and the thread
-speedups of the [Threads](#threads) table were within 4% of each other.
+| Library | MacBook Pro | Mac mini | Ryzen 5 | Ryzen 9 |
+|---------|------------:|---------:|--------:|--------:|
+| **xlsxturbo** | -1.2% | -1.0% | -0.6% | -2.9% |
+| polars | -1.4% | -0.6% | -9.9% | -8.7% |
+| pandas + xlsxwriter | +0.3% | -1.3% | -9.4% | -9.0% |
+| pandas + openpyxl | -3.9% | -4.4% | -11.0% | -13.3% |
+
+*xlsxturbo 1.12.2 from PyPI in a fresh venv per interpreter; pandas 3.1.0, polars 2.1.0, openpyxl 3.1.5, xlsxwriter 3.3.1 and pyarrow 26.0.0 on every one, numpy 2.4.6 on 3.11 (the last release for it) and 2.5.4 on the others. The CPython builds are uv's. 100,000 rows x 50 columns, `--styled`; each figure is the median of three rounds, each round one timed run after a warmup. The rounds differed by at most 3.7% of their median. All runs passed their output checks. Machines as in [Four machines](#four-machines).*
+
+Python 3.10, measured the same way before support for it was dropped, had the highest
+ratios (9.3x to 10.5x): pandas + openpyxl took 19% longer there than on 3.11 on the Macs
+and 4-9% longer on Windows, with older libraries (pandas 2.3.3, polars 2.0.0, numpy 2.2.6),
+since the current releases publish no 3.10 wheels.
 
 ## Benchmarking
 

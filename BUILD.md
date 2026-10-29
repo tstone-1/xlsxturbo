@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust toolchain (stable): https://rustup.rs/
-- Python 3.10+ (Python 3.14.10 is pinned for local development)
+- Python 3.11+ (Python 3.14.10 is pinned for local development)
 - uv: https://docs.astral.sh/uv/
 
 ## Local Development

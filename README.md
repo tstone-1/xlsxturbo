@@ -28,7 +28,7 @@ The `.xlsx` files themselves are written by
 pip install xlsxturbo
 ```
 
-Wheels are published for Python 3.10+ on Linux, Windows, and macOS. There are no runtime
+Wheels are published for Python 3.11+ on Linux, Windows, and macOS. There are no runtime
 dependencies beyond the interpreter.
 
 ## Export a DataFrame
@@ -144,9 +144,10 @@ The [stability page](https://tstone-1.github.io/xlsxturbo/stability/) is the ful
 — the public surface named exhaustively, what does and does not count as breaking, and the
 supported Python and platform matrices.
 
-- Tested in CI on Python 3.10 and 3.12 across Linux, Windows, and macOS, plus Python 3.15
-  on Linux. One `abi3` wheel per platform serves 3.10 through 3.15. Python 3.9 was dropped
-  in 1.1.0; a 3.9 interpreter resolves to 1.0.0, which stays on PyPI.
+- Tested in CI on Python 3.11 and 3.12 across Linux, Windows, and macOS, plus Python 3.15
+  on Linux. One `abi3` wheel per platform serves 3.11 through 3.15. Python 3.10 was dropped
+  in 1.13.0 and Python 3.9 in 1.1.0; pip resolves an older interpreter to 1.12.2 or 1.0.0,
+  which stay on PyPI.
 - Advanced Excel features are exposed through focused parameters rather than a full
   workbook object model. That is a deliberate scope boundary, not a gap to be filled.
 

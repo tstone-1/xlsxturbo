@@ -26,7 +26,7 @@ around here.
 pip install xlsxturbo
 ```
 
-Wheels are published for Python 3.10+ on Linux, Windows, and macOS. There are no
+Wheels are published for Python 3.11+ on Linux, Windows, and macOS. There are no
 runtime dependencies beyond the interpreter itself.
 
 ## Your first export

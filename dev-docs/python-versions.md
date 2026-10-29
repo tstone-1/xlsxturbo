@@ -5,7 +5,7 @@ Moved verbatim from the repository-root `AGENTS.md`, which keeps a one-line inde
 ### A new CPython needs no code change — and the `abi3` promise has one hole
 
 Checked against 3.15.0rc1 on 2026-08-26, Windows x86_64. **The published wheel works on a
-Python released after it was built, which is the whole point of `abi3-py310`**: pip resolves
+Python released after it was built, which is the whole point of `abi3`** (the wheel was `abi3-py310` then, `abi3-py311` from 1.13.0): pip resolves
 `cp310-abi3-win_amd64` on 3.15rc1, the extension imports, and a pass over `df_to_xlsx`
 (header format, column widths, table style, freeze panes, column formats, a `data_bar`
 conditional format, formula columns, comments, a chart), `dfs_to_xlsx`, `csv_to_xlsx`,

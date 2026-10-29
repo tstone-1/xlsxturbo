@@ -21,7 +21,7 @@ license = { text = "MIT" }
 # script, had drifted to three different numbers, none of them current.
 # Generated -- see the file's header.
 license-files = ["LICENSE", "THIRD-PARTY-LICENSES.md"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["excel", "xlsx", "csv", "converter", "performance", "rust"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -30,7 +30,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -83,7 +82,7 @@ python-source = "python"
 module-name = "xlsxturbo"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 120
 extend-exclude = ["python/xlsxturbo/xlsxturbo.pyd"]
 
@@ -136,7 +135,7 @@ include = ["python", "tests", "benchmarks", "scripts"]
 exclude = ["**/__pycache__", "**/.venv", "target"]
 venvPath = "."
 venv = ".venv"
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 # Checked as Linux on every machine, which is the platform the `python-lint` CI
 # job runs on. Without this pyright takes the host platform, and on Windows it
 # reported 4 errors for Unix-only calls that are guarded at runtime

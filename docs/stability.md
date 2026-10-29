@@ -101,13 +101,12 @@ warnings.simplefilter("error", DeprecationWarning)
 ## Supported Python versions
 
 One `abi3` wheel per platform covers every supported version, so support here is structural
-rather than per-version: the wheel built against Python 3.10's stable ABI is the same file a
+rather than per-version: the wheel built against Python 3.11's stable ABI is the same file a
 3.15 interpreter loads.
 
 | Python | Supported | Run in CI |
 |--------|-----------|-----------|
-| 3.10 | yes | yes |
-| 3.11 | yes | no |
+| 3.11 | yes | yes |
 | 3.12 | yes | yes |
 | 3.13 | yes | no |
 | 3.14 | yes | no |
@@ -115,13 +114,13 @@ rather than per-version: the wheel built against Python 3.10's stable ABI is the
 
 The versions marked "no" are not untested by oversight — they run the identical wheel through
 the identical `abi3` interface, so CI covers the oldest, a middle, and the newest, and the
-gaps carry no independent risk. What CI would catch on 3.11 that 3.10 and 3.12 do not is
+gaps carry no independent risk. What CI would catch on 3.13 that 3.12 and 3.15 do not is
 essentially nothing.
 
 **On Python 3.15, use polars 2.0 or newer.** polars 1.44.2, the last 1.x release, cannot
 build a datetime column on 3.15: `pl.Series([datetime(2024, 1, 15)])` raises
 `AttributeError` before xlsxturbo is called, while the same line works on 3.14 and with
-polars 2.0.0 on 3.15. pandas 3 has no such limit. CI runs polars 2 on 3.10, 3.12 and 3.15,
+polars 2.0.0 on 3.15. pandas 3 has no such limit. CI runs polars 2 on 3.11, 3.12 and 3.15,
 and polars 1 on 3.12.
 
 **The table is about the ordinary builds. There is no wheel for a free-threaded
@@ -130,7 +129,7 @@ interpreter.** An `abi3` wheel cannot serve a `Py_GIL_DISABLED` build, so on `py
 distribution, which needs a Rust toolchain to build. It does build and run there — measured
 on 3.14.7t and 3.15.0rc1t — but installing takes about a minute instead of a second, and on
 a machine with no Rust it fails outright. The same command on the ordinary 3.14 resolves to
-`xlsxturbo-<version>-cp310-abi3-win_amd64.whl` immediately, which is what makes free
+`xlsxturbo-<version>-cp311-abi3-win_amd64.whl` immediately, which is what makes free
 threading the variable rather than something local.
 
 Built that way it works: the test suite passes on 3.14t, and concurrent exports off a shared
@@ -138,9 +137,16 @@ DataFrame come out correct. But polars publishes no free-threaded wheels either,
 an interpreter only pandas is installable as a frame source. That is the practical reason
 there is no `cp3XXt` wheel here yet, rather than anything measured about the library.
 
+**Python 3.10 was dropped in 1.13.0**, having reached upstream end of life in October 2026.
+A 3.10 interpreter resolves to 1.12.2, which stays on PyPI and keeps working. Move to 3.11
+or newer to receive further releases. By then 3.10 was testing older libraries rather than
+this one: the newest pandas, polars and numpy publish no 3.10 wheels, so the 3.10 CI leg ran
+pandas 2.3.3, polars 2.0.0 and numpy 2.2.6 while every other leg ran pandas 3.1, polars 2.1
+and numpy 2.4 or newer.
+
 **Python 3.9 was dropped in 1.1.0**, having reached upstream end of life in October 2025.
 `pip` handles this without any action on your part: a 3.9 interpreter resolves to 1.0.0,
-which stays on PyPI and keeps working. Move to 3.10 or newer to receive further releases.
+which stays on PyPI and keeps working.
 
 A dropped Python version is a **minor** release, not a 2.0.0 event. An interpreter whose
 upstream support has ended is not a platform this project can meaningfully promise anything
