@@ -32,6 +32,7 @@ import argparse
 import contextlib
 import gc
 import importlib.metadata
+import io
 import json
 import math
 import os
@@ -47,10 +48,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
     import pandas as pd
+
+_T = TypeVar("_T")
 
 # Column type cycles for each data shape. "mixed" is the reference workload:
 # 25% integers, 25% floats, 25% strings (5-20 chars), 12.5% dates, 12.5% booleans.
@@ -758,6 +761,43 @@ def measure_peak_memory(library: str, rows: int, cols: int, shape: str, styled: 
     return max(float(report["increase_mb"]), 0.0)
 
 
+def run_order(items: list[_T], run_num: int) -> list[_T]:
+    """Rotate the writers by one place per run.
+
+    A fixed order gives one library every first slot and another every last one, so a
+    sustained load or thermal change would favour the same library in every run. With
+    as many runs as writers, each writer takes each position once.
+
+    Args:
+        items: The writers in report order.
+        run_num: The 1-based run number.
+
+    Returns:
+        The writers in the order this run calls them.
+    """
+    shift = (run_num - 1) % len(items) if items else 0
+    return items[shift:] + items[:shift]
+
+
+def archive_contents(source: str | Path | io.BytesIO) -> dict[str, bytes]:
+    """Every uncompressed archive member except ``docProps/core.xml``.
+
+    That part carries the creation time, the one thing two exports of the same data
+    may differ in. Equal results mean two outputs hold the same workbook, however
+    they were packed.
+
+    Args:
+        source: A workbook path or buffer.
+
+    Returns:
+        Member name to its uncompressed bytes.
+    """
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+    with zipfile.ZipFile(source) as archive:
+        return {name: archive.read(name) for name in archive.namelist() if name != "docProps/core.xml"}
+
+
 def run_benchmarks(
     df_pd: pd.DataFrame,
     rows: int,
@@ -814,7 +854,7 @@ def run_benchmarks(
         if verbose:
             print(f"Run {run_num}/{runs}...", flush=True)
 
-        for name, func in funcs:
+        for name, func in run_order(funcs, run_num):
             output_path = temp_dir / f"run{run_num}_{name.replace(' ', '_')}.xlsx"
 
             gc.collect()

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `benchmarks/benchmark.py` rotates the order of the compared libraries by one place per
+  run. Before, xlsxturbo always ran first and pandas + openpyxl always last.
+- New `benchmarks/benchmark_compression.py` and `benchmarks/benchmark_threads.py` generate
+  the compression-level and thread-scaling tables on the performance page, which were
+  measured by hand before. Each checks that every output holds the same workbook. The
+  thread script times `csv_to_xlsx` beside `df_to_xlsx`, so the claim that the CSV path
+  scales further across threads is now measured.
+- `benchmarks/benchmark_parallel.py` checks that both modes write the same workbook and
+  has a `--markdown` output.
+- The performance page is re-measured with xlsxturbo 1.12.2, polars 2.1.0 and pandas 3.1.0.
+  A new section compares Python 3.14.10 with 3.15.2 on one machine.
+
 ## [1.12.2] - 2026-10-29
 
 ### Fixed

@@ -67,3 +67,6 @@ coverage.txt
 .coverage
 *.profraw
 *.profdata
+
+# Machine-local agent notes (machine names, personal workflow)
+AGENTS.local.md

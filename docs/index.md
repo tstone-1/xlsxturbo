@@ -5,7 +5,7 @@ usable from Python.
 
 xlsxturbo exports pandas and polars DataFrames and CSV files to `.xlsx`, using Rust
 for the hot path while keeping the Python API small enough to drop straight into a
-script, a report job, or a batch pipeline. It is roughly 7-9x faster than
+script, a report job, or a batch pipeline. It is roughly 8.5-9.5x faster than
 pandas + openpyxl on the [reference benchmarks](performance.md), and it supports the
 Excel features those exports usually need -- tables, conditional formatting, charts,
 data validation, images -- through focused keyword arguments rather than a workbook
@@ -115,7 +115,7 @@ tool.
   - Datetimes (ISO 8601) → Excel datetimes
   - `NaN`/`Inf` → Empty cells (graceful handling)
   - Everything else → Text
-- **~7-9x faster** than pandas + openpyxl on reference systems (see [benchmarks](performance.md))
+- **~8.5-9.5x faster** than pandas + openpyxl on reference systems (see [benchmarks](performance.md))
 - **Memory efficient** - streams data with 1MB buffer
 - Available as a **Python library** and an **`xlsxturbo` command** for CSV files, both
   installed by `pip install xlsxturbo` — see [CLI usage](csv-conversion.md#cli-usage)

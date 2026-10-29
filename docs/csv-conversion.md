@@ -17,7 +17,8 @@ print(f"Converted {rows} rows and {cols} columns")
 # Custom sheet name
 xlsxturbo.csv_to_xlsx("data.csv", "report.xlsx", sheet_name="Sales Data")
 
-# For large files (100K+ rows), use parallel processing
+# Parse the CSV on several cores; 5-8% faster on a 500,000-row file
+# (see the performance page)
 xlsxturbo.csv_to_xlsx("big_data.csv", "output.xlsx", parallel=True)
 
 # Handle ambiguous dates (01-02-2024: is it Jan 2 or Feb 1?)

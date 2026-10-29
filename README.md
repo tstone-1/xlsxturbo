@@ -9,7 +9,7 @@ High-performance Excel writer with automatic type detection. Written in Rust, us
 
 xlsxturbo exports pandas and polars DataFrames and CSV files to `.xlsx`. It uses Rust for
 the hot path and keeps the Python API small enough to drop straight into a script, a
-report job, or a batch pipeline. Roughly **7-9x faster than pandas + openpyxl** on the
+report job, or a batch pipeline. Roughly **8.5-9.5x faster than pandas + openpyxl** on the
 reference benchmarks, with the Excel features those exports usually need — tables,
 conditional formatting, charts, data validation, images — available as focused keyword
 arguments rather than a workbook object model.
@@ -114,13 +114,12 @@ accepts, which are overridable per sheet, and which survive constant-memory mode
 ## Performance
 
 On 100,000 rows x 50 columns of mixed types, with every library writing the same Excel
-table, number formats and column widths, xlsxturbo is about 3.6x faster than polars, 6x
-faster than pandas + xlsxwriter, and 8.6x faster than pandas + openpyxl, and needs the
-least memory of the four. Measured on one MacBook Pro; an older Windows measurement
-with each library's default output gave 3.9x, 5.8x and 7.4x. Full tables, test systems,
-and methodology are on the
-[performance page](https://tstone-1.github.io/xlsxturbo/performance/), and both benchmark
-suites live in [`benchmarks/`](benchmarks/) so you can measure your own hardware.
+table, number formats and column widths, xlsxturbo is 3.4-3.9x faster than polars,
+5.7-6.5x faster than pandas + xlsxwriter, and 8.7-9.3x faster than pandas + openpyxl,
+measured on two Apple Silicon Macs and two Windows PCs, and needs the least memory of the
+four. Full tables, test systems, and methodology are on the
+[performance page](https://tstone-1.github.io/xlsxturbo/performance/), and the benchmark
+scripts live in [`benchmarks/`](benchmarks/) so you can measure your own hardware.
 
 ## Known limitations
 
