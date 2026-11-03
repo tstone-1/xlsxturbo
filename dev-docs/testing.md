@@ -73,3 +73,7 @@ decoration, each learned by writing one that failed the test:
 makes proptest save a seed for every property that correctly went red, describing code that no
 longer exists. Promote a genuine failing case to a named test instead — it states the input
 where a reader can see it.
+
+## A stale build fails the suite
+
+**`tests/test_build_is_current.py` fails when the built extension is older than any tracked Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`.** A stale `.so` does not error, it measures the wrong code with full confidence: on 2026-09-02 a whole review ran against 1.3.0 code believing it was HEAD, and a later gate run blamed a timing test for what was the build. CI builds immediately before pytest, so the test only ever fires locally, where `maturin develop --release` is the answer. A `git checkout` that touches a `.rs` file trips it on purpose. `pyproject.toml` is compared against the installed `.dist-info/RECORD` rather than the extension file, because cargo never reads it: after a `pyproject.toml`-only change `maturin develop --release` compiles nothing and leaves the extension's mtime alone.
