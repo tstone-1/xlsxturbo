@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.13.0] - 2026-11-05
+
+### Added
+- `min_value` and `max_value` on `data_bar`, `2_color_scale` and `3_color_scale` conditional
+  formats fix the ends of the scale to numbers. Before, each column scaled from its own
+  lowest to its own highest value, so bars in neighbouring columns could not be compared.
+  `ConditionalFormat` already declared both keys, so a type checker accepted them on these
+  types while the runtime raised `ConfigurationError` (#67).
+
+### Fixed
+- `header_format` now applies to the header row of an Excel table. With `table_style` set,
+  the header cells came out unformatted, with no error or warning: rust_xlsxwriter's
+  `add_table` rewrote the header row without the format. The format now goes onto each
+  table column (#66).
 
 ### Removed
 - **Python 3.10 support.** It reached upstream end of life in October 2026. `pip` handles

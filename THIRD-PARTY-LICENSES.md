@@ -654,14 +654,14 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.10.0](https://github.com/rust-lang/cc-rs)
+- [cc 1.11.0](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.15](https://github.com/rust-lang/cc-rs)
-- [js-sys 0.3.106](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
-- [wasm-bindgen-macro-support 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
-- [wasm-bindgen-macro 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
-- [wasm-bindgen-shared 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
-- [wasm-bindgen 0.2.129](https://github.com/wasm-bindgen/wasm-bindgen)
+- [js-sys 0.3.107](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
+- [wasm-bindgen-macro-support 0.2.130](https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
+- [wasm-bindgen-macro 0.2.130](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
+- [wasm-bindgen-shared 0.2.130](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
+- [wasm-bindgen 0.2.130](https://github.com/wasm-bindgen/wasm-bindgen)
 
 ```text
 Copyright (c) 2014 Alex Crichton
@@ -732,7 +732,7 @@ DEALINGS IN THE SOFTWARE.
 Applies to:
 
 - [bitflags 2.13.2](https://github.com/bitflags/bitflags)
-- [log 0.4.34](https://github.com/rust-lang/log)
+- [log 0.4.35](https://github.com/rust-lang/log)
 - [num-traits 0.2.19](https://github.com/rust-num/num-traits)
 
 ```text
@@ -1379,7 +1379,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [crc32fast 1.5.3](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.4](https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License
@@ -1589,7 +1589,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.1.3](https://github.com/zip-rs/zip2)
+- [zip 9.3.0](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)

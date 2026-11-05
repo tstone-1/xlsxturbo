@@ -8,15 +8,18 @@ older one.
 
 | Version | Supported |
 |---------|-----------|
-| 1.12.x  | Yes -- the current line |
+| 1.13.x  | Yes -- the current line |
+| 1.12.x  | Security fixes only, while it remains the newest release installable on Python 3.10 |
 | 1.1.x - 1.11.x | No -- any Python that runs 1.1 through 1.11 also runs 1.12; upgrade |
 | 1.0.x   | Security fixes only, while it remains the newest release installable on a supported Python |
 | < 1.0   | No -- upgrade |
 
-The 1.0.x row is narrower than it looks and exists for one concrete reason: 1.1.0 dropped
-Python 3.9, so a 3.9 interpreter resolves to 1.0.0 and cannot take a fix shipped on the 1.1
-line. That is the only situation in which a 1.0.x release would be published. If you are on
-a supported Python, upgrade rather than relying on it.
+The 1.0.x and 1.12.x rows are narrower than they look and exist for one concrete reason
+each: 1.1.0 dropped Python 3.9, so a 3.9 interpreter resolves to 1.0.0 and cannot take a
+fix shipped on the 1.1 line; 1.13.0 dropped Python 3.10, so a 3.10 interpreter resolves to
+1.12.2 and cannot take a fix shipped on the 1.13 line. That is the only situation in which
+a 1.0.x or 1.12.x release would be published. If you are on a supported Python, upgrade
+rather than relying on them.
 
 Support tracks the released line, not a calendar window. A single maintainer cannot promise
 a fixed number of months and honour it, so this says what will actually happen instead.
