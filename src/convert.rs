@@ -21,7 +21,7 @@ use crate::write::{
 use csv::ReaderBuilder;
 use pyo3::prelude::*;
 use rayon::prelude::*;
-use rust_xlsxwriter::{Color, Format, Table, Workbook, Worksheet};
+use rust_xlsxwriter::{Color, Format, Table, TableColumn, Workbook, Worksheet};
 use std::collections::HashMap;
 use std::fs::File;
 
@@ -984,6 +984,20 @@ fn apply_frame_features(
             if let Some(name) = config.table_name {
                 let sanitized = sanitize_table_name(name);
                 table = table.set_name(&sanitized);
+            }
+
+            // `add_table` rewrites the header row from the table's columns, and a
+            // column without a header format writes its name unformatted over the
+            // formatted cell `write_frame` put there (issue #66). So the header
+            // format goes onto each table column, with the name the header cell
+            // already holds. Without a header format the columns stay unset and
+            // the crate takes the names from the header cells, as before.
+            if let Some(fmt) = header_fmt {
+                let table_columns: Vec<TableColumn> = columns
+                    .iter()
+                    .map(|name| TableColumn::new().set_header(name).set_header_format(fmt))
+                    .collect();
+                table = table.set_columns(&table_columns);
             }
 
             let last_row = last_row_idx.saturating_sub(1);

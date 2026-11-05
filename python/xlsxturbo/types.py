@@ -180,8 +180,10 @@ class ConditionalFormat(_ConditionalRequired, total=False):
     # For cell rules (type='cell'):
     criteria: str  # 'equal_to', 'not_equal_to', 'greater_than', 'less_than', 'between', 'containing', etc.
     value: str | int | float  # Target value for comparison criteria
-    min_value: int | float  # Min value for 'between'/'not_between' criteria
-    max_value: int | float  # Max value for 'between'/'not_between' criteria
+    # Min/max value for 'between'/'not_between' criteria; on colour scales and
+    # data bars, a fixed scale end instead of the column's lowest/highest value.
+    min_value: int | float
+    max_value: int | float
     format: _ConditionalCellFormat  # Format to apply when condition is met (bg_color, font_color, bold, etc.)
 
 

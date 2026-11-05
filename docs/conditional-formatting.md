@@ -46,11 +46,22 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 
 | Type | Options |
 |------|---------|
-| `2_color_scale` | `min_color`, `max_color` |
-| `3_color_scale` | `min_color`, `mid_color`, `max_color` |
-| `data_bar` | `bar_color`, `border_color`, `solid`, `direction` |
+| `2_color_scale` | `min_color`, `max_color`, `min_value`, `max_value` |
+| `3_color_scale` | `min_color`, `mid_color`, `max_color`, `min_value`, `max_value` |
+| `data_bar` | `bar_color`, `border_color`, `solid`, `direction`, `min_value`, `max_value` |
 | `icon_set` | `icon_type`, `reverse`, `icons_only` |
 | `cell` | `criteria`, `value`, `min_value`, `max_value`, `format` |
+
+**Fixed scale.** By default each column's colour scale or data bars run from that
+column's lowest value to its highest, so the bars of two columns cannot be compared.
+`min_value` and `max_value` fix the ends of the scale to numbers; give one or both.
+For share columns holding values from 0 to 1:
+
+```python
+conditional_formats={'share_*': {'type': 'data_bar', 'min_value': 0, 'max_value': 1}}
+```
+
+Both must be finite numbers. On a `3_color_scale` the midpoint stays at the 50th percentile.
 
 **Available icon types:**
 - 3 icons: `3_arrows`, `3_arrows_gray`, `3_flags`, `3_traffic_lights`, `3_traffic_lights_rimmed`, `3_signs`, `3_symbols`, `3_symbols_uncircled`

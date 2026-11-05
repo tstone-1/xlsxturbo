@@ -174,22 +174,7 @@ verified violation of the pre-existing contract with a reproducer, regression te
 and explicit old/new behavior in its release notes; it may not redefine the contract
 to justify a redesign. Approved for the CSV I/O classification repair in 1.4.1.
 
-It is **checked, not maintained by hand**. `tests/test_stability_policy.py` compares the
-page against the four places that actually decide its contents — the trove classifiers and
-`requires-python` in `pyproject.toml`, the interpreter matrix in `ci.yml`, the wheel targets
-in `release.yml`, and `xlsxturbo.__all__` — in both directions. Consequences:
-
-- **A new exported name fails the suite until the page names it.** That is deliberate: the
-  page is the list of things that cannot be removed before 2.0.0, so adding to it should be a
-  decision rather than a side effect. New *options* need nothing here; the touchpoint
-  checklist already covers those.
-- **Adding a Python version to the CI matrix fails until the classifier and the page agree.**
-  A version tested and nowhere else declared reads as a widened promise when it is only a
-  widened test.
-- **This worked.** Dropping Python 3.9 in 1.1.0 failed both suites exactly as designed — the
-  page's version table against the classifiers and the CI matrix, and the Dependabot hold in
-  `tests/test_ci_config.py` that existed only because pytest 9 needs 3.10. Neither failure was
-  a surprise to be worked around; each named the work that had to accompany the drop.
+- *The page is checked, not maintained by hand* -- `tests/test_stability_policy.py` fails a new export or CI Python version until the page agrees. Full text: [dev-docs/stability-policy.md](dev-docs/stability-policy.md).
 
 ### A new CPython needs no code change — and the `abi3` promise has one hole
 
@@ -228,11 +213,7 @@ When adding or modifying a feature:
 
 Before commit or push, follow the `BUILD.md` checklist.
 
-### docs/ is published wholesale — mind what is sitting in it
-
-MkDocs publishes every file under `docs/`, and knows nothing about git. Two tracked-but-internal files (`roadmap-1.0.md`) and two untracked ones (`strategic-recommendations-plan.md`, `reviews/`) are therefore listed in `mkdocs.yml`'s `exclude_docs`, and `tests/test_docs_site.py` asserts that list stays in step with `.gitignore`.
-
-Verified by removing one `exclude_docs` entry: the private planning memo appeared in `site/` and `mkdocs build --strict` still **exited 0**. Strict mode does not cover this. The reliable protection is that deployment happens only from `.github/workflows/docs.yml`, which builds from a clean checkout and so cannot see an untracked file at all — never run `mkdocs gh-deploy` by hand.
+- *docs/ is published wholesale* -- internal files there must be in `mkdocs.yml`'s `exclude_docs`; `--strict` does not catch a leak; never `mkdocs gh-deploy` by hand. Full text: [dev-docs/docs-site.md](dev-docs/docs-site.md).
 
 ### Two CLIs, one interface
 

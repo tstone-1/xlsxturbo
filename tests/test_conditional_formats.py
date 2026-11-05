@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import polars as pl
@@ -178,6 +179,79 @@ class TestConditionalFormatting:
                 df,
                 tmp_xlsx,
                 conditional_formats={"Missing": {"type": "data_bar"}},
+            )
+
+
+def _cfvos(path: str) -> list[str]:
+    """Every ``<cfvo>`` and Excel 2010 ``<x14:cfvo>`` element of sheet 1, in order."""
+    with zipfile.ZipFile(path) as zf:
+        xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    return re.findall(r"<(?:x14:)?cfvo[^>]*>(?:<xm:f>[^<]*</xm:f>)?", xml)
+
+
+class TestFixedScale:
+    """``min_value``/``max_value`` give colour scales and data bars a fixed scale (issue #67)."""
+
+    def test_data_bar_fixed_scale(self, tmp_xlsx: str) -> None:
+        """Both bounds land in the rule and in the Excel 2010 extension Excel draws from."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"share": [0.1, 0.4]}),
+            tmp_xlsx,
+            conditional_formats={"share": {"type": "data_bar", "min_value": 0, "max_value": 1}},
+        )
+        assert _cfvos(tmp_xlsx) == [
+            '<cfvo type="num" val="0"/>',
+            '<cfvo type="num" val="1"/>',
+            '<x14:cfvo type="num"><xm:f>0</xm:f>',
+            '<x14:cfvo type="num"><xm:f>1</xm:f>',
+        ]
+
+    def test_2_color_scale_fixed_scale(self, tmp_xlsx: str) -> None:
+        """A 2-colour scale takes the same pair."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"share": [0.1, 0.4]}),
+            tmp_xlsx,
+            conditional_formats={"share": {"type": "2_color_scale", "min_value": 0, "max_value": 0.5}},
+        )
+        assert _cfvos(tmp_xlsx) == ['<cfvo type="num" val="0"/>', '<cfvo type="num" val="0.5"/>']
+
+    def test_3_color_scale_one_bound_keeps_the_other_defaults(self, tmp_xlsx: str) -> None:
+        """Setting only ``max_value`` leaves the lowest value and the 50th percentile in place."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"n": [1, 2]}),
+            tmp_xlsx,
+            conditional_formats={"n": {"type": "3_color_scale", "max_value": 5}},
+        )
+        assert _cfvos(tmp_xlsx) == [
+            '<cfvo type="min" val="0"/>',
+            '<cfvo type="percentile" val="50"/>',
+            '<cfvo type="num" val="5"/>',
+        ]
+
+    def test_without_bounds_the_data_bar_scales_automatically(self, tmp_xlsx: str) -> None:
+        """No bounds given: the rule keeps Excel's automatic minimum and maximum."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"share": [0.1, 0.4]}),
+            tmp_xlsx,
+            conditional_formats={"share": {"type": "data_bar"}},
+        )
+        assert _cfvos(tmp_xlsx)[:2] == ['<cfvo type="min"/>', '<cfvo type="max"/>']
+
+    @pytest.mark.parametrize("cf_type", ["data_bar", "2_color_scale", "3_color_scale"])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, "1"])
+    def test_a_bound_must_be_a_finite_number(self, tmp_xlsx: str, cf_type: str, bad: object) -> None:
+        """NaN, infinity, a bool and a string are refused with the option named."""
+        rule: Any = {"type": cf_type, "max_value": bad}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"conditional_formats\['a'\]: 'max_value'"):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [0, 1]}), tmp_xlsx, conditional_formats={"a": rule})
+
+    def test_icon_set_still_refuses_the_bounds(self, tmp_xlsx: str) -> None:
+        """The pair is not accepted where nothing would use it."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="unknown option 'min_value'"):
+            xlsxturbo.df_to_xlsx(
+                pd.DataFrame({"a": [0, 1]}),
+                tmp_xlsx,
+                conditional_formats={"a": {"type": "icon_set", "min_value": 0}},
             )
 
 

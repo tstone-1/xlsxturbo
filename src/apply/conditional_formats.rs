@@ -9,7 +9,7 @@ use rust_xlsxwriter::{
     ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,
     ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDataBar,
     ConditionalFormatDataBarDirection, ConditionalFormatIconSet, ConditionalFormatText,
-    ConditionalFormatTextRule, Format, Worksheet,
+    ConditionalFormatTextRule, ConditionalFormatType, Format, Worksheet,
 };
 use std::collections::HashMap;
 
@@ -72,6 +72,15 @@ fn parse_cf_format(view: &OptionMap<'_, '_>) -> Result<Option<Format>, String> {
     }
 }
 
+/// Read the optional fixed scale of a colour scale or data bar: `min_value`
+/// and `max_value`, finite numbers mapped to `ConditionalFormatType::Number`.
+///
+/// Without them each column scales from its own lowest to its own highest
+/// value, so the bars of two columns cannot be compared (issue #67).
+fn cf_scale_bounds(view: &OptionMap<'_, '_>) -> Result<(Option<f64>, Option<f64>), String> {
+    Ok((view.finite_f64("min_value")?, view.finite_f64("max_value")?))
+}
+
 /// Apply a 2-color-scale conditional format.
 fn apply_2_color_scale(
     view: &OptionMap<'_, '_>,
@@ -81,6 +90,13 @@ fn apply_2_color_scale(
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormat2ColorScale::new();
+    let (min_value, max_value) = cf_scale_bounds(view)?;
+    if let Some(v) = min_value {
+        cf = cf.set_minimum(ConditionalFormatType::Number, v);
+    }
+    if let Some(v) = max_value {
+        cf = cf.set_maximum(ConditionalFormatType::Number, v);
+    }
     if let Some(c) = cf_optional_color(view, "min_color")? {
         cf = cf.set_minimum_color(c);
     }
@@ -107,6 +123,13 @@ fn apply_3_color_scale(
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormat3ColorScale::new();
+    let (min_value, max_value) = cf_scale_bounds(view)?;
+    if let Some(v) = min_value {
+        cf = cf.set_minimum(ConditionalFormatType::Number, v);
+    }
+    if let Some(v) = max_value {
+        cf = cf.set_maximum(ConditionalFormatType::Number, v);
+    }
     if let Some(c) = cf_optional_color(view, "min_color")? {
         cf = cf.set_minimum_color(c);
     }
@@ -136,6 +159,13 @@ fn apply_data_bar(
     data_end_row: u32,
 ) -> Result<(), String> {
     let mut cf = ConditionalFormatDataBar::new();
+    let (min_value, max_value) = cf_scale_bounds(view)?;
+    if let Some(v) = min_value {
+        cf = cf.set_minimum(ConditionalFormatType::Number, v);
+    }
+    if let Some(v) = max_value {
+        cf = cf.set_maximum(ConditionalFormatType::Number, v);
+    }
     if let Some(c) = cf_optional_color(view, "bar_color")? {
         cf = cf.set_fill_color(c);
     }
@@ -403,20 +433,38 @@ fn apply_single_conditional_format(
 
     match format_type.to_lowercase().as_str() {
         "2_color_scale" | "2colorscale" | "two_color_scale" => {
-            view.reject_unknown_for(&format_type, &["type", "min_color", "max_color"])?;
+            view.reject_unknown_for(
+                &format_type,
+                &["type", "min_color", "max_color", "min_value", "max_value"],
+            )?;
             apply_2_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "3_color_scale" | "3colorscale" | "three_color_scale" => {
             view.reject_unknown_for(
                 &format_type,
-                &["type", "min_color", "mid_color", "max_color"],
+                &[
+                    "type",
+                    "min_color",
+                    "mid_color",
+                    "max_color",
+                    "min_value",
+                    "max_value",
+                ],
             )?;
             apply_3_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
         }
         "data_bar" | "databar" => {
             view.reject_unknown_for(
                 &format_type,
-                &["type", "bar_color", "border_color", "solid", "direction"],
+                &[
+                    "type",
+                    "bar_color",
+                    "border_color",
+                    "solid",
+                    "direction",
+                    "min_value",
+                    "max_value",
+                ],
             )?;
             apply_data_bar(&view, worksheet, col_idx, data_start_row, data_end_row)
         }

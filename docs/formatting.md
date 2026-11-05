@@ -44,6 +44,10 @@ xlsxturbo.df_to_xlsx(df, "styled.xlsx", header_format={
 # - wrap_text (bool): Enable text wrapping within cell
 ```
 
+`header_format` also applies to the header row of an Excel table (`table_style`). The
+format is drawn over the table style, so a background colour in `header_format` replaces
+the style's header colour.
+
 > **Note:** Unknown keys (e.g. `'color'` instead of `'font_color'`) and wrong value types raise an error listing the valid options. Applies to `header_format`, `column_formats`, `conditional_formats[...]['format']`, `images`, `validations`, `textboxes`, `charts`, `sparklines`, and `rich_text` segment formats.
 >
 > `rich_text` segments accept **font-level keys only** (`bold`, `italic`, `underline`, `font_color`, `font_size`, `font_name`). A segment is an inline run inside one cell, so cell-level keys — `bg_color`, borders, `align_horizontal`/`align_vertical`, `wrap_text`, `quote_prefix` — would never render and are rejected rather than silently ignored. Format the cell itself via `column_formats` or `cells` instead.

@@ -918,6 +918,56 @@ class TestHeaderFormat:
         wb.close()
 
 
+class TestHeaderFormatOnATable:
+    """``header_format`` survives ``add_table`` rewriting the header row (issue #66)."""
+
+    @pytest.mark.parametrize("style", ["None", "Medium9"])
+    @pytest.mark.parametrize("startrow", [0, 2])
+    def test_table_header_keeps_the_format(self, tmp_xlsx: str, style: str, startrow: int) -> None:
+        """Every header cell of the table carries the format and its column name."""
+        df = pd.DataFrame({"a long header name": [1], "b": [2]})
+        xlsxturbo.dfs_to_xlsx(
+            [
+                (
+                    df,
+                    "S",
+                    {
+                        "table_style": style,
+                        "startrow": startrow,
+                        "header_format": {
+                            "bold": True,
+                            "wrap_text": True,
+                            "bg_color": "#595959",
+                            "font_color": "#FFFFFF",
+                        },
+                    },
+                )
+            ],
+            tmp_xlsx,
+        )
+        wb = load_workbook(tmp_xlsx)
+        ws = wb["S"]
+        for col, name in enumerate(df.columns, start=1):
+            cell = ws.cell(startrow + 1, col)
+            assert cell.value == name
+            assert cell.fill.fgColor.rgb == "FF595959"
+            assert cell.font.bold is True
+            assert cell.alignment.wrap_text is True
+        table = next(iter(ws.tables.values()))
+        assert [c.name for c in table.tableColumns] == list(df.columns)
+        wb.close()
+
+    def test_table_without_header_format_is_unchanged(self, tmp_xlsx: str) -> None:
+        """No header format: header cells stay plain and keep their names."""
+        df = pd.DataFrame({"x": [1], "y": [2]})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium9")
+        wb = load_workbook(tmp_xlsx)
+        ws = active_ws(wb)
+        assert [ws["A1"].value, ws["B1"].value] == ["x", "y"]
+        assert ws["A1"].font.bold is not True
+        wb.close()
+
+
 class TestRichText:
     """Tests for rich text feature (v0.10.0)."""
 
