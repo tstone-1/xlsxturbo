@@ -54,6 +54,17 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    # The default strategy raises the floor of a range on every release. For
+    # requirements-test.txt that is wrong: the floor is the oldest version we
+    # test, and the older-major legs (requirements-test-pandas2.txt,
+    # requirements-test-polars1.txt) exist to keep it there. PRs #68 and #70
+    # moved pandas to >=3.1.0 and polars to >=2.1.0 and widened those legs'
+    # caps, which would have stopped CI testing pandas 2 and polars 1 while
+    # docs/stability.md still supports them. With this strategy a range only
+    # moves when a new release falls outside it; exact pins in
+    # requirements-docs.txt still move on every release.
+    # `TestDependabotKeepsTestFloors` fails if this line goes.
+    versioning-strategy: increase-if-necessary
     # No `ignore:` block, deliberately. If one is ever added to silence a major
     # that cannot be taken yet, register the reason in `HELD_BACK_MAJORS` in
     # tests/test_ci_config.py at the same time -- a silenced PR simply stops

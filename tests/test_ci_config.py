@@ -406,6 +406,33 @@ def _majors_dependabot_ignores() -> set[str]:
     return ignored
 
 
+class TestDependabotKeepsTestFloors:
+    """The pip updates must not raise the floor of a supported range.
+
+    Dependabot's default strategy for a range raises its lower bound on every
+    release. On `requirements-test.txt` the lower bound is the oldest supported
+    version, so PRs #68 and #70 would have dropped polars 1 and pandas 2 from
+    CI while `docs/stability.md` still supported them. They failed only because
+    the same PRs also widened the older-major legs, which
+    `TestBothMajorsOfATwoMajorRangeAreExercised` caught; a floor-only bump of a
+    one-major range would pass every other check.
+    """
+
+    def test_pip_updates_widen_only_when_necessary(self) -> None:
+        """The setting that stops floor-raising PRs from being filed."""
+        config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+        pip = [u for u in config["updates"] if u["package-ecosystem"] == "pip"]
+        assert len(pip) == 1, (
+            f"expected exactly one pip entry in {DEPENDABOT}, found {len(pip)}"
+        )
+        assert pip[0].get("versioning-strategy") == "increase-if-necessary", (
+            f"the pip entry in {DEPENDABOT} must set "
+            f"`versioning-strategy: increase-if-necessary`, found "
+            f"{pip[0].get('versioning-strategy')!r}; the default raises the floor "
+            f"of requirements-test.txt and drops a supported major from CI"
+        )
+
+
 class TestDeferredMajorUpgradesExpireWithTheirReason:
     """A silenced Dependabot PR stops arriving, so its reason needs a deadline.
 
