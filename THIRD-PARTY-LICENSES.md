@@ -654,7 +654,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.11.0](https://github.com/rust-lang/cc-rs)
+- [cc 1.11.1](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.15](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.107](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -1589,7 +1589,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.3.0](https://github.com/zip-rs/zip2)
+- [zip 9.4.1](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
