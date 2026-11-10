@@ -17,4 +17,4 @@
 # `tests/test_ci_config.py` fails if this file stops layering the main one or
 # stops being referenced by a workflow.
 -r requirements-test.txt
-polars<2
+polars<3
