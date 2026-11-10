@@ -13,8 +13,70 @@ permissions:
   contents: read
 
 jobs:
+  # Checks that need nothing built, run before anything is built or uploaded.
+  #
+  # The release notes were once extracted only in `github-release`, which runs
+  # after the PyPI upload, and nothing compared the tag with the package version.
+  # So a tag whose CHANGELOG entry was forgotten published to PyPI and then
+  # failed, and a tag `v1.14.0` on a commit that still said 1.13.1 uploaded
+  # 1.13.1. A PyPI upload cannot be taken back; this job fails before it.
+  #
+  # No secrets and read-only, because it only reads the checkout. On a manual
+  # run (`workflow_dispatch`) there is no tag: the checks are skipped and the
+  # job passes, so the builds still run, and `release` skips itself on its own
+  # tag condition.
+  release-check:
+    name: Check tag, version and release notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+
+      - name: Note that a manual run has no tag to check
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "::notice::not a tag ($GITHUB_REF_NAME); tag, version and release-note checks skipped"
+
+      - name: Check the tag names the version in pyproject.toml and Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python - <<'EOF'
+          import os
+          import sys
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          with open("pyproject.toml", "rb") as handle:
+              python_version = tomllib.load(handle)["project"]["version"]
+          with open("Cargo.toml", "rb") as handle:
+              rust_version = tomllib.load(handle)["package"]["version"]
+          print(f"tag {tag}, pyproject.toml {python_version}, Cargo.toml {rust_version}")
+          wrong = [
+              f"{name} says {version}"
+              for name, version in (("pyproject.toml", python_version), ("Cargo.toml", rust_version))
+              if tag != f"v{version}"
+          ]
+          if wrong:
+              print(f"::error::tag {tag} does not match the package version: {'; '.join(wrong)}")
+              sys.exit(1)
+          EOF
+
+      # The same script `github-release` uses, so the section checked here is the
+      # one that gets published. It exits non-zero on a missing section.
+      - name: Check CHANGELOG.md has a section for this tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+          echo "--- release notes for $GITHUB_REF_NAME ---"
+          cat release-notes.md
+
   # Build wheels for Linux
   linux:
+    needs: [release-check]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -42,6 +104,7 @@ jobs:
 
   # Build wheels for Windows
   windows:
+    needs: [release-check]
     runs-on: windows-latest
     strategy:
       matrix:
@@ -68,6 +131,7 @@ jobs:
 
   # Build wheels for macOS
   macos:
+    needs: [release-check]
     runs-on: macos-latest
     strategy:
       matrix:
@@ -94,6 +158,7 @@ jobs:
 
   # Build source distribution
   sdist:
+    needs: [release-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -251,7 +316,9 @@ jobs:
   release:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [linux, windows, macos, sdist, smoke-test]
+    # `release-check` is listed although every build job already needs it, so
+    # the upload does not depend on that staying true of each build job.
+    needs: [release-check, linux, windows, macos, sdist, smoke-test]
     if: startsWith(github.ref, 'refs/tags/')
     environment:
       name: pypi
@@ -315,8 +382,9 @@ jobs:
       # Slicing lives in a script, not inline here, because the same logic backs
       # the one-off backfill of the pre-0.18.0 tags -- and because it needed
       # testing against all 37 existing tags before it could be trusted. The
-      # script exits non-zero on a missing section, so a tag whose CHANGELOG
-      # entry was forgotten fails the job instead of publishing empty notes.
+      # script exits non-zero on a missing section; `release-check` runs it
+      # first, before the upload, so a forgotten entry fails there rather than
+      # here, after PyPI already has the release.
       - name: Extract release notes from CHANGELOG
         run: |
           bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md

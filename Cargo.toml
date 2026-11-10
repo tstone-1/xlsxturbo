@@ -1,6 +1,6 @@
 [package]
 name = "xlsxturbo"
-version = "1.13.0"
+version = "1.13.1"
 edition = "2021"
 description = "High-performance Excel writer with automatic type detection (pandas, polars, CSV)"
 license = "MIT"
@@ -22,15 +22,22 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
-# 0.99.0 is a floor, not a preference. Two releases removed a local guard by
-# fixing what it worked around: 0.98.2 the `define_name` panic on an empty name
-# (upstream #186), 0.99.0 the missing name validation (#189), which is what
-# makes a table name colliding with a defined name an error at all. The
-# pre-flight in `lib.rs` reports that collision before the save, so an older
-# crate would silently accept a workbook Excel then offers to repair. 0.100.0
-# made `add_worksheet_with_constant_memory` return a `Result` (it panicked when
-# the temporary folder was unwritable), which `add_named_worksheet` relies on,
-# and fixed comment authors being assigned to the wrong notes (upstream #198).
+# 0.102.0 is a floor, not a preference: each release up to it fixed something
+# this crate relies on or a changelog entry promises. 0.98.2 fixed the
+# `define_name` panic on an empty name (upstream #186) and 0.99.0 the missing
+# name validation (#189), which is what makes a table name colliding with a
+# defined name an error at all. The pre-flight in `lib.rs` reports that
+# collision before the save, so an older crate would silently accept a workbook
+# Excel then offers to repair. 0.100.0 made `add_worksheet_with_constant_memory`
+# return a `Result` (it panicked when the temporary folder was unwritable),
+# which `add_named_worksheet` relies on, and fixed comment authors being
+# assigned to the wrong notes (#198). 0.101.0 made `TempFileError` carry its
+# `io::Error` (#213), which `temp_file_failure` maps so that a refused
+# temporary folder raises `FilePermissionError`. 0.102.0 fixed text rules in
+# `conditional_formats` whose value holds a double quote or non-ASCII text,
+# rule priorities on repeated ranges, and the quadratic time of placing many
+# comments, images or charts on a sheet with `row_heights` or `column_widths`
+# (the 1.12.2 changelog entry).
 rust_xlsxwriter = { version = "0.102.0", features = ["constant_memory"] }
 csv = "1.4"
 clap = { version = "4.6", features = ["derive"], optional = true }

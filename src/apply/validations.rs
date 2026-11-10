@@ -4,7 +4,10 @@ use crate::parse::matches_pattern;
 use crate::types::{pytype_name, OptionMap, ValidationConfig};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
-use rust_xlsxwriter::{DataValidation, DataValidationErrorStyle, Worksheet};
+use rust_xlsxwriter::{
+    DataValidation, DataValidationErrorStyle, DataValidationRule, IntoDataValidationValue,
+    Worksheet,
+};
 
 /// Every validation type accepts `type` plus the shared input/error
 /// title/message keys; only the type-specific keys (e.g. `values`, or
@@ -29,13 +32,13 @@ fn keys_with(extra: &[&'static str]) -> Vec<&'static str> {
 /// an integer, just out of range for this validation type. Distinguish that
 /// case from an actual type mismatch. Kept bespoke (not an `OptionMap`
 /// method) because of that out-of-range wording, which no other feature needs.
-fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str, default: i32) -> Result<i32, String> {
+fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<i32>, String> {
     let Some(entry) = view.get(key) else {
-        return Ok(default);
+        return Ok(None);
     };
     let bound = entry.bind(view.py());
     if bound.is_none() {
-        return Ok(default);
+        return Ok(None);
     }
     if bound.is_instance_of::<pyo3::types::PyBool>() {
         return Err(format!(
@@ -45,7 +48,7 @@ fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str, default: i32) -> Re
         ));
     }
     if let Ok(v) = bound.extract::<i32>() {
-        return Ok(v);
+        return Ok(Some(v));
     }
     if let Ok(v) = bound.extract::<i64>() {
         return Err(format!(
@@ -79,6 +82,25 @@ fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str, default: i32) -> Re
         key,
         pytype_name(bound)
     ))
+}
+
+/// The rule for a `min`/`max` pair: `Between` when both are given, a one-sided
+/// rule when only one is, `None` when neither is.
+///
+/// One-sided rather than `Between` with the type's extreme as the missing
+/// bound: for `decimal` that extreme was `f64::MAX`, written out as a 309-digit
+/// number above Excel's largest (9.99999999999999E+307), and Excel refused to
+/// open the workbook. The one-sided form opens for all three numeric types.
+fn bounds_rule<T: IntoDataValidationValue>(
+    min: Option<T>,
+    max: Option<T>,
+) -> Option<DataValidationRule<T>> {
+    match (min, max) {
+        (Some(min), Some(max)) => Some(DataValidationRule::Between(min, max)),
+        (Some(min), None) => Some(DataValidationRule::GreaterThanOrEqualTo(min)),
+        (None, Some(max)) => Some(DataValidationRule::LessThanOrEqualTo(max)),
+        (None, None) => None,
+    }
 }
 
 /// Describe why a `values` entry is not a list of strings.
@@ -147,6 +169,25 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
                 .extract()
                 .map_err(|_| values_type_error(values_entry, view.context()))?;
 
+            // An empty list writes `<formula1>""</formula1>`, which Excel opens
+            // as a dropdown with no entries: a rule nothing can satisfy.
+            if values.is_empty() {
+                return Err(format!("{}: 'values' must not be empty", view.context()));
+            }
+            // The values are written as one inline list, and Excel splits an
+            // inline list at every comma: `["Smith, John", "c"]` would offer the
+            // three entries `Smith`, ` John` and `c`. There is no escape for a
+            // comma in that form, so refuse it rather than write other entries.
+            if let Some(index) = values.iter().position(|v| v.contains(',')) {
+                return Err(format!(
+                    "{}: 'values' item {} ({:?}) contains a comma, which Excel reads as \
+                     a separator between dropdown entries",
+                    view.context(),
+                    index,
+                    values[index]
+                ));
+            }
+
             // Check Excel's 255 character limit for list validation.
             // Count characters, not bytes — Excel's limit is on characters.
             let total_chars: usize = values.iter().map(|s| s.chars().count()).sum::<usize>()
@@ -166,27 +207,38 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
         }
         "whole_number" | "whole" | "integer" => {
             view.reject_unknown(&keys_with(&["min", "max"]))?;
-            // Whole number validation with between rule
-            let min = validation_i32_field(view, "min", i32::MIN)?;
-            let max = validation_i32_field(view, "max", i32::MAX)?;
-            DataValidation::new()
-                .allow_whole_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
+            let min = validation_i32_field(view, "min")?;
+            let max = validation_i32_field(view, "max")?;
+            // With neither bound the rule spans the whole i32 range, which is
+            // "any whole number": Excel opens it, and callers rely on it.
+            let rule =
+                bounds_rule(min, max).unwrap_or(DataValidationRule::Between(i32::MIN, i32::MAX));
+            DataValidation::new().allow_whole_number(rule)
         }
         "decimal" | "number" => {
             view.reject_unknown(&keys_with(&["min", "max"]))?;
-            // Decimal validation with between rule
-            let min = view.finite_f64("min")?.unwrap_or(f64::MIN);
-            let max = view.finite_f64("max")?.unwrap_or(f64::MAX);
-            DataValidation::new()
-                .allow_decimal_number(rust_xlsxwriter::DataValidationRule::Between(min, max))
+            let min = view.finite_f64("min")?;
+            let max = view.finite_f64("max")?;
+            // No full-range fallback here: `f64::MAX` is above Excel's largest
+            // number (9.99999999999999E+307), and a workbook carrying it in a
+            // validation formula is refused by Excel on open (measured for
+            // min-only, max-only and no bounds alike).
+            let rule = bounds_rule(min, max).ok_or_else(|| {
+                format!(
+                    "{}: decimal validation requires 'min', 'max' or both",
+                    view.context()
+                )
+            })?;
+            DataValidation::new().allow_decimal_number(rule)
         }
         "text_length" | "textlength" | "length" => {
             view.reject_unknown(&keys_with(&["min", "max"]))?;
-            // Text length validation with between rule
-            let min = view.u32("min")?.unwrap_or(0);
-            let max = view.u32("max")?.unwrap_or(u32::MAX);
-            DataValidation::new()
-                .allow_text_length(rust_xlsxwriter::DataValidationRule::Between(min, max))
+            let min = view.u32("min")?;
+            let max = view.u32("max")?;
+            // With neither bound, any length: kept as the rule written before,
+            // which Excel opens.
+            let rule = bounds_rule(min, max).unwrap_or(DataValidationRule::Between(0, u32::MAX));
+            DataValidation::new().allow_text_length(rule)
         }
         _ => {
             return Err(format!(
@@ -235,12 +287,16 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
 }
 
 /// Apply data validations to worksheet
+///
+/// `data_rows` is the inclusive `(first, last)` range of data rows, or `None`
+/// for a frame without any: every config is then still matched against the
+/// columns and checked, and only the write is skipped, so a typo does not pass
+/// silently on an empty frame and fail on the first one with data.
 pub(crate) fn apply_validations(
     py: Python<'_>,
     worksheet: &mut Worksheet,
     columns: &[String],
-    data_start_row: u32,
-    data_end_row: u32,
+    data_rows: Option<(u32, u32)>,
     validations: &IndexMap<String, ValidationConfig>,
 ) -> Result<(), String> {
     for (col_pattern, config) in validations {
@@ -267,6 +323,9 @@ pub(crate) fn apply_validations(
         let view = OptionMap::new(py, config, format!("validations['{}']", col_pattern));
         let validation = build_validation(&view, col_pattern)?;
 
+        let Some((data_start_row, data_end_row)) = data_rows else {
+            continue;
+        };
         for col_idx in col_indices {
             worksheet
                 .add_data_validation(data_start_row, col_idx, data_end_row, col_idx, &validation)

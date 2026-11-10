@@ -193,8 +193,14 @@ since the current releases publish no 3.10 wheels.
 
 ## Benchmarking
 
-Every table on this page is printed by one of the scripts below with `--markdown`.
-Reports include successful and attempted run counts and any failures. A failed run, a
+The tables measured on one machine are printed by the scripts below with `--markdown`.
+Three are assembled from several runs of `benchmark.py --markdown` instead: [Four
+machines](#four-machines) takes xlsxturbo's time and each library's ratio from the styled
+and the defaults table of each machine, and the two tables under [Python
+versions](#python-versions) take, per machine and interpreter, the median over three
+rounds of the styled table: xlsxturbo's time and the pandas + openpyxl ratio in the first,
+the change in each library's time from 3.14 to 3.15 in the second. No script prints those
+three. Reports include successful and attempted run counts and any failures. A failed run, a
 failed warmup or a failed output check makes the command exit with status 1. In
 `benchmark.py`, failed libraries remain in the report with unavailable measurements, and
 a failed xlsxturbo baseline produces no speedup ratios.

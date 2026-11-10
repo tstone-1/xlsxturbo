@@ -127,7 +127,7 @@ def csv_to_xlsx(
     sheet_name: str = "Sheet1",
     parallel: bool = False,
     date_order: DateOrder = "auto",
-    compression_level: int = 6,
+    compression_level: int | None = None,
 ) -> tuple[int, int]:
     """Convert a CSV file to XLSX format with automatic type detection.
 
@@ -143,8 +143,9 @@ def csv_to_xlsx(
             "auto" - ISO first, then European (DMY), then US (MDY).
             "mdy" or "us" - US format: 01-02-2024 = January 2nd.
             "dmy" or "eu" - European format: 01-02-2024 = February 1st.
-        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
-            Level 1 is the fastest and gives the largest file; see the performance page.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: None,
+            which is level 6). Level 1 is the fastest and gives the largest file; see the
+            performance page.
 
     Note:
         String cells preserve surrounding whitespace (e.g. " padded " is
@@ -174,7 +175,7 @@ def df_to_xlsx(
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
-    freeze_panes: bool | tuple[int, int] = False,
+    freeze_panes: bool | tuple[int, int] | None = None,
     column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
@@ -195,10 +196,10 @@ def df_to_xlsx(
     defined_names: Mapping[str, str] | None = None,
     cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: Mapping[str, SparklineOptions] | None = None,
-    startrow: int = 0,
+    startrow: int | None = None,
     autofilter: bool = False,
     tab_color: str | None = None,
-    compression_level: int = 6,
+    compression_level: int | None = None,
 ) -> tuple[int, int]:
     """Convert a pandas or polars DataFrame to XLSX format.
 
@@ -216,9 +217,9 @@ def df_to_xlsx(
             column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
             Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None".
-        freeze_panes: ``True`` freezes the header row (default: False). A ``(row, col)``
-            tuple freezes at that zero-based cell instead, as XlsxWriter's
-            ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
+        freeze_panes: ``True`` freezes the header row (default: None, which freezes
+            nothing, as ``False`` does). A ``(row, col)`` tuple freezes at that zero-based
+            cell instead, as XlsxWriter's ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
             area, so ``(4, 1)`` keeps four rows and one column in view. ``True``
             follows ``startrow`` and does nothing with header=False; a tuple is
             taken as given.
@@ -263,6 +264,8 @@ def df_to_xlsx(
         validations: Dict mapping column name/pattern to data validation config.
             Every name or pattern must match at least one column.
             Types: 'list' (dropdown), 'whole_number', 'decimal', 'text_length'.
+            With only 'min' or only 'max' the rule is one-sided; 'decimal' needs at
+            least one of the two. A 'list' value may not contain a comma.
             Example: {'Status': {'type': 'list', 'values': ['Open', 'Closed']}}
             'whole_number' min/max are bounded to the i32 range (-2147483648..=2147483647);
             a value outside that range raises ValueError naming the field and range,
@@ -293,9 +296,9 @@ def df_to_xlsx(
             must be sheet-qualified (e.g. 'Sheet1!A2:C10'), like a chart range.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
         startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
-            data starts on the row below it (default: 0). The rows above stay free for
-            ``cells``, ``merged_ranges`` and ``rich_text``. Cell references in every
-            option stay absolute sheet positions, and so do ``row_heights`` keys. The
+            data starts on the row below it (default: None, which is row 0). The rows
+            above stay free for ``cells``, ``merged_ranges`` and ``rich_text``. Cell
+            references in every option stay absolute sheet positions, and so do ``row_heights`` keys. The
             table, freeze panes, formula columns, conditional formats and validations
             move with the frame. The returned row count does not include the offset.
             Example: startrow=2 with cells={'A1': 'Q3 report'}
@@ -308,8 +311,9 @@ def df_to_xlsx(
         tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
             (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
             per sheet in the options dict, where None removes the workbook-wide colour.
-        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
-            Level 1 is the fastest and gives the largest file; see the performance page.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: None,
+            which is level 6). Level 1 is the fastest and gives the largest file; see the
+            performance page.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.
@@ -339,7 +343,7 @@ def dfs_to_xlsx(
     header: bool = True,
     autofit: bool = False,
     table_style: str | None = None,
-    freeze_panes: bool | tuple[int, int] = False,
+    freeze_panes: bool | tuple[int, int] | None = None,
     column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = None,
     table_name: str | None = None,
     header_format: HeaderFormat | None = None,
@@ -360,10 +364,10 @@ def dfs_to_xlsx(
     defined_names: Mapping[str, str] | None = None,
     cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: Mapping[str, SparklineOptions] | None = None,
-    startrow: int = 0,
+    startrow: int | None = None,
     autofilter: bool = False,
     tab_color: str | None = None,
-    compression_level: int = 6,
+    compression_level: int | None = None,
 ) -> list[tuple[int, int]]:
     """Write multiple DataFrames to separate sheets in a single workbook.
 
@@ -383,9 +387,9 @@ def dfs_to_xlsx(
             left at Excel's default width). Add an '_all' entry in
             column_widths to cap the autofit width instead of overriding it.
         table_style: Apply Excel table formatting (default: None).
-        freeze_panes: ``True`` freezes the header row (default: False). A ``(row, col)``
-            tuple freezes at that zero-based cell instead, as XlsxWriter's
-            ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
+        freeze_panes: ``True`` freezes the header row (default: None, which freezes
+            nothing, as ``False`` does). A ``(row, col)`` tuple freezes at that zero-based
+            cell instead, as XlsxWriter's ``freeze_panes(row, col)`` does: it is the top-left cell of the scrolling
             area, so ``(4, 1)`` keeps four rows and one column in view. ``True``
             follows ``startrow`` and does nothing with header=False; a tuple is
             taken as given.
@@ -443,9 +447,9 @@ def dfs_to_xlsx(
             'range' must be sheet-qualified, e.g. 'Sheet1!A2:C10'.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
         startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
-            data starts on the row below it (default: 0). The rows above stay free for
-            ``cells``, ``merged_ranges`` and ``rich_text``. Cell references in every
-            option stay absolute sheet positions, and so do ``row_heights`` keys. The
+            data starts on the row below it (default: None, which is row 0). The rows
+            above stay free for ``cells``, ``merged_ranges`` and ``rich_text``. Cell
+            references in every option stay absolute sheet positions, and so do ``row_heights`` keys. The
             table, freeze panes, formula columns, conditional formats and validations
             move with the frame. The returned row count does not include the offset.
             Example: startrow=2 with cells={'A1': 'Q3 report'}
@@ -458,8 +462,9 @@ def dfs_to_xlsx(
         tab_color: Colour of the sheet tab: '#RRGGBB' or a named colour such as 'red'
             (default: None). In ``dfs_to_xlsx`` the keyword colours every sheet; set it
             per sheet in the options dict, where None removes the workbook-wide colour.
-        compression_level: Zip compression level of the file, from 1 to 9 (default: 6).
-            Level 1 is the fastest and gives the largest file; see the performance page.
+        compression_level: Zip compression level of the file, from 1 to 9 (default: None,
+            which is level 6). Level 1 is the fastest and gives the largest file; see the
+            performance page.
         defined_names: Dict mapping name to Excel reference for workbook-level defined names.
             Example: {'MyRange': '=Sheet1!$A$1:$D$100'}
         cells: Dict mapping cell refs to values for arbitrary cell writes.

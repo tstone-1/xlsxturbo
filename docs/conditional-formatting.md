@@ -61,7 +61,8 @@ For share columns holding values from 0 to 1:
 conditional_formats={'share_*': {'type': 'data_bar', 'min_value': 0, 'max_value': 1}}
 ```
 
-Both must be finite numbers. On a `3_color_scale` the midpoint stays at the 50th percentile.
+Both must be finite numbers, and `min_value` may not be greater than `max_value`
+(equal bounds are accepted). On a `3_color_scale` the midpoint stays at the 50th percentile.
 
 **Available icon types:**
 - 3 icons: `3_arrows`, `3_arrows_gray`, `3_flags`, `3_traffic_lights`, `3_traffic_lights_rimmed`, `3_signs`, `3_symbols`, `3_symbols_uncircled`
@@ -94,7 +95,8 @@ conditional_formats={'score': {'type': 'cell', 'criteria': 'between', 'min_value
 ```
 
 Numeric comparison thresholds must be finite. NaN and positive or negative infinity
-raise `ConfigurationError`; string comparison values remain supported.
+raise `ConfigurationError`; string comparison values remain supported. A `value` of
+`True` or `False` is not a number here and raises `ConfigurationError` too.
 
 **Available criteria for `cell` type:**
 
@@ -113,3 +115,6 @@ Column patterns work with conditional formats:
 # Apply data bars to all columns starting with "price_"
 conditional_formats={'price_*': {'type': 'data_bar', 'bar_color': '#9B59B6'}}
 ```
+
+On a DataFrame with no data rows nothing is written, but every config is still
+checked, including that each pattern matches a column.

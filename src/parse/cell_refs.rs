@@ -105,7 +105,11 @@ fn addresses(digits: &str, max_1based: u32) -> bool {
 
 /// Parse a cell reference like "A1" into (row, col) - 0-based
 pub(crate) fn parse_cell_ref(cell_ref: &str) -> Result<(u32, u16), String> {
-    let cell_ref = cell_ref.trim().to_uppercase();
+    // ASCII-only fold: `to_uppercase` maps `ß` to `SS` and `ı` (dotless i) to
+    // `I`, so `"ß1"` was accepted as column SS and `"ı1"` as I1. With an ASCII
+    // fold a non-ASCII letter stays as it is and fails the letter check below
+    // with the same error as any other invalid reference.
+    let cell_ref = cell_ref.trim().to_ascii_uppercase();
     if cell_ref.is_empty() {
         return Err("Empty cell reference".to_string());
     }
@@ -188,6 +192,32 @@ pub(crate) fn parse_cell_range(range_str: &str) -> Result<(u32, u16, u32, u16), 
     }
 
     Ok((first_row, first_col, last_row, last_col))
+}
+
+#[cfg(test)]
+mod cell_ref_tests {
+    use super::parse_cell_ref;
+
+    #[test]
+    fn letters_that_uppercase_to_ascii_are_not_column_letters() {
+        // Each of these was accepted under a Unicode uppercase: `ß` folds to
+        // `SS`, dotless `ı` to `I`, long `ſ` to `S`. The ASCII spelling beside
+        // each is the control that the reference itself is fine.
+        for (unicode, ascii) in [("ß1", "SS1"), ("ı1", "I1"), ("ſ1", "S1"), ("aß1", "ASS1")] {
+            assert!(parse_cell_ref(ascii).is_ok(), "control '{}' refused", ascii);
+            let err = parse_cell_ref(unicode).expect_err(unicode);
+            assert!(
+                err.starts_with("Invalid "),
+                "'{}' gave an unexpected error: {}",
+                unicode,
+                err
+            );
+        }
+        assert_eq!(
+            parse_cell_ref("ß1"),
+            Err("Invalid cell reference 'ß1': no column letters".to_string())
+        );
+    }
 }
 
 #[cfg(test)]

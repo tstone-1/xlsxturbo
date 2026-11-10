@@ -71,6 +71,79 @@ class TestValidations:
         assert validation.formula2 == "1"
         wb.close()
 
+    @pytest.mark.parametrize(
+        ("kind", "bound"),
+        [("whole_number", 7), ("decimal", 0.5), ("text_length", 3)],
+    )
+    @pytest.mark.parametrize(
+        ("field", "operator"),
+        [("min", "greaterThanOrEqual"), ("max", "lessThanOrEqual")],
+    )
+    def test_one_bound_writes_a_one_sided_rule(
+        self, tmp_xlsx: str, kind: str, bound: float, field: str, operator: str,
+    ) -> None:
+        """Only ``min`` or only ``max`` writes one formula, with no stand-in for the other.
+
+        The stand-in for a missing decimal bound was ``f64::MAX``, written as a
+        309-digit number above Excel's largest, and Excel refused to open the file.
+        """
+        config: Any = {"type": kind, field: bound}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        dv = active_ws(wb).data_validations.dataValidation[0]
+        assert dv.operator == operator
+        assert dv.formula1 == str(bound)
+        assert dv.formula2 is None
+        wb.close()
+
+    def test_decimal_without_bounds_is_refused(self, tmp_xlsx: str) -> None:
+        """A decimal rule with no bound has no value Excel can open, so it is refused."""
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"validations\['a'\]: decimal validation requires 'min', 'max' or both",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": {"type": "decimal"}})
+
+    @pytest.mark.parametrize(
+        ("kind", "low", "high"),
+        [("whole_number", "-2147483648", "2147483647"), ("text_length", "0", "4294967295")],
+    )
+    def test_no_bounds_keeps_the_full_range(self, tmp_xlsx: str, kind: str, low: str, high: str) -> None:
+        """Without bounds these two keep their full-range rule, which Excel opens."""
+        config: Any = {"type": kind}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        dv = active_ws(wb).data_validations.dataValidation[0]
+        assert (dv.operator, dv.formula1, dv.formula2) == (None, low, high)
+        wb.close()
+
+    @pytest.mark.parametrize(("values", "index"), [(["Smith, John", "c"], 0), (["a", "b", "1,5"], 2)])
+    def test_list_value_with_a_comma_is_refused(self, tmp_xlsx: str, values: list[str], index: int) -> None:
+        """Excel splits an inline list at commas, so the value would become several entries."""
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=rf"validations\['a'\]: 'values' item {index} .* contains a comma",
+        ):
+            xlsxturbo.df_to_xlsx(
+                pd.DataFrame({"a": ["x"]}), tmp_xlsx, validations={"a": {"type": "list", "values": values}},
+            )
+
+    def test_list_value_with_a_space_is_written(self, tmp_xlsx: str) -> None:
+        """Control for the comma check: other punctuation and spaces pass through."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"a": ["x"]}), tmp_xlsx, validations={"a": {"type": "list", "values": ["a b", "c;d"]}},
+        )
+        wb = load_workbook(tmp_xlsx)
+        assert active_ws(wb).data_validations.dataValidation[0].formula1 == '"a b,c;d"'
+        wb.close()
+
+    def test_empty_list_is_refused(self, tmp_xlsx: str) -> None:
+        """A dropdown with no entries is a rule nothing can satisfy."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"validations\['a'\]: 'values' must not be empty"):
+            xlsxturbo.df_to_xlsx(
+                pd.DataFrame({"a": ["x"]}), tmp_xlsx, validations={"a": {"type": "list", "values": []}},
+            )
+
     def test_list_validation(self, tmp_xlsx: str) -> None:
         """Verify dropdown list validation."""
         df = pd.DataFrame({"Status": ["Open", "Closed"], "Value": [1, 2]})
@@ -170,8 +243,8 @@ class TestValidations:
         assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
-        # Should have validations on the score columns
-        assert len(ws.data_validations.dataValidation) > 0
+        # One validation per score column, none on 'name'.
+        assert sorted(str(dv.sqref) for dv in ws.data_validations.dataValidation) == ["A2", "B2"]
         wb.close()
 
     def test_validation_pattern_must_match(self, tmp_xlsx: str) -> None:
@@ -183,3 +256,35 @@ class TestValidations:
                 tmp_xlsx,
                 validations={"Missing": {"type": "whole_number", "min": 0, "max": 100}},
             )
+
+
+class TestEmptyFrame:
+    """A frame without data rows still has its validations checked; only the write is skipped."""
+
+    @staticmethod
+    def _empty() -> pd.DataFrame:
+        return pd.DataFrame({"a": pd.Series([], dtype="int64")})
+
+    def test_an_unknown_type_is_refused(self, tmp_xlsx: str) -> None:
+        """A typo fails on the empty day, not first on the day with data."""
+        bad: Any = {"type": "bogus"}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"validations\['a'\].*Unknown validation type 'bogus'"):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, validations={"a": bad})
+
+    def test_an_unknown_key_is_refused(self, tmp_xlsx: str) -> None:
+        """Unknown-key rejection runs without rows."""
+        bad: Any = {"type": "whole_number", "min": 0, "zzz": 1}
+        with pytest.raises(xlsxturbo.ConfigurationError, match="unknown option 'zzz'"):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, validations={"a": bad})
+
+    def test_a_pattern_must_still_match_a_column(self, tmp_xlsx: str) -> None:
+        """An empty frame still has columns, so a pattern matching none of them is a typo."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"validations\['nosuch'\]: pattern matched no columns"):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, validations={"nosuch": {"type": "whole_number", "min": 0}})
+
+    def test_a_valid_config_writes_nothing(self, tmp_xlsx: str) -> None:
+        """A valid config on the empty frame exports, and no validation is written."""
+        xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, validations={"a": {"type": "whole_number", "min": 0}})
+        wb = load_workbook(tmp_xlsx)
+        assert active_ws(wb).data_validations.dataValidation == []
+        wb.close()

@@ -148,8 +148,8 @@ renaming that heading to `## [X.Y.Z] - YYYY-MM-DD`, so the entry gains:
 is matched by `.github/scripts/release-notes.sh`, because it matches `## [<version>]` as a
 prefix and ignores the rest of the line. A tag pushed against that heading publishes a
 GitHub Release whose notes say Unreleased, with nothing failing. `## [Unreleased]` matches
-no tag, so forgetting this step fails the release job instead. `tests/test_ci_config.py`
-enforces it.
+no tag, so forgetting this step fails the Release workflow's first job instead, before
+anything is built or uploaded. `tests/test_ci_config.py` enforces it.
 
 ### 3. Re-lock and Re-run the Suite
 
@@ -260,6 +260,11 @@ After pushing the tag:
 1. Go to: https://github.com/tstone-1/xlsxturbo/actions
 2. Watch the **Release** workflow
 3. Verify all jobs succeed:
+   - **Check tag, version and release notes** (`release-check`) - runs first, and every
+     build job and the PyPI upload wait for it. It fails when the tag is not `v` plus the
+     version in both `pyproject.toml` and `Cargo.toml`, or when `CHANGELOG.md` has no
+     section for the tag, so neither mistake reaches PyPI. On a manual run there is no tag
+     and it passes without checking.
    - **linux** (x86_64, aarch64)
    - **windows** (x64)
    - **macos** (x86_64, aarch64)
@@ -271,7 +276,7 @@ After pushing the tag:
      pytest against it, so a leg cannot silently test some other wheel twice.
    - **Publish to PyPI**
    - **Create GitHub Release** - attaches the wheels and SBOMs, with notes sliced out of
-     `CHANGELOG.md`; it fails rather than publishing empty notes if the tag has no entry
+     `CHANGELOG.md` by the same script `release-check` ran
 
 ### 9. Verify PyPI Publication
 
@@ -317,4 +322,4 @@ uv run --no-sync maturin develop --release
 | Workflow | Trigger | Jobs |
 |----------|---------|------|
 | CI | Push/PR to main | `test` (`cargo test --release` + build), `python-test` / `python-test-windows` / `python-test-macos` (pytest against a maturin-built wheel per OS), `lint` (fmt + clippy), `python-lint` (ruff + bandit + pyright), `coverage` (informational), `cargo-audit`, `pip-audit`, `codeql` (python, rust), `action-pins`, `dependency-review` (pull requests only) |
-| Release | Push tag `v*` | `linux` (x86_64, aarch64), `windows` (x64), `macos` (x86_64, aarch64), `sdist`, `sbom`, `smoke-test` (five legs, one per published wheel, each on a runner of that wheel's architecture), `release` (PyPI publish), `github-release` (tagged Release with wheels and SBOMs) |
+| Release | Push tag `v*` (a manual run builds and tests but publishes nothing) | `release-check` (tag equals the package version, CHANGELOG section exists; needed by every build job and by `release`), `linux` (x86_64, aarch64), `windows` (x64), `macos` (x86_64, aarch64), `sdist`, `sbom`, `smoke-test` (five legs, one per published wheel, each on a runner of that wheel's architecture), `release` (PyPI publish), `github-release` (tagged Release with wheels and SBOMs) |

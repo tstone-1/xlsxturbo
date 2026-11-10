@@ -109,7 +109,7 @@ every other option stay absolute, so the title goes in `cells`, `merged_ranges` 
 | `MultiIndex` columns | Two header rows, merged cells | One header row; each name is the tuple as text, `('g', 'a')` | Flatten first: `df.columns = ["_".join(c) for c in df.columns]` |
 | Timezone-aware datetimes | Raises `ValueError` | Written as local wall-clock time, offset dropped | Convert explicitly — see [Compatibility](compatibility.md) |
 | Integers above 2^53 | Rounded to the nearest float | Written as text, every digit kept | Nothing: this is the safer behaviour |
-| `Timedelta` | A number of days, e.g. `0.0625` | Text, e.g. `5400000000 microseconds` | `df["t"] / pd.Timedelta(days=1)` and a `[h]:mm` number format |
+| `Timedelta` | A number of days, e.g. `0.0625` | Text such as `0 days 01:30:00`, or `5400000000 microseconds` when every column is a timedelta; the number of nanoseconds when every column is a nanosecond timedelta ([details](dataframe-export.md#durations)) | `df["t"] / pd.Timedelta(days=1)` and a `[h]:mm` number format |
 | Non-string column names (`0`, `1`) | Numbers in the header | Text in the header | Usually nothing |
 | Floats, with the default openpyxl engine | Rounded to 16 significant digits: `0.1 + 0.2` is stored as `0.3` | The exact value, `0.30000000000000004` | Nothing: the difference is in the last bit, and xlsxturbo's is the value you had |
 

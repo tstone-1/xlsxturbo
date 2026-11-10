@@ -626,7 +626,7 @@ fn csv_to_xlsx(
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
-///     freeze_panes: True freezes the header row (default: False). A (row, col) tuple
+///     freeze_panes: True freezes the header row (default: None, which freezes nothing, as False does). A (row, col) tuple
 ///                   freezes at that zero-based cell instead, as XlsxWriter's
 ///                   freeze_panes(row, col) does: it is the top-left cell of the scrolling
 ///                   area, so (4, 1) keeps four rows and one column in view. True follows
@@ -710,7 +710,7 @@ fn csv_to_xlsx(
 ///                 custom_max, custom_min, group_max, group_min, date_range.
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
 ///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
-///               starts on the row below it (default: 0). The rows above stay free for
+///               starts on the row below it (default: None, which is row 0). The rows above stay free for
 ///               cells, merged_ranges and rich_text. Cell references in every option stay
 ///               absolute sheet positions, and so do row_heights keys. The table, freeze
 ///               panes, formula columns, conditional formats and validations move with
@@ -952,7 +952,7 @@ fn version() -> &'static str {
 ///     table_style: Apply Excel table formatting with this style name (default: None).
 ///                  Styles: "Light1"-"Light21", "Medium1"-"Medium28", "Dark1"-"Dark11", "None"
 ///                  Tables include autofilter dropdowns and banded rows.
-///     freeze_panes: True freezes the header row (default: False). A (row, col) tuple
+///     freeze_panes: True freezes the header row (default: None, which freezes nothing, as False does). A (row, col) tuple
 ///                   freezes at that zero-based cell instead, as XlsxWriter's
 ///                   freeze_panes(row, col) does: it is the top-left cell of the scrolling
 ///                   area, so (4, 1) keeps four rows and one column in view. True follows
@@ -1015,7 +1015,7 @@ fn version() -> &'static str {
 ///                 "range" must be sheet-qualified, e.g. "Sheet1!A2:C10".
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
 ///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
-///               starts on the row below it (default: 0). The rows above stay free for
+///               starts on the row below it (default: None, which is row 0). The rows above stay free for
 ///               cells, merged_ranges and rich_text. Cell references in every option stay
 ///               absolute sheet positions, and so do row_heights keys. The table, freeze
 ///               panes, formula columns, conditional formats and validations move with

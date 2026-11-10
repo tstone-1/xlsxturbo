@@ -23,8 +23,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import re
+import subprocess
+import sys
 import tomllib
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 import yaml
@@ -817,3 +822,135 @@ class TestUvRunDoesNotResyncTheVenv:
             "tools and test dependencies; add `--no-sync` (or `--no-project` for a "
             "throwaway `--with` environment):\n" + "\n".join(bare)
         )
+
+
+RELEASE_WORKFLOW = WORKFLOWS / "release.yml"
+RELEASE_CHECK = "release-check"
+
+
+def _release_jobs() -> dict[str, dict]:
+    """The jobs of release.yml, by id."""
+    jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    assert RELEASE_CHECK in jobs, (
+        f"release.yml has no `{RELEASE_CHECK}` job, so every check below has nothing to "
+        f"inspect; found jobs {sorted(jobs)}"
+    )
+    return jobs
+
+
+def _needs(job: dict) -> list[str]:
+    """A job's `needs`, as a list whichever form the workflow writes it in."""
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _version_check_script() -> str:
+    """The Python program the release check's version step runs, as written."""
+    steps = _release_jobs()[RELEASE_CHECK]["steps"]
+    scripts = [
+        step["run"]
+        for step in steps
+        if "tomllib" in step.get("run", "") and "python - <<'EOF'" in step.get("run", "")
+    ]
+    assert len(scripts) == 1, f"expected one version-check step in `{RELEASE_CHECK}`, found {len(scripts)}"
+    body = scripts[0].split("python - <<'EOF'\n", 1)[1].rsplit("EOF", 1)[0]
+    assert "GITHUB_REF_NAME" in body, "the version check does not read the tag"
+    return body
+
+
+class TestTheReleaseIsCheckedBeforeItIsUploaded:
+    """Tag, version and release notes are checked before anything reaches PyPI.
+
+    The release notes used to be extracted only in `github-release`, which needs
+    `release`, the PyPI upload, and no step compared the tag with the package
+    version. So a forgotten CHANGELOG entry failed after the upload, and a tag
+    `v1.14.0` on a commit that still said 1.13.1 uploaded 1.13.1. An upload cannot
+    be taken back, so the check is a job of its own that the upload needs.
+    """
+
+    def test_the_upload_needs_the_check(self) -> None:
+        """The failure this class exists for: `release` must wait for the check."""
+        jobs = _release_jobs()
+        assert "release" in jobs, f"release.yml has no `release` job; found {sorted(jobs)}"
+        assert RELEASE_CHECK in _needs(jobs["release"]), (
+            f"the PyPI upload (`release`) does not need `{RELEASE_CHECK}`, so a tag with no "
+            f"CHANGELOG section or the wrong package version can still be uploaded; it "
+            f"needs {_needs(jobs['release'])}"
+        )
+
+    def test_every_wheel_build_waits_for_the_check(self) -> None:
+        """A wrong tag fails in seconds instead of after every wheel has built."""
+        jobs = _release_jobs()
+        builders = [
+            name
+            for name, job in jobs.items()
+            if any("maturin-action" in step.get("uses", "") for step in job.get("steps", []))
+        ]
+        assert len(builders) >= 4, f"found only {builders} building with maturin-action; the scan stopped matching"
+        late = [name for name in builders if RELEASE_CHECK not in _needs(jobs[name])]
+        assert not late, f"these build jobs start without waiting for `{RELEASE_CHECK}`: {late}"
+
+    def test_the_check_runs_the_published_notes_script_on_the_tag(self) -> None:
+        """The section checked is the one `github-release` publishes, found the same way."""
+        runs = "\n".join(step.get("run", "") for step in _release_jobs()[RELEASE_CHECK]["steps"])
+        assert 'bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME"' in runs
+
+    def test_the_check_holds_no_secrets_and_only_reads(self) -> None:
+        """It runs on every tag before any approval, so it gets nothing it could leak or write."""
+        job = _release_jobs()[RELEASE_CHECK]
+        assert job.get("permissions") == {"contents": "read"}, job.get("permissions")
+        assert "environment" not in job
+        text = yaml.safe_dump(job)
+        assert "secrets." not in text
+        for step in job["steps"]:
+            # The tag reaches the scripts through the environment, never interpolated.
+            assert "${{" not in step.get("run", ""), step.get("name")
+
+    @pytest.mark.parametrize(
+        ("tag_for", "passes"),
+        [(lambda version: f"v{version}", True), (lambda version: f"v{version}.1", False),
+         (lambda version: version, False)],
+        ids=["matching tag", "other version", "no v prefix"],
+    )
+    def test_the_version_check_compares_the_tag_with_both_manifests(
+        self, tag_for: Callable[[str], str], passes: bool
+    ) -> None:
+        """Run the step's own program against this checkout's manifests."""
+        tag = tag_for(_project_version())
+        result = subprocess.run(  # noqa: S603 - the interpreter running this suite, no shell
+            [sys.executable, "-c", _version_check_script()],
+            cwd=REPO_ROOT,
+            env={**os.environ, "GITHUB_REF_NAME": tag},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert (result.returncode == 0) is passes, result.stdout + result.stderr
+        if not passes:
+            assert "does not match the package version" in result.stdout
+
+    @pytest.mark.parametrize(
+        ("python_version", "rust_version", "named"),
+        [("9.9.9", "9.9.8", "Cargo.toml says 9.9.8"), ("9.9.8", "9.9.9", "pyproject.toml says 9.9.8")],
+        ids=["Cargo.toml behind", "pyproject.toml behind"],
+    )
+    def test_each_manifest_is_checked_on_its_own(
+        self, tmp_path: Path, python_version: str, rust_version: str, named: str
+    ) -> None:
+        """A tag matching one manifest is refused while the other disagrees.
+
+        The checkout's own manifests always agree, so the test above cannot tell a
+        check of both from a check of either; these synthetic pairs can.
+        """
+        (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{python_version}"\n', encoding="utf-8")
+        (tmp_path / "Cargo.toml").write_text(f'[package]\nversion = "{rust_version}"\n', encoding="utf-8")
+        result = subprocess.run(  # noqa: S603 - the interpreter running this suite, no shell
+            [sys.executable, "-c", _version_check_script()],
+            cwd=tmp_path,
+            env={**os.environ, "GITHUB_REF_NAME": "v9.9.9"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert named in result.stdout

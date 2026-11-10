@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] - 2026-11-10
+
+### Fixed
+- A `decimal` validation with only `min` or only `max` wrote the largest float as the
+  missing bound, and Excel refused to open the workbook. A single bound is now written as
+  a one-sided rule ("greater than or equal to" / "less than or equal to"). `whole_number`
+  and `text_length` with one bound also write a one-sided rule now, where they wrote a
+  range up to the type's limit.
+- A missing duration (`NaT`) in a pandas frame whose columns are all timedeltas is now an
+  empty cell; it was written as the text `NaT`. The same holds for a numpy
+  `timedelta64('NaT')` in an object column. The text of a present duration is unchanged.
+- `conditional_formats` and `validations` were not checked at all on a DataFrame without
+  data rows. An unknown type or key, a bad value and a pattern that matches no column now
+  raise `ConfigurationError` on an empty frame as on a populated one.
+- The type stub now gives `compression_level`, `startrow` and `freeze_panes` the defaults
+  the functions really have (`None`, meaning level 6, row 0 and no freeze), so a type
+  checker no longer refuses an explicit `None` that the runtime accepts. `ExportOptions`
+  follows.
+
+  The fixes below are repairs under the documented-contract exception of the
+  [stability policy](https://tstone-1.github.io/xlsxturbo/stability/): each call wrote
+  something other than what was asked for, and now raises `ConfigurationError` (a
+  `ValueError`) instead.
+- `validations={"col": {"type": "decimal"}}` with neither `min` nor `max` is refused. It
+  wrote a workbook Excel could not open. `whole_number` and `text_length` without bounds
+  are unchanged.
+- A `list` validation value containing a comma is refused, with the item's index in the
+  message: Excel split it into several dropdown entries. An empty `values` list is
+  refused too; it wrote a dropdown with no entries.
+- A fixed scale (`data_bar`, `2_color_scale`, `3_color_scale`) with `min_value` greater
+  than `max_value` is refused. Equal bounds are still accepted.
+- A single-value `cell` rule with `value=True` or `False` is refused. It was written as
+  the number 1 or 0. The message for a wrong `value` type now names the type it got.
+- A cell reference containing a non-ASCII letter is refused. `ß1` was accepted as `SS1`,
+  and a dotless i or a long s as `I1` or `S1`, which put the comment, image or cell in a
+  different place than the key said.
+
+### Changed
+- The release workflow checks that the tag matches the version in `pyproject.toml` and
+  `Cargo.toml`, and that `CHANGELOG.md` has a section for it, before any wheel is built
+  or uploaded. Before, the changelog check ran after the upload to PyPI.
+- `scripts/coverage_report.py` puts an uninstrumented build back into the venv when it
+  finishes, also after a failure, and no longer leaves `default_*.profraw` files in the
+  repository root.
+- zip 9.3.0 -> 9.5.0, which adds `zeroize` and `constant_time_eq` to the crates linked
+  into the extension; both are named in the bundled license notice.
+
+### Documentation
+- The duration section of DataFrame export states what is written for each frame shape,
+  unit and library, and its conversion advice divides by one day, which `[h]:mm:ss` needs.
+- The performance page names the three tables that are put together from several
+  benchmark runs; it said every table was printed by a script.
+
 ## [1.13.0] - 2026-11-05
 
 ### Added

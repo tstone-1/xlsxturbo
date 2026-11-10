@@ -339,6 +339,25 @@ pub(crate) fn write_py_value_with_format(
         return write_num(worksheet, row, col, excel_dt, Some(datetime_format));
     }
 
+    // A frame whose columns are all timedeltas reaches here as numpy
+    // `timedelta64` scalars, and a missing one is `timedelta64('NaT')`: its type
+    // name is neither `NaTType` (that is pandas' NaT, which a frame with any
+    // other column type yields) nor `datetime64`, so without this check it fell
+    // through to `str()` and was written as the text `NaT`. NaT is `i64::MIN`
+    // in every unit, as in the datetime64 guard above. Only the missing value
+    // is handled here: a present duration still takes the `str()` path below,
+    // whose text is part of the 1.x output.
+    if type_name == "timedelta64" {
+        let ticks: i64 = value
+            .call_method1("astype", ("int64",))
+            .and_then(|v| v.call_method0("item"))
+            .and_then(|v| v.extract())
+            .map_err(|e| format!("Failed to convert numpy timedelta64 scalar: {}", e))?;
+        if ticks == i64::MIN {
+            return write_str(worksheet, row, col, "", column_format);
+        }
+    }
+
     // Datetime before date, since datetime is subclass of date. Use a typed
     // isinstance-style check (via `cast::<PyDateTime>`) so subclasses such as
     // pendulum.DateTime or freezegun's FakeDatetime are caught here too,

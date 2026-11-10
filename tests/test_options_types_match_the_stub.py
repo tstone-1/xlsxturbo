@@ -1,6 +1,6 @@
 """Tests that `ExportOptions` field types match the signature they mirror.
 
-`ExportOptions` exists to make 27 keyword arguments discoverable, and it is
+`ExportOptions` exists to make the keyword arguments discoverable, and it is
 worth exactly as much as its types are. It is a second surface describing the
 same options as `df_to_xlsx`, whose authoritative types live in
 `python/xlsxturbo/xlsxturbo.pyi` -- and two surfaces describing one thing drift.
@@ -23,6 +23,7 @@ and what an IDE renders, so text is the thing to keep identical.
 from __future__ import annotations
 
 import ast
+import inspect
 
 import pytest
 
@@ -139,3 +140,71 @@ class TestExportOptionsMirrorsTheSignature:
         assert not unknown, f"ALLOWED_DIVERGENCE names fields that do not exist: {unknown}"
         unexplained = sorted(name for name, why in ALLOWED_DIVERGENCE.items() if not why.strip())
         assert not unexplained, f"ALLOWED_DIVERGENCE entries with no reason: {unexplained}"
+
+
+ENTRY_POINTS = ("csv_to_xlsx", "df_to_xlsx", "dfs_to_xlsx")
+
+
+def _stub_defaults(function: str) -> dict[str, tuple[object, str]]:
+    """Parameter name -> (default value, annotation source), for one stub function."""
+    tree = ast.parse(STUB.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            args = node.args
+            positional = [*args.posonlyargs, *args.args]
+            pairs = [
+                *zip(positional[len(positional) - len(args.defaults) :], args.defaults, strict=True),
+                *zip(args.kwonlyargs, args.kw_defaults, strict=True),
+            ]
+            return {
+                arg.arg: (ast.literal_eval(default), ast.unparse(arg.annotation) if arg.annotation else "")
+                for arg, default in pairs
+                if default is not None  # a keyword-only parameter without a default
+            }
+    raise AssertionError(f"{function} not found in the stub")
+
+
+class TestStubDefaultsMatchTheRuntime:
+    """The stub's defaults are the compiled functions' defaults.
+
+    `compression_level`, `startrow` and `freeze_panes` default to `None` in the
+    `#[pyo3(signature)]` blocks, and the stub said `6`, `0` and `False`. The values
+    behave the same when omitted, but the stub's annotation then refused an explicit
+    `None` the runtime accepts, and `ExportOptions` copied the stub, so the
+    annotation test above could not see it. The compiled function carries its
+    defaults even though it carries no annotations, so they can be compared.
+    """
+
+    @pytest.mark.parametrize("function", ENTRY_POINTS)
+    def test_every_default_is_the_runtime_default(self, function: str) -> None:
+        """Same parameters with defaults, same values, in both directions."""
+        import xlsxturbo
+
+        runtime = {
+            name: parameter.default
+            for name, parameter in inspect.signature(getattr(xlsxturbo, function)).parameters.items()
+            if parameter.default is not inspect.Parameter.empty
+        }
+        stub = _stub_defaults(function)
+        # The emptiness control: every entry point has defaulted options.
+        assert len(runtime) >= 3, f"{function}: only {sorted(runtime)} carry a runtime default"
+        assert set(stub) == set(runtime), (
+            f"{function}: the stub gives defaults for {sorted(set(stub) - set(runtime))} that the "
+            f"runtime does not, and the runtime for {sorted(set(runtime) - set(stub))} that the stub does not"
+        )
+        wrong = [
+            f"{name}: stub says {stub[name][0]!r}, runtime {value!r}"
+            for name, value in runtime.items()
+            if stub[name][0] != value or type(stub[name][0]) is not type(value)
+        ]
+        assert not wrong, f"{function}: " + "; ".join(wrong)
+
+    @pytest.mark.parametrize("function", ENTRY_POINTS)
+    def test_a_none_default_is_admitted_by_its_annotation(self, function: str) -> None:
+        """A parameter defaulting to `None` must accept an explicit `None` too."""
+        refused = [
+            f"{name}: {annotation}"
+            for name, (default, annotation) in _stub_defaults(function).items()
+            if default is None and "None" not in annotation.split(" | ")
+        ]
+        assert not refused, f"{function}: these default to None but their annotation refuses it: {refused}"

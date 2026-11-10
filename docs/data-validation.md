@@ -54,7 +54,7 @@ xlsxturbo.df_to_xlsx(df, "validated.xlsx",
 
 | Type | Aliases | Description | Options |
 |------|---------|-------------|---------|
-| `list` | - | Dropdown menu | `values` (list of strings, max 255 chars total) |
+| `list` | - | Dropdown menu | `values` (non-empty list of strings without commas, max 255 chars total) |
 | `whole_number` | `whole`, `integer` | Integer range | `min`, `max` |
 | `decimal` | `number` | Decimal range | `min`, `max` |
 | `text_length` | `textlength`, `length` | Character count | `min`, `max` |
@@ -68,10 +68,13 @@ Titles and messages can be supplied independently; every supplied value must be 
 **Notes:**
 - Validations apply to the data rows of the specified column
 - Column patterns work: `'score_*': {...}` matches all columns starting with `score_`
-- If only `min` or only `max` is specified, the other defaults to the type's extreme value
+- With both `min` and `max` the rule is "between"; with only `min` it is "greater than or equal to", and with only `max` "less than or equal to"
+- With neither bound, `whole_number` accepts any whole number from -2147483648 to 2147483647 and `text_length` any length; `decimal` needs at least one bound and raises `ConfigurationError` without one
 - `whole_number` `min`/`max` are bounded to the i32 range (-2147483648 to 2147483647); a value outside that range raises `ValueError` naming the field and range
 - `decimal` bounds must be finite numbers; `NaN` and infinity are refused
 - Booleans are not numeric bounds, including for `whole_number`
 - List validation values are limited to 255 total characters (Excel limitation)
+- A list value may not contain a comma: Excel splits the list at commas, so `"Smith, John"` would become two entries. Such a value, and an empty `values` list, raise `ConfigurationError`
+- On a DataFrame with no data rows nothing is written, but the validations are still checked, including that each pattern matches a column
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Not available in constant memory mode

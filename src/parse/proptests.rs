@@ -152,12 +152,40 @@ proptest! {
     ///
     /// This one is not decoration: `parse_cell_ref` uppercases its input and
     /// then slices it at a byte offset counted in `char`s. That is only sound
-    /// because the prefix it counts is ASCII, and `to_uppercase` can change a
-    /// string's byte length (`ß` becomes `SS`) and can turn a non-ASCII char
-    /// into an ASCII one (`ı` becomes `I`).
+    /// because the prefix it counts is ASCII; a full Unicode `to_uppercase`
+    /// would change a string's byte length (`ß` becomes `SS`) and turn a
+    /// non-ASCII char into an ASCII one (`ı` becomes `I`).
     #[test]
     fn cell_ref_never_panics(s in ".*") {
         let _ = parse_cell_ref(&s);
+    }
+
+    /// A reference is accepted exactly when it is written in ASCII, and then
+    /// means what its ASCII uppercase means.
+    ///
+    /// Meant to catch: a Unicode case fold before the ASCII-letter check. With
+    /// `to_uppercase`, `ß1` parsed as column SS and `ı1` and `ſ1` (long s) as
+    /// I1 and S1. The alphabet mixes ASCII letters with exactly those folding
+    /// characters, and two letters and at most four digits keep every
+    /// all-ASCII case inside the grid, so the only reason left to refuse one is
+    /// the non-ASCII character. Stated as an equivalence, so refusing everything
+    /// fails it as surely as accepting `ß`.
+    #[test]
+    fn cell_ref_accepts_only_ascii_letters(
+        letters in "[a-zA-Z\u{df}\u{131}\u{17f}]{1,2}",
+        row in 1u32..10_000,
+    ) {
+        let a1 = format!("{}{}", letters, row);
+        if letters.is_ascii() {
+            let col = letters
+                .to_ascii_uppercase()
+                .bytes()
+                .fold(0u32, |acc, b| acc * 26 + u32::from(b - b'A') + 1)
+                - 1;
+            prop_assert_eq!(parse_cell_ref(&a1), Ok((row - 1, col as u16)));
+        } else {
+            prop_assert!(parse_cell_ref(&a1).is_err(), "'{}' was accepted", a1);
+        }
     }
 
     // --- Cell ranges -----------------------------------------------------

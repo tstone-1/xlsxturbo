@@ -54,6 +54,10 @@ EXTENSION_DIR = REPO_ROOT / "python" / "xlsxturbo"
 # assertion went on running under instrumentation after being "fixed".
 COVERAGE_MARKER = {"XLSXTURBO_COVERAGE": "1"}
 
+# The instrumentation flag. Step 3 installs an extension built with it into the venv, and
+# `restore_uninstrumented_build` removes it again from the environment of the final rebuild.
+INSTRUMENT_FLAG = "-Cinstrument-coverage"
+
 # What the report is *not* about, as one regex, because `llvm-cov` filters by
 # filename and nothing finer:
 #
@@ -257,13 +261,61 @@ def report_python_layer() -> None:
         # the suite is told, and `tests/test_concurrency.py` skips its timing
         # assertions. Without this the pass took 24.2s against the same suite's
         # 12.5s and failed those assertions intermittently.
-        env=COVERAGE_MARKER,
+        #
+        # The instrumented extension writes a profile on every exit, and with no
+        # `LLVM_PROFILE_FILE` it writes `default_*.profraw` into the working
+        # directory, the repository root. These profiles are not part of the
+        # report (the merge has already happened), so they go to a folder of their
+        # own under the profile directory, which the next run deletes.
+        env={
+            **COVERAGE_MARKER,
+            "LLVM_PROFILE_FILE": str(PROFILE_DIR / "python-layer" / "xlsxturbo-%p-%m.profraw"),
+        },
     )
     run([sys.executable, "-m", "coverage", "report", "--show-missing"])
 
 
+def restore_uninstrumented_build() -> bool:
+    """Rebuild the extension without instrumentation and say which build is installed.
+
+    Step 3 installs an instrumented extension into the venv. Left there, every later
+    local test or benchmark run measures the instrumented build, and nothing flags it:
+    ``tests/test_build_is_current.py`` compares modification times, and the
+    instrumented build is the newest file. On such a build four threads are slower
+    than one, so a thread-scaling table measured afterwards would be wrong.
+
+    This runs from a ``finally``, so it must not raise: a ``SystemExit`` here would
+    replace the error that ended the run. It reports instead.
+
+    Returns:
+        Whether an uninstrumented build is now installed.
+    """
+    env = dict(os.environ)
+    for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+        if INSTRUMENT_FLAG in env.get(name, ""):
+            # Set by the caller's own environment rather than by this script; the
+            # rebuild would be instrumented again.
+            env.pop(name)
+    print("\n[cleanup] rebuilding the extension without instrumentation", flush=True)
+    # S603: a literal argument vector and no shell, as in `run`.
+    result = subprocess.run(  # noqa: S603
+        [venv_tool("maturin"), "develop", "--release"],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+    )
+    if result.returncode == 0:
+        print("[OK] the venv holds an uninstrumented build of the extension")
+        return True
+    print(
+        "[WARN] the venv still holds the INSTRUMENTED build of the extension; timings "
+        "and benchmarks measured with it are wrong. Rebuild with: maturin develop --release"
+    )
+    return False
+
+
 def main() -> int:
-    """Build both halves instrumented, run both suites, merge, report."""
+    """Build both halves instrumented, run both suites, merge, report, restore."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--html", action="store_true", help="also write an HTML report")
     parser.add_argument("--lcov", metavar="PATH", help="also write an lcov trace file")
@@ -282,7 +334,14 @@ def main() -> int:
         shutil.rmtree(PROFILE_DIR)
     PROFILE_DIR.mkdir(parents=True)
 
-    instrument = {"RUSTFLAGS": "-Cinstrument-coverage"}
+    # The builds run instrumented code too: build scripts and proc macros are compiled
+    # with the flag, and each writes a profile when it exits. With no
+    # `LLVM_PROFILE_FILE` those land in the repository root as `default_*.profraw`, so
+    # they get a folder of their own, below the top level that step 4 merges.
+    instrument = {
+        "RUSTFLAGS": INSTRUMENT_FLAG,
+        "LLVM_PROFILE_FILE": str(PROFILE_DIR / "build" / "build-%p-%m.profraw"),
+    }
     profile_env = {
         **instrument,
         **COVERAGE_MARKER,
@@ -296,6 +355,36 @@ def main() -> int:
     for binary in test_binaries:
         run([str(binary)], env=profile_env)
 
+    # Steps 1 and 2 build into `target/` only. From step 3 on the venv holds an
+    # instrumented extension, so everything after it runs inside the `try` whose
+    # `finally` puts an ordinary build back, on success and on failure alike.
+    try:
+        report_both_halves(args, instrument, profile_env, test_binaries, other_binaries, profdata_tool, cov_tool)
+    finally:
+        restore_uninstrumented_build()
+    return 0
+
+
+def report_both_halves(
+    args: argparse.Namespace,
+    instrument: dict[str, str],
+    profile_env: dict[str, str],
+    test_binaries: list[Path],
+    other_binaries: list[Path],
+    profdata_tool: str,
+    cov_tool: str,
+) -> None:
+    """Steps 3 to 5: build the instrumented extension, run the suites, merge and report.
+
+    Args:
+        args: The parsed command line.
+        instrument: Environment carrying the instrumentation flags.
+        profile_env: ``instrument`` plus the coverage marker and the profile path.
+        test_binaries: The instrumented Rust test binaries from step 1.
+        other_binaries: The other instrumented binaries from step 1 (the CLI).
+        profdata_tool: Path to ``llvm-profdata``.
+        cov_tool: Path to ``llvm-cov``.
+    """
     print(
         "[3/5] building the instrumented extension and running the Python suite",
         flush=True,
@@ -351,7 +440,6 @@ def main() -> int:
         "\nNo threshold is applied. Read the per-file rows for unexercised "
         "error paths; the total is context, not a target."
     )
-    return 0
 
 
 if __name__ == "__main__":

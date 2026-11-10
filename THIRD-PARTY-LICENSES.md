@@ -12,8 +12,8 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 | License | Crates |
 | --- | ---: |
-| MIT License | 94 |
-| Apache License 2.0 | 3 |
+| MIT License | 96 |
+| Apache License 2.0 | 4 |
 | Unicode License v3 | 2 |
 | zlib License | 1 |
 
@@ -464,6 +464,7 @@ Applies to:
 
 Applies to:
 
+- [constant_time_eq 0.6.1](https://codeberg.org/cesarb/constant_time_eq)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 
 ```text
@@ -768,7 +769,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [flate2 1.1.10](https://github.com/rust-lang/flate2-rs)
+- [flate2 1.1.11](https://github.com/rust-lang/flate2-rs)
 
 ```text
 Copyright (c) 2014-2026 Alex Crichton
@@ -1122,6 +1123,41 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
+- [zeroize 1.9.1](https://github.com/RustCrypto/utils)
+
+```text
+Copyright (c) 2018-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+### MIT License
+
+Applies to:
+
 - [getrandom 0.4.3](https://github.com/rust-random/getrandom)
 
 ```text
@@ -1197,6 +1233,41 @@ Applies to:
 
 ```text
 Copyright (c) 2019 Nick Fitzgerald
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+### MIT License
+
+Applies to:
+
+- [zeroize_derive 1.5.0](https://github.com/RustCrypto/utils)
+
+```text
+Copyright (c) 2019-2026 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -1379,7 +1450,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [crc32fast 1.5.4](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.5](https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License
@@ -1498,7 +1569,7 @@ SOFTWARE.
 Applies to:
 
 - [fastrand 2.5.0](https://github.com/smol-rs/fastrand)
-- [itoa 1.0.18](https://github.com/dtolnay/itoa)
+- [itoa 1.0.19](https://github.com/dtolnay/itoa)
 - [linux-raw-sys 0.12.1](https://github.com/sunfishcode/linux-raw-sys)
 - [once_cell 1.21.4](https://github.com/matklad/once_cell)
 - [pin-project-lite 0.2.17](https://github.com/taiki-e/pin-project-lite)
@@ -1509,7 +1580,7 @@ Applies to:
 - [rustversion 1.0.23](https://github.com/dtolnay/rustversion)
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.9](https://github.com/dtolnay/syn)
+- [syn 3.0.10](https://github.com/dtolnay/syn)
 - [typed-path 0.13.0](https://github.com/chipsenkbeil/typed-path)
 - [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
@@ -1589,7 +1660,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.4.1](https://github.com/zip-rs/zip2)
+- [zip 9.5.0](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)

@@ -43,6 +43,11 @@ Python layer. `cargo-llvm-cov` is deliberately not a dependency, because its `re
 subcommand takes no extra `--object` and the extension module is exactly that; the script
 drives `llvm-profdata`/`llvm-cov` directly instead.
 
+The script installs an instrumented extension into the venv, and a later test or benchmark
+run would measure it without any check noticing, so it ends, on failure as well, by
+rebuilding with plain `maturin develop --release` and prints `[OK]` or `[WARN]` saying which
+build is installed; `tests/test_coverage_script.py` holds it to that.
+
 **There is no threshold, in CI or out, and adding one would be a regression.** A coverage
 target gets met by tests that execute lines without asserting anything. The CI job is
 informational: it publishes the table to the job summary and uploads HTML. It can still fail,
@@ -77,3 +82,11 @@ where a reader can see it.
 ## A stale build fails the suite
 
 **`tests/test_build_is_current.py` fails when the built extension is older than any tracked Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`.** A stale `.so` does not error, it measures the wrong code with full confidence: on 2026-09-02 a whole review ran against 1.3.0 code believing it was HEAD, and a later gate run blamed a timing test for what was the build. CI builds immediately before pytest, so the test only ever fires locally, where `maturin develop --release` is the answer. A `git checkout` that touches a `.rs` file trips it on purpose. `pyproject.toml` is compared against the installed `.dist-info/RECORD` rather than the extension file, because cargo never reads it: after a `pyproject.toml`-only change `maturin develop --release` compiles nothing and leaves the extension's mtime alone.
+
+A comment-only edit to `Cargo.toml` trips it as well, and `maturin develop --release` did not clear it (observed once, 2026-11-10): cargo judged the crate fresh and left the extension's mtime alone. `cargo clean -p xlsxturbo --release` and a rebuild cleared it.
+
+## Reading a workbook back is not opening it in Excel
+
+**The suite checks output with openpyxl and by reading the XML. Neither parses a value the way Excel does, so a workbook Excel refuses can pass every test.** From 0.10.0 until 2026-11-10 a `decimal` validation with one bound wrote `f64::MAX` (1.797e308) as the missing one. Excel's largest number is 9.99999999999999E+307, and it refused to open the file; the same rule with an explicit `1e300` opened, so the value was the cause, not the 309-digit length. Every decimal test passed both bounds, and openpyxl read the one-sided file without complaint.
+
+So a change that writes a number, a formula or a name Excel has to interpret (validations, conditional formats, defined names, table names) is checked in Excel once, by hand, before it ships. On Windows that takes seconds through COM: a new `Excel.Application` with `Visible` and `DisplayAlerts` off, `Workbooks.Open(path, 0, $true)`, then read the object back (`Range.Validation.Type`, `.Operator`, `.Formula1`). With alerts off, a file Excel would offer to repair fails to open with `Unable to get the Open property of the Workbooks class`. Run a file known to open in the same session as the control, and close only the instance the probe created. A stand-in value for a missing bound is the shape to distrust: write the one-sided rule, not a range up to the type's limit.

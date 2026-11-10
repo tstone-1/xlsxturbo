@@ -224,6 +224,11 @@ class ValidationOptions(_ValidationRequired, total=False):
     - 'decimal': Decimal number between min and max
     - 'text_length': Text length between min and max
 
+    With only 'min' or only 'max' the rule is one-sided (at least / at most).
+    'decimal' needs at least one of the two. A 'list' needs at least one
+    value, and no value may contain a comma: Excel reads a comma as the
+    separator between dropdown entries.
+
     For 'whole_number', 'min'/'max' are bounded to the i32 range
     (-2147483648..=2147483647); a value outside that range raises ValueError
     naming the field and range, instead of a misleading generic type error.

@@ -1,6 +1,6 @@
 """A structured, reusable bundle of export options.
 
-``df_to_xlsx`` takes 30 parameters. That is the whole problem this module exists
+``df_to_xlsx`` takes a parameter for every option. That is the whole problem this module exists
 to solve: the options are discoverable only by reading a long signature, they
 cannot be built up in pieces, and a set of them cannot be named, stored, or
 passed around::
@@ -28,10 +28,10 @@ alternative.
 **It lowers to keyword arguments; it does not wrap the entry points.** The
 obvious spelling is ``df_to_xlsx(df, path, options=REPORT)``, which needs a
 Python wrapper around the compiled function. That wrapper would have to either
-repeat all 30 parameters -- a hand-maintained duplicate, and duplicated lists
+repeat every parameter -- a hand-maintained duplicate, and duplicated lists
 are what this repository keeps getting caught by -- or collapse them to
 ``**kwargs``, which would replace an explicit, fully typed signature with an
-opaque one. An IDE showing 30 named parameters today would show ``**kwargs``
+opaque one. An IDE showing every parameter by name today would show ``**kwargs``
 instead. That is the opposite of the goal, so the compiled functions are left
 exactly as they are and every existing call keeps working untouched.
 
@@ -46,7 +46,10 @@ in ``tests/test_options.py`` trivial enough to trust.
 per-sheet dict means "no table on this sheet", deliberately shadowing a workbook
 default -- verified behaviour, not a guess. So an option nobody touched has to be
 distinguishable from one explicitly set to ``None``, and both lowerings omit only
-the former.
+the former. What ``None`` means is the option's own: for ``freeze_panes`` and
+``startrow`` it is the default (no freeze, row 0) as a keyword argument, but in a
+per-sheet dict it takes the workbook-wide value, so ``False`` and ``0`` are the
+values that switch them off for one sheet.
 
 Every option remains available as a plain keyword argument, indefinitely. This is
 an addition, not a replacement, and nothing here is deprecated.
@@ -120,7 +123,7 @@ class ExportOptions:
     # Layout
     header: bool = _UNSET
     autofit: bool = _UNSET
-    freeze_panes: bool | tuple[int, int] = _UNSET
+    freeze_panes: bool | tuple[int, int] | None = _UNSET
     autofilter: bool = _UNSET
     tab_color: str | None = _UNSET
     column_widths: Mapping[int, float] | Mapping[str, float] | Mapping[int | str, float] | None = _UNSET
@@ -152,12 +155,12 @@ class ExportOptions:
     sparklines: Mapping[str, SparklineOptions] | None = _UNSET
 
     # Placement
-    startrow: int = _UNSET
+    startrow: int | None = _UNSET
 
     # Workbook-level: accepted by the entry points, not by a per-sheet dict.
     constant_memory: bool = _UNSET
     defined_names: Mapping[str, str] | None = _UNSET
-    compression_level: int = _UNSET
+    compression_level: int | None = _UNSET
 
     def as_kwargs(self) -> dict[str, Any]:
         """Return the set options as keyword arguments for the entry points.

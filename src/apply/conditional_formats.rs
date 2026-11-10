@@ -3,35 +3,97 @@
 use crate::parse::{
     matches_pattern, parse_color, parse_column_format, parse_icon_type, WithOptionContext,
 };
-use crate::types::{ConditionalFormatConfigs, OptionMap};
+use crate::types::{pytype_name, ConditionalFormatConfigs, OptionMap};
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
-    ConditionalFormat2ColorScale, ConditionalFormat3ColorScale, ConditionalFormatBlank,
-    ConditionalFormatCell, ConditionalFormatCellRule, ConditionalFormatDataBar,
-    ConditionalFormatDataBarDirection, ConditionalFormatIconSet, ConditionalFormatText,
-    ConditionalFormatTextRule, ConditionalFormatType, Format, Worksheet,
+    ConditionalFormat, ConditionalFormat2ColorScale, ConditionalFormat3ColorScale,
+    ConditionalFormatBlank, ConditionalFormatCell, ConditionalFormatCellRule,
+    ConditionalFormatDataBar, ConditionalFormatDataBarDirection, ConditionalFormatIconSet,
+    ConditionalFormatText, ConditionalFormatTextRule, ConditionalFormatType, Format, Worksheet,
 };
 use std::collections::HashMap;
 
-/// Add a cell-rule conditional format (Blank/Text/Cell) with an optional `format` applied first.
-macro_rules! add_cell_cf {
-    ($ws:expr, $r0:expr, $c:expr, $r1:expr, $cf:expr, $fmt:expr, $what:literal) => {{
-        let __cf = match $fmt {
-            Some(f) => $cf.set_format(f),
-            None => $cf,
-        };
-        $ws.add_conditional_format($r0, $c, $r1, $c, &__cf)
-            .map_err(|e| format!(concat!("Failed to add ", $what, ": {}"), e))?;
-    }};
+/// One conditional format, built and checked but not yet on a worksheet.
+///
+/// Building is kept apart from writing so that a frame without data rows still
+/// has its configs checked: before, both sat behind one "has data rows" test,
+/// and a typo in a scheduled export passed on every empty day and failed on
+/// the first day with data. An enum rather than a boxed trait object, because
+/// `Worksheet::add_conditional_format` takes a sized type.
+enum BuiltFormat {
+    TwoColorScale(ConditionalFormat2ColorScale),
+    ThreeColorScale(ConditionalFormat3ColorScale),
+    DataBar(ConditionalFormatDataBar),
+    IconSet(ConditionalFormatIconSet),
+    Blank(ConditionalFormatBlank, &'static str),
+    Text(ConditionalFormatText),
+    Range(ConditionalFormatCell),
+    Cell(ConditionalFormatCell),
 }
 
-/// Add a visualization-style conditional format (color scale, data bar, icon set).
-/// These types don't accept a user Format — their appearance IS the format.
-macro_rules! add_viz_cf {
-    ($ws:expr, $r0:expr, $c:expr, $r1:expr, $cf:expr, $what:literal) => {{
-        $ws.add_conditional_format($r0, $c, $r1, $c, &$cf)
-            .map_err(|e| format!(concat!("Failed to add ", $what, ": {}"), e))?;
-    }};
+impl BuiltFormat {
+    /// The name used in the "Failed to add ..." message.
+    fn what(&self) -> &'static str {
+        match self {
+            Self::TwoColorScale(_) => "2_color_scale",
+            Self::ThreeColorScale(_) => "3_color_scale",
+            Self::DataBar(_) => "data_bar",
+            Self::IconSet(_) => "icon_set",
+            Self::Blank(_, what) => what,
+            Self::Text(_) => "text rule format",
+            Self::Range(_) => "range rule format",
+            Self::Cell(_) => "cell format",
+        }
+    }
+
+    /// Run the crate's own check, which `add_conditional_format` would run
+    /// at write time, so that a frame with no rows refuses the same configs.
+    fn validate(&self) -> Result<(), String> {
+        let result = match self {
+            Self::TwoColorScale(cf) => cf.validate(),
+            Self::ThreeColorScale(cf) => cf.validate(),
+            Self::DataBar(cf) => cf.validate(),
+            Self::IconSet(cf) => cf.validate(),
+            Self::Blank(cf, _) => cf.validate(),
+            Self::Text(cf) => cf.validate(),
+            Self::Range(cf) | Self::Cell(cf) => cf.validate(),
+        };
+        result.map_err(|e| format!("Failed to add {}: {}", self.what(), e))
+    }
+
+    /// Add the format to one column's data rows.
+    fn add(
+        &self,
+        worksheet: &mut Worksheet,
+        col_idx: u16,
+        data_start_row: u32,
+        data_end_row: u32,
+    ) -> Result<(), String> {
+        let (r0, r1, c) = (data_start_row, data_end_row, col_idx);
+        let result = match self {
+            Self::TwoColorScale(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::ThreeColorScale(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::DataBar(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::IconSet(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::Blank(cf, _) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::Text(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+            Self::Range(cf) | Self::Cell(cf) => worksheet.add_conditional_format(r0, c, r1, c, cf),
+        };
+        result
+            .map(|_| ())
+            .map_err(|e| format!("Failed to add {}: {}", self.what(), e))
+    }
+}
+
+/// Apply the optional user `format` of a cell-rule conditional format.
+/// Visualization types (scales, bars, icons) take none: their look is the format.
+macro_rules! with_format {
+    ($cf:expr, $fmt:expr) => {
+        match $fmt {
+            Some(f) => $cf.set_format(f),
+            None => $cf,
+        }
+    };
 }
 
 /// Extract an optional color field from a conditional format config.
@@ -77,18 +139,28 @@ fn parse_cf_format(view: &OptionMap<'_, '_>) -> Result<Option<Format>, String> {
 ///
 /// Without them each column scales from its own lowest to its own highest
 /// value, so the bars of two columns cannot be compared (issue #67).
+///
+/// A reversed pair is refused: rust_xlsxwriter writes the two `cfvo` values as
+/// given, so `min_value=10, max_value=0` reached the file unchanged, and it is
+/// almost always a swapped pair. Equal bounds stay accepted.
 fn cf_scale_bounds(view: &OptionMap<'_, '_>) -> Result<(Option<f64>, Option<f64>), String> {
-    Ok((view.finite_f64("min_value")?, view.finite_f64("max_value")?))
+    let min_value = view.finite_f64("min_value")?;
+    let max_value = view.finite_f64("max_value")?;
+    if let (Some(lo), Some(hi)) = (min_value, max_value) {
+        if lo > hi {
+            return Err(format!(
+                "{}: 'min_value' ({}) must not be greater than 'max_value' ({})",
+                view.context(),
+                lo,
+                hi
+            ));
+        }
+    }
+    Ok((min_value, max_value))
 }
 
-/// Apply a 2-color-scale conditional format.
-fn apply_2_color_scale(
-    view: &OptionMap<'_, '_>,
-    worksheet: &mut Worksheet,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+/// Build a 2-color-scale conditional format.
+fn build_2_color_scale(view: &OptionMap<'_, '_>) -> Result<BuiltFormat, String> {
     let mut cf = ConditionalFormat2ColorScale::new();
     let (min_value, max_value) = cf_scale_bounds(view)?;
     if let Some(v) = min_value {
@@ -103,25 +175,11 @@ fn apply_2_color_scale(
     if let Some(c) = cf_optional_color(view, "max_color")? {
         cf = cf.set_maximum_color(c);
     }
-    add_viz_cf!(
-        worksheet,
-        data_start_row,
-        col_idx,
-        data_end_row,
-        cf,
-        "2_color_scale"
-    );
-    Ok(())
+    Ok(BuiltFormat::TwoColorScale(cf))
 }
 
-/// Apply a 3-color-scale conditional format.
-fn apply_3_color_scale(
-    view: &OptionMap<'_, '_>,
-    worksheet: &mut Worksheet,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+/// Build a 3-color-scale conditional format.
+fn build_3_color_scale(view: &OptionMap<'_, '_>) -> Result<BuiltFormat, String> {
     let mut cf = ConditionalFormat3ColorScale::new();
     let (min_value, max_value) = cf_scale_bounds(view)?;
     if let Some(v) = min_value {
@@ -139,25 +197,11 @@ fn apply_3_color_scale(
     if let Some(c) = cf_optional_color(view, "max_color")? {
         cf = cf.set_maximum_color(c);
     }
-    add_viz_cf!(
-        worksheet,
-        data_start_row,
-        col_idx,
-        data_end_row,
-        cf,
-        "3_color_scale"
-    );
-    Ok(())
+    Ok(BuiltFormat::ThreeColorScale(cf))
 }
 
-/// Apply a data-bar conditional format.
-fn apply_data_bar(
-    view: &OptionMap<'_, '_>,
-    worksheet: &mut Worksheet,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+/// Build a data-bar conditional format.
+fn build_data_bar(view: &OptionMap<'_, '_>) -> Result<BuiltFormat, String> {
     let mut cf = ConditionalFormatDataBar::new();
     let (min_value, max_value) = cf_scale_bounds(view)?;
     if let Some(v) = min_value {
@@ -191,25 +235,11 @@ fn apply_data_bar(
         };
         cf = cf.set_direction(dir);
     }
-    add_viz_cf!(
-        worksheet,
-        data_start_row,
-        col_idx,
-        data_end_row,
-        cf,
-        "data_bar"
-    );
-    Ok(())
+    Ok(BuiltFormat::DataBar(cf))
 }
 
-/// Apply an icon-set conditional format.
-fn apply_icon_set(
-    view: &OptionMap<'_, '_>,
-    worksheet: &mut Worksheet,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+/// Build an icon-set conditional format.
+fn build_icon_set(view: &OptionMap<'_, '_>) -> Result<BuiltFormat, String> {
     let mut cf = ConditionalFormatIconSet::new();
     if let Some(s) = view.string("icon_type")? {
         cf = cf.set_icon_type(parse_icon_type(&s).in_field(view.context(), "icon_type")?);
@@ -220,26 +250,14 @@ fn apply_icon_set(
     if view.bool("icons_only")?.unwrap_or(false) {
         cf = cf.show_icons_only(true);
     }
-    add_viz_cf!(
-        worksheet,
-        data_start_row,
-        col_idx,
-        data_end_row,
-        cf,
-        "icon_set"
-    );
-    Ok(())
+    Ok(BuiltFormat::IconSet(cf))
 }
 
-/// Apply a cell-rule conditional format, dispatching by criteria family.
-fn apply_cell_conditional(
+/// Build a cell-rule conditional format, dispatching by criteria family.
+fn build_cell_conditional(
     view: &OptionMap<'_, '_>,
-    worksheet: &mut Worksheet,
     col_pattern: &str,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+) -> Result<BuiltFormat, String> {
     // `string()` rather than a hand-rolled `extract()`: a raw `PyErr` flattened
     // into this layer's `String` channel renders as "<class>: <message>", so the
     // caller reads a `TypeError:` prefix inside a `ConfigurationError`. The
@@ -258,28 +276,16 @@ fn apply_cell_conditional(
     // Blank / no-blank
     match criteria_lower.as_str() {
         "blanks" | "blank" => {
-            add_cell_cf!(
-                worksheet,
-                data_start_row,
-                col_idx,
-                data_end_row,
-                ConditionalFormatBlank::new(),
-                fmt,
-                "blanks format"
-            );
-            return Ok(());
+            return Ok(BuiltFormat::Blank(
+                with_format!(ConditionalFormatBlank::new(), fmt),
+                "blanks format",
+            ));
         }
         "no_blanks" | "no blanks" | "not_blank" | "not blank" => {
-            add_cell_cf!(
-                worksheet,
-                data_start_row,
-                col_idx,
-                data_end_row,
-                ConditionalFormatBlank::new().invert(),
-                fmt,
-                "no_blanks format"
-            );
-            return Ok(());
+            return Ok(BuiltFormat::Blank(
+                with_format!(ConditionalFormatBlank::new().invert(), fmt),
+                "no_blanks format",
+            ));
         }
         _ => {}
     }
@@ -300,16 +306,10 @@ fn apply_cell_conditional(
         )),
         _ => None,
     } {
-        add_cell_cf!(
-            worksheet,
-            data_start_row,
-            col_idx,
-            data_end_row,
+        return Ok(BuiltFormat::Text(with_format!(
             ConditionalFormatText::new().set_rule(rule),
-            fmt,
-            "text rule format"
-        );
-        return Ok(());
+            fmt
+        )));
     }
 
     // Range rules (require numeric min_value/max_value)
@@ -324,16 +324,10 @@ fn apply_cell_conditional(
         )),
         _ => None,
     } {
-        add_cell_cf!(
-            worksheet,
-            data_start_row,
-            col_idx,
-            data_end_row,
+        return Ok(BuiltFormat::Range(with_format!(
             ConditionalFormatCell::new().set_rule(rule),
-            fmt,
-            "range rule format"
-        );
-        return Ok(());
+            fmt
+        )));
     }
 
     // Single-value comparison rules. Preserve numeric vs string in the Excel rule
@@ -345,6 +339,19 @@ fn apply_cell_conditional(
         )
     })?;
     let bound = value_obj.bind(view.py());
+    // A Python bool extracts as f64, so `value=True` used to become the rule
+    // `= 1`. Refused, as `OptionMap`'s numeric accessors refuse it for
+    // `min_value`/`max_value` on the same dict.
+    let value_type_error = || {
+        format!(
+            "{}: 'value' must be a string or number, got {}",
+            view.context(),
+            pytype_name(bound)
+        )
+    };
+    if bound.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(value_type_error());
+    }
 
     macro_rules! make_rule {
         ($variant:ident) => {
@@ -360,10 +367,7 @@ fn apply_cell_conditional(
             } else if let Ok(s) = bound.extract::<String>() {
                 ConditionalFormatCell::new().set_rule(ConditionalFormatCellRule::$variant(s))
             } else {
-                return Err(format!(
-                    "conditional_formats['{}']: 'value' must be a string or number",
-                    col_pattern
-                ));
+                return Err(value_type_error());
             }
         };
     }
@@ -392,33 +396,20 @@ fn apply_cell_conditional(
         }
     };
 
-    add_cell_cf!(
-        worksheet,
-        data_start_row,
-        col_idx,
-        data_end_row,
-        cf,
-        fmt,
-        "cell format"
-    );
-    Ok(())
+    Ok(BuiltFormat::Cell(with_format!(cf, fmt)))
 }
 
-/// Apply a single conditional format config to a column range.
+/// Build and check a single conditional format config.
 /// Dispatches by `type` to a family-specific helper. Unlike `validations`,
 /// conditional format configs are dispatched to one of five type-specific
 /// families with disjoint key sets, so the valid-keys list — and thus the
 /// unknown-key error — is per-type; the resolved format type is passed to
 /// `OptionMap::reject_unknown_for` as its qualifier.
-fn apply_single_conditional_format(
+fn build_single_conditional_format(
     py: Python<'_>,
-    worksheet: &mut Worksheet,
     col_pattern: &str,
     config: &HashMap<String, Py<PyAny>>,
-    col_idx: u16,
-    data_start_row: u32,
-    data_end_row: u32,
-) -> Result<(), String> {
+) -> Result<BuiltFormat, String> {
     let view = OptionMap::new(
         py,
         config,
@@ -431,13 +422,13 @@ fn apply_single_conditional_format(
     // produces the same missing-key wording this site used before.
     let format_type: String = view.required_string("type")?;
 
-    match format_type.to_lowercase().as_str() {
+    let built = match format_type.to_lowercase().as_str() {
         "2_color_scale" | "2colorscale" | "two_color_scale" => {
             view.reject_unknown_for(
                 &format_type,
                 &["type", "min_color", "max_color", "min_value", "max_value"],
             )?;
-            apply_2_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
+            build_2_color_scale(&view)
         }
         "3_color_scale" | "3colorscale" | "three_color_scale" => {
             view.reject_unknown_for(
@@ -451,7 +442,7 @@ fn apply_single_conditional_format(
                     "max_value",
                 ],
             )?;
-            apply_3_color_scale(&view, worksheet, col_idx, data_start_row, data_end_row)
+            build_3_color_scale(&view)
         }
         "data_bar" | "databar" => {
             view.reject_unknown_for(
@@ -466,14 +457,14 @@ fn apply_single_conditional_format(
                     "max_value",
                 ],
             )?;
-            apply_data_bar(&view, worksheet, col_idx, data_start_row, data_end_row)
+            build_data_bar(&view)
         }
         "icon_set" | "iconset" => {
             view.reject_unknown_for(
                 &format_type,
                 &["type", "icon_type", "reverse", "icons_only"],
             )?;
-            apply_icon_set(&view, worksheet, col_idx, data_start_row, data_end_row)
+            build_icon_set(&view)
         }
         "cell" => {
             view.reject_unknown_for(
@@ -487,14 +478,7 @@ fn apply_single_conditional_format(
                     "max_value",
                 ],
             )?;
-            apply_cell_conditional(
-                &view,
-                worksheet,
-                col_pattern,
-                col_idx,
-                data_start_row,
-                data_end_row,
-            )
+            build_cell_conditional(&view, col_pattern)
         }
         _ => Err(format!(
             "{}: 'type': Unknown conditional format type '{}'. Valid types: \
@@ -502,18 +486,23 @@ fn apply_single_conditional_format(
             view.context(),
             format_type
         )),
-    }
+    }?;
+    built.validate()?;
+    Ok(built)
 }
 
 /// Apply conditional formats to a worksheet
 /// Supports: 2_color_scale, 3_color_scale, data_bar, icon_set, cell
 /// Uses IndexMap to preserve pattern order (first match wins for overlapping patterns)
+///
+/// `data_rows` is the inclusive `(first, last)` range of data rows, or `None`
+/// for a frame without any: every config is then still matched against the
+/// columns and checked, and only the write is skipped.
 pub(crate) fn apply_conditional_formats(
     py: Python<'_>,
     worksheet: &mut Worksheet,
     columns: &[String],
-    data_start_row: u32,
-    data_end_row: u32,
+    data_rows: Option<(u32, u32)>,
     cond_formats: &ConditionalFormatConfigs,
 ) -> Result<(), String> {
     for (col_pattern, configs) in cond_formats {
@@ -531,17 +520,17 @@ pub(crate) fn apply_conditional_formats(
             ));
         }
 
+        // Built once per config, as validations are: the format is the same
+        // for every column the pattern matches, only the range differs. The
+        // loop order (config, then column) is the order rules are written in,
+        // and so their priority.
         for config in configs {
+            let built = build_single_conditional_format(py, col_pattern, config)?;
+            let Some((data_start_row, data_end_row)) = data_rows else {
+                continue;
+            };
             for &col_idx in &col_indices {
-                apply_single_conditional_format(
-                    py,
-                    worksheet,
-                    col_pattern,
-                    config,
-                    col_idx,
-                    data_start_row,
-                    data_end_row,
-                )?;
+                built.add(worksheet, col_idx, data_start_row, data_end_row)?;
             }
         }
     }

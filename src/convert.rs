@@ -441,11 +441,19 @@ pub(crate) fn claimed_table_name(
     table_name: Option<&str>,
     next_table_id: u32,
 ) -> Result<Option<String>, String> {
-    if constant_memory || !include_header || table_style.is_none() {
+    let has_style = table_style.is_some();
+    // Checked first so that a sheet asking for no table never reads the shape.
+    if !table_requested(constant_memory, include_header, has_style) {
         return Ok(None);
     }
     let (row_count, col_count) = dataframe_shape(df)?;
-    if row_count == 0 || col_count == Some(0) {
+    if !creates_table(
+        constant_memory,
+        include_header,
+        has_style,
+        row_count,
+        col_count != Some(0),
+    ) {
         return Ok(None);
     }
     Ok(Some(match table_name {
@@ -456,16 +464,42 @@ pub(crate) fn claimed_table_name(
     }))
 }
 
+/// Whether the options ask for an Excel table at all: a style, a header row,
+/// and not constant_memory. The frame's shape decides the rest, in
+/// [`creates_table`].
+fn table_requested(constant_memory: bool, include_header: bool, has_style: bool) -> bool {
+    has_style && include_header && !constant_memory
+}
+
+/// Whether a frame becomes an Excel table. The one statement of that rule:
+/// `apply_frame_features` creates the table by it, `claimed_table_name` counts
+/// the crate's automatic table ids by it, and the autofit allows for filter
+/// buttons by it, so the three cannot disagree.
+///
+/// A table needs at least one data row and one column. The column leg is not
+/// symmetry for its own sake: a frame with rows and no columns
+/// (`pd.DataFrame(index=range(3))`) used to produce a one-column table over
+/// `A1:A4` whose single column carried the crate-generated header `Column1`, a
+/// column the caller never asked for.
+fn creates_table(
+    constant_memory: bool,
+    include_header: bool,
+    has_style: bool,
+    row_count: usize,
+    has_columns: bool,
+) -> bool {
+    table_requested(constant_memory, include_header, has_style) && row_count > 0 && has_columns
+}
+
 /// Get a DataFrame's `(rows, columns)` without reading its data.
 ///
 /// The column count is `None` for an object that exposes only `__len__`;
 /// callers treat that as "has columns", since the alternative is to refuse a
 /// table for a frame whose width simply could not be read.
 ///
-/// Shared by `write_frame` (to decide whether to write a table) and by the
-/// table-name pre-checks, which must mirror the same conditions that gate table
-/// creation — so two empty DataFrames sharing a table name don't false-positive
-/// as a conflict.
+/// Shared by `write_frame` and by the table-name pre-checks, which both feed it
+/// to [`creates_table`], so two empty DataFrames sharing a table name don't
+/// false-positive as a conflict.
 pub(crate) fn dataframe_shape(df: &Bound<'_, PyAny>) -> Result<(usize, Option<usize>), String> {
     if df.hasattr("shape").unwrap_or(false) {
         let shape = df
@@ -729,13 +763,19 @@ pub(crate) fn write_frame(
 const FILTER_BUTTON_WIDTH: f64 = 16.0 / 7.0;
 
 /// Whether the header cells of this sheet carry filter buttons: a plain-range
-/// autofilter, or an Excel table under the gate `apply_frame_features`
-/// creates one by.
+/// autofilter, or an Excel table (see [`creates_table`]).
 fn header_has_filter_buttons(config: &WriteConfig<'_>, row_count: usize, col_count: usize) -> bool {
     if !config.include_header || config.constant_memory || col_count == 0 {
         return false;
     }
-    config.autofilter || (config.table_style.is_some() && row_count > 0)
+    config.autofilter
+        || creates_table(
+            config.constant_memory,
+            config.include_header,
+            config.table_style.is_some(),
+            row_count,
+            true,
+        )
 }
 
 /// Refuse the two `autofilter` combinations that cannot mean what they say,
@@ -968,16 +1008,15 @@ fn apply_frame_features(
         return Ok(col_count);
     }
 
-    // Add Excel Table if requested (requires header, at least one data row and
-    // at least one column).
-    //
-    // The column gate is not symmetry for its own sake: a frame with rows and no
-    // columns (`pd.DataFrame(index=range(3))`) used to produce a one-column
-    // table over `A1:A4` whose single column carried the crate-generated header
-    // `Column1` — a column the caller never asked for, written into a sheet that
-    // otherwise holds nothing. `claimed_table_name` mirrors this condition.
+    // Add Excel Table if requested; when a frame qualifies is `creates_table`.
     if let Some(style_name) = config.table_style {
-        if row_count > 0 && col_count > 0 && config.include_header {
+        if creates_table(
+            config.constant_memory,
+            config.include_header,
+            true,
+            row_count,
+            col_count > 0,
+        ) {
             let style = parse_table_style(style_name)?;
             let mut table = Table::new().set_style(style);
 
@@ -1032,25 +1071,15 @@ fn apply_frame_features(
         }
     }
 
-    // Apply conditional formats
+    // Conditional formats and validations are checked on every frame and
+    // written only where there are data rows: an empty frame still has columns
+    // to match and configs to refuse.
+    let data_rows = has_data_rows.then_some((data_row_start, data_row_end));
     if let Some(cond_fmts) = opts.conditional_formats {
-        if has_data_rows {
-            apply_conditional_formats(
-                py,
-                worksheet,
-                columns,
-                data_row_start,
-                data_row_end,
-                cond_fmts,
-            )?;
-        }
+        apply_conditional_formats(py, worksheet, columns, data_rows, cond_fmts)?;
     }
-
-    // Apply data validations
     if let Some(vals) = opts.validations {
-        if has_data_rows {
-            apply_validations(py, worksheet, columns, data_row_start, data_row_end, vals)?;
-        }
+        apply_validations(py, worksheet, columns, data_rows, vals)?;
     }
 
     // The plain-range autofilter, after the formula columns so that it spans them.

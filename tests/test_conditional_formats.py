@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import zipfile
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -161,12 +160,8 @@ class TestConditionalFormatting:
                 "score_*": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
             },
         )
-        assert Path(tmp_xlsx).exists()
-        wb = load_workbook(tmp_xlsx)
-        ws = active_ws(wb)
-        # Should have conditional formats on both score columns
-        assert len(ws.conditional_formatting) >= 1
-        wb.close()
+        # One range per matched column, and nothing on the unmatched one.
+        assert _ranges(tmp_xlsx) == {"A2": ["colorScale"], "B2": ["colorScale"]}
 
     def test_conditional_format_pattern_must_match(self, tmp_xlsx: str) -> None:
         """Conditional-format patterns that match no columns raise an error."""
@@ -180,6 +175,27 @@ class TestConditionalFormatting:
                 tmp_xlsx,
                 conditional_formats={"Missing": {"type": "data_bar"}},
             )
+
+
+def _ranges(path: str) -> dict[str, list[str]]:
+    """Map each conditional-format range of the active sheet to its rule types, in order."""
+    wb = load_workbook(path)
+    try:
+        return {
+            str(cf.sqref): [rule.type for rule in cf.rules]
+            for cf in active_ws(wb).conditional_formatting
+        }
+    finally:
+        wb.close()
+
+
+def _rules(path: str) -> list[Any]:
+    """Every conditional-format rule of the active sheet, in range order."""
+    wb = load_workbook(path)
+    try:
+        return [rule for cf in active_ws(wb).conditional_formatting for rule in cf.rules]
+    finally:
+        wb.close()
 
 
 def _cfvos(path: str) -> list[str]:
@@ -237,13 +253,45 @@ class TestFixedScale:
         )
         assert _cfvos(tmp_xlsx)[:2] == ['<cfvo type="min"/>', '<cfvo type="max"/>']
 
+    def test_3_color_scale_fixed_scale_both_bounds(self, tmp_xlsx: str) -> None:
+        """Both bounds replace the lowest and highest value; the midpoint stays the 50th percentile."""
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"n": [1, 2]}),
+            tmp_xlsx,
+            conditional_formats={"n": {"type": "3_color_scale", "min_value": 0, "max_value": 5}},
+        )
+        assert _cfvos(tmp_xlsx) == [
+            '<cfvo type="num" val="0"/>',
+            '<cfvo type="percentile" val="50"/>',
+            '<cfvo type="num" val="5"/>',
+        ]
+
     @pytest.mark.parametrize("cf_type", ["data_bar", "2_color_scale", "3_color_scale"])
+    @pytest.mark.parametrize("field", ["min_value", "max_value"])
     @pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, "1"])
-    def test_a_bound_must_be_a_finite_number(self, tmp_xlsx: str, cf_type: str, bad: object) -> None:
-        """NaN, infinity, a bool and a string are refused with the option named."""
-        rule: Any = {"type": cf_type, "max_value": bad}
-        with pytest.raises(xlsxturbo.ConfigurationError, match=r"conditional_formats\['a'\]: 'max_value'"):
+    def test_a_bound_must_be_a_finite_number(self, tmp_xlsx: str, cf_type: str, field: str, bad: object) -> None:
+        """NaN, infinity, a bool and a string are refused with the option named, for either bound."""
+        rule: Any = {"type": cf_type, field: bad}
+        with pytest.raises(xlsxturbo.ConfigurationError, match=rf"conditional_formats\['a'\]: '{field}'"):
             xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [0, 1]}), tmp_xlsx, conditional_formats={"a": rule})
+
+    @pytest.mark.parametrize("cf_type", ["data_bar", "2_color_scale", "3_color_scale"])
+    def test_a_reversed_scale_is_refused(self, tmp_xlsx: str, cf_type: str) -> None:
+        """``min_value`` above ``max_value`` is a swapped pair, refused with both keys named."""
+        rule: Any = {"type": cf_type, "min_value": 10, "max_value": 0}
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"conditional_formats\['a'\]: 'min_value' \(10\) must not be greater than 'max_value' \(0\)",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [0, 1]}), tmp_xlsx, conditional_formats={"a": rule})
+
+    @pytest.mark.parametrize("cf_type", ["data_bar", "2_color_scale", "3_color_scale"])
+    def test_equal_bounds_are_accepted(self, tmp_xlsx: str, cf_type: str) -> None:
+        """A scale whose two bounds are equal is written as given (Excel opens it)."""
+        rule: Any = {"type": cf_type, "min_value": 1, "max_value": 1}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [0, 1]}), tmp_xlsx, conditional_formats={"a": rule})
+        num_cfvos = [c for c in _cfvos(tmp_xlsx) if c.startswith("<cfvo") and 'type="num"' in c]
+        assert num_cfvos == ['<cfvo type="num" val="1"/>', '<cfvo type="num" val="1"/>']
 
     def test_icon_set_still_refuses_the_bounds(self, tmp_xlsx: str) -> None:
         """The pair is not accepted where nothing would use it."""
@@ -379,7 +427,9 @@ class TestCellConditionalFormat:
                  "format": {"bg_color": "#FFFF00"}},
             ]
         })
-        assert Path(tmp_xlsx).exists()
+        # All three rules on the one range, in the order given.
+        assert _ranges(tmp_xlsx) == {"A2:A5": ["cellIs", "cellIs", "cellIs"]}
+        assert [rule.formula for rule in _rules(tmp_xlsx)] == [['"HIGH"'], ['"MEDIUM"'], ['"LOW"']]
 
     def test_backward_compat_single_dict(self, tmp_xlsx: str) -> None:
         """Verify existing single-dict format still works (backward compat)."""
@@ -387,7 +437,9 @@ class TestCellConditionalFormat:
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, conditional_formats={
             "score": {"type": "2_color_scale", "min_color": "#FF0000", "max_color": "#00FF00"}
         })
-        assert Path(tmp_xlsx).exists()
+        (rule,) = _rules(tmp_xlsx)
+        assert rule.type == "colorScale"
+        assert [c.rgb for c in rule.colorScale.color] == ["FFFF0000", "FF00FF00"]
 
     def test_cell_with_pattern_matching(self, tmp_xlsx: str) -> None:
         """Verify cell conditional format works with wildcard patterns."""
@@ -400,7 +452,10 @@ class TestCellConditionalFormat:
                 "format": {"bold": True}
             }
         })
-        assert Path(tmp_xlsx).exists()
+        assert _ranges(tmp_xlsx) == {"A2": ["cellIs"], "B2": ["cellIs"]}
+        rules = _rules(tmp_xlsx)
+        assert [(r.operator, r.formula) for r in rules] == [("greaterThan", ["60"])] * 2
+        assert all(r.dxf.font.b for r in rules)
 
     def test_cell_format_with_border(self, tmp_xlsx: str) -> None:
         """Verify cell conditional format can include border styling."""
@@ -413,7 +468,10 @@ class TestCellConditionalFormat:
                 "format": {"bg_color": "#FFFF00", "border": "thin"}
             }
         })
-        assert Path(tmp_xlsx).exists()
+        (rule,) = _rules(tmp_xlsx)
+        assert rule.formula == ["2"]
+        border = rule.dxf.border
+        assert [border.left.style, border.right.style, border.top.style, border.bottom.style] == ["thin"] * 4
 
     def test_invalid_criteria_raises(self, tmp_xlsx: str) -> None:
         """Verify invalid criteria raises ValueError."""
@@ -443,7 +501,9 @@ class TestCellConditionalFormat:
                 "format": {"bg_color": "#00FF00"}
             }
         })
-        assert Path(tmp_xlsx).exists()
+        assert _ranges(tmp_xlsx) == {"A2:A4": ["cellIs"]}
+        (rule,) = _rules(tmp_xlsx)
+        assert (rule.operator, rule.formula) == ("greaterThanOrEqual", ["75"])
 
     def test_cell_without_format_key(self, tmp_xlsx: str) -> None:
         """Verify cell rule without format key still works (no styling applied)."""
@@ -451,7 +511,29 @@ class TestCellConditionalFormat:
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, conditional_formats={
             "A": {"type": "cell", "criteria": "greater_than", "value": 1}
         })
-        assert Path(tmp_xlsx).exists()
+        (rule,) = _rules(tmp_xlsx)
+        assert (rule.operator, rule.formula) == ("greaterThan", ["1"])
+        assert rule.dxfId is None
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_a_bool_value_is_refused(self, tmp_xlsx: str, value: bool) -> None:
+        """``value=True`` is not the number 1, as ``min_value=True`` is not."""
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"conditional_formats\['A'\]: 'value' must be a string or number, got bool",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_xlsx, conditional_formats={
+                "A": {"type": "cell", "criteria": "equal_to", "value": value}
+            })
+
+    def test_a_value_of_another_type_names_it(self, tmp_xlsx: str) -> None:
+        """The refusal names the type it got, as the ``OptionMap`` accessors do."""
+        bad: Any = {"type": "cell", "criteria": "equal_to", "value": [1]}
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"conditional_formats\['A'\]: 'value' must be a string or number, got list",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_xlsx, conditional_formats={"A": bad})
 
     def test_cell_missing_value_raises(self, tmp_xlsx: str) -> None:
         """Verify missing value key for value-requiring criteria raises ValueError."""
@@ -514,3 +596,48 @@ class TestCellConditionalFormat:
         }
         with pytest.raises(TypeError, match=r"list item .* must be a dict"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, conditional_formats=invalid_formats)  # type: ignore[arg-type]
+
+
+class TestEmptyFrame:
+    """A frame without data rows still has its configs checked; only the write is skipped."""
+
+    @staticmethod
+    def _empty() -> pd.DataFrame:
+        return pd.DataFrame({"a": pd.Series([], dtype="int64")})
+
+    def test_an_unknown_type_is_refused(self, tmp_xlsx: str) -> None:
+        """A typo fails on the empty day, not first on the day with data."""
+        bad: Any = {"type": "bogus"}
+        with pytest.raises(
+            xlsxturbo.ConfigurationError, match=r"conditional_formats\['a'\].*Unknown conditional format type 'bogus'",
+        ):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, conditional_formats={"a": bad})
+
+    def test_an_unknown_key_is_refused(self, tmp_xlsx: str) -> None:
+        """Unknown-key rejection runs without rows."""
+        bad: Any = {"type": "data_bar", "zzz": 1}
+        with pytest.raises(xlsxturbo.ConfigurationError, match="unknown option 'zzz'"):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, conditional_formats={"a": bad})
+
+    def test_a_bad_value_is_refused(self, tmp_xlsx: str) -> None:
+        """Value checks run without rows."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="'max_value' must be a finite number"):
+            xlsxturbo.df_to_xlsx(
+                self._empty(), tmp_xlsx,
+                conditional_formats={"a": {"type": "data_bar", "max_value": float("nan")}},
+            )
+
+    def test_a_pattern_must_still_match_a_column(self, tmp_xlsx: str) -> None:
+        """An empty frame still has columns, so a pattern matching none of them is a typo."""
+        with pytest.raises(
+            xlsxturbo.ConfigurationError, match=r"conditional_formats\['nosuch'\]: pattern matched no columns",
+        ):
+            xlsxturbo.df_to_xlsx(self._empty(), tmp_xlsx, conditional_formats={"nosuch": {"type": "data_bar"}})
+
+    def test_a_valid_config_writes_nothing(self, tmp_xlsx: str) -> None:
+        """A valid config on the empty frame exports, and no rule is written."""
+        xlsxturbo.df_to_xlsx(
+            self._empty(), tmp_xlsx,
+            conditional_formats={"a": [{"type": "data_bar"}, {"type": "cell", "criteria": "equal_to", "value": 1}]},
+        )
+        assert _ranges(tmp_xlsx) == {}

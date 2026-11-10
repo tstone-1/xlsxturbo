@@ -199,8 +199,22 @@ number without changing value, because Excel stores every number as a double. Th
 written as text so no digits are lost. Anything at or below that magnitude is a normal
 number.
 
+### Durations
+
 DataFrame columns follow the same mapping, with one addition worth knowing: **durations
-(`pandas.Timedelta` / `numpy.timedelta64`) are written as text**, e.g. `86400 seconds`.
-Excel has no duration type — convert to a number in the unit you want first
-(`df["elapsed"].dt.total_seconds()`) and apply a `num_format` such as `[h]:mm:ss` if you
-want it displayed as a duration.
+are not written as Excel durations**, and what is written depends on how the column
+reaches the writer. For a duration of one day:
+
+| Column | Written |
+|--------|---------|
+| pandas, every column of the frame a timedelta, unit seconds to microseconds | Text in the column's unit: `86400 seconds`, `86400000 milliseconds`, `86400000000 microseconds` |
+| pandas, every column of the frame a timedelta, unit nanoseconds (the pandas 2 default) | The number of nanoseconds, `86400000000000` |
+| pandas timedelta column in a frame with any other column type | Text, `1 days 00:00:00` |
+| polars `Duration`, or `datetime.timedelta` objects | Text, `1 day, 0:00:00` |
+
+A missing duration (`NaT`, `None`, a polars null) is an empty cell in every case. Excel
+has no duration type: it shows a number of days as a duration. So convert first, with
+`df["elapsed"] / pd.Timedelta(days=1)` (pandas) or
+`pl.col("elapsed").dt.total_microseconds() / 86_400_000_000` (polars), and apply a
+`num_format` such as `[h]:mm:ss`. For a plain number in another unit,
+`df["elapsed"].dt.total_seconds()` gives seconds.
