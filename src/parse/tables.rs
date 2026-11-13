@@ -126,6 +126,107 @@ pub(crate) fn sanitize_table_name(name: &str) -> String {
     sanitized
 }
 
+/// Excel's limit for a table column name, in UTF-16 code units.
+const TABLE_HEADER_MAX_UTF16: usize = 255;
+
+/// Whether `name` holds an `_xHHHH_` sequence: `_x`, four hex digits, `_`.
+///
+/// Excel reads that shape as an escaped character. The `x` is lower case only
+/// (`_X000D_` opens), the hex digits may be either case.
+fn has_escape_shape(name: &str) -> bool {
+    name.as_bytes().windows(7).any(|w| {
+        w[0] == b'_' && w[1] == b'x' && w[6] == b'_' && w[2..6].iter().all(u8::is_ascii_hexdigit)
+    })
+}
+
+/// Why `name` cannot be the header of a table column, or `None` when it can.
+///
+/// rust_xlsxwriter 0.102.0 writes the name into `<tableColumn name="...">`
+/// without the `_xHHHH_` escaping Excel uses there, so each of these headers
+/// gives a workbook Excel refuses to open, with `Ok` from the crate. Measured
+/// against Excel with the crate alone on 2026-11-13; the cases and their
+/// controls are in `dev-docs/upstream-rust-xlsxwriter.md`. A line feed is not
+/// in the list: the crate writes it as `&#xA;` and Excel opens that.
+///
+/// The same header is fine without a table, which is why this is a check on
+/// the table and not on the column name. Remove a rule here only when a crate
+/// release writes that header in a form Excel opens.
+pub(crate) fn unwritable_table_header(name: &str) -> Option<String> {
+    if let Some(c) = name
+        .chars()
+        .find(|&c| (c < '\u{20}' && c != '\n') || c == '\u{fffe}' || c == '\u{ffff}')
+    {
+        let what = match c {
+            '\t' => "a tab".to_string(),
+            '\r' => "a carriage return".to_string(),
+            other => format!("the control character U+{:04X}", other as u32),
+        };
+        return Some(format!("it contains {what}"));
+    }
+    if has_escape_shape(name) {
+        return Some(
+            "it contains text of the form '_xHHHH_', which Excel reads as an escaped character"
+                .to_string(),
+        );
+    }
+    let units = name.encode_utf16().count();
+    if units > TABLE_HEADER_MAX_UTF16 {
+        return Some(format!(
+            "it is {units} characters long and Excel allows {TABLE_HEADER_MAX_UTF16}"
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+mod table_header_tests {
+    use super::unwritable_table_header;
+
+    #[test]
+    fn headers_excel_refuses_in_a_table_are_named() {
+        for (header, reason) in [
+            ("a\tb", "a tab"),
+            ("a\rb", "a carriage return"),
+            ("a\r\nb", "a carriage return"),
+            ("a\u{1}b", "U+0001"),
+            ("a\u{1f}b", "U+001F"),
+            ("a\u{0}b", "U+0000"),
+            ("a\u{fffe}b", "U+FFFE"),
+            ("a\u{ffff}b", "U+FFFF"),
+            ("_x000D_", "_xHHHH_"),
+            ("_x000d_", "_xHHHH_"),
+            ("a_x0041_b", "_xHHHH_"),
+        ] {
+            let found = unwritable_table_header(header);
+            assert!(
+                found.as_deref().is_some_and(|r| r.contains(reason)),
+                "{header:?}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn headers_excel_opens_in_a_table_pass() {
+        // Each of these was opened in Excel as a table header.
+        for header in [
+            "a", "a\nb", "  a  ", "a\u{7f}b", "a\u{85}b", "_X000D_", "_x00G0_", "_x000D",
+            "_x0000D_",
+        ] {
+            assert_eq!(unwritable_table_header(header), None, "{header:?}");
+        }
+    }
+
+    #[test]
+    fn the_length_limit_counts_utf16_units() {
+        assert_eq!(unwritable_table_header(&"x".repeat(255)), None);
+        assert!(unwritable_table_header(&"x".repeat(256)).is_some());
+        // One emoji is two UTF-16 units: 127 fit, 128 do not.
+        assert_eq!(unwritable_table_header(&"\u{1F600}".repeat(127)), None);
+        let reason = unwritable_table_header(&"\u{1F600}".repeat(128));
+        assert!(reason.is_some_and(|r| r.contains("256")));
+    }
+}
+
 #[cfg(test)]
 mod cell_reference_name_tests {
     use super::sanitize_table_name;

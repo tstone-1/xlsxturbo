@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.2] - 2026-11-13
+
+### Fixed
+- A `table_style` on a frame with a column name the table writer cannot express gave a
+  workbook Excel refused to open. Such a name holds a tab, a carriage return or another
+  control character, contains text of the form `_x000D_`, or is longer than 255
+  characters. The call now raises `ConfigurationError` (a `ValueError`) that names the
+  sheet, the column and the reason. A line feed in a column name is unaffected, and so is
+  the same column name on a sheet without a table. This is a repair under the
+  documented-contract exception of the
+  [stability policy](https://tstone-1.github.io/xlsxturbo/stability/).
+
 ## [1.13.1] - 2026-11-10
 
 ### Fixed

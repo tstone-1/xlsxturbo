@@ -16,7 +16,7 @@ pub(crate) use formats::{
     parse_icon_type, parse_rich_text_format, parse_vertical_alignment,
 };
 pub(crate) use patterns::matches_pattern;
-pub(crate) use tables::{parse_table_style, sanitize_table_name};
+pub(crate) use tables::{parse_table_style, sanitize_table_name, unwritable_table_header};
 pub(crate) use values::{naive_date_to_excel, naive_datetime_to_excel, parse_value};
 
 #[cfg(test)]

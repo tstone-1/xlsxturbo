@@ -87,6 +87,72 @@ Released in 0.101.0 (2026-10-20) and taken the next day: `temp_file_failure` map
 deny for Everyone on Windows, `chmod 0o555` on POSIX). Reverting the mapping turns that test
 and the `ENOENT` assertion in `tests/test_constant_memory.py` red.
 
+**Open, fixed upstream but not released: a sheet named `TRUE` or `FALSE` with
+`autofilter=True` gives a workbook Excel cannot open** (measured 2026-11-13, xlsxturbo 1.13.1
+on rust_xlsxwriter 0.102.0, any letter case). `quote_sheet_name` does not quote a boolean
+sheet name, so the hidden filter name is written as
+`<definedName name="_xlnm._FilterDatabase" ...>TRUE!$A$1:$B$4</definedName>`. Excel through
+COM refuses the file (`Unable to get the Open property of the Workbooks class`). Controls in
+the same run opened: sheet `Data` and sheet `RC1` (written as `'RC1'!`) with the autofilter,
+and sheet `TRUE` with no filter and with a `table_style`. The autofilter is the only place
+where the crate builds a sheet reference for us; chart and sparkline ranges are strings the
+caller writes. The fix is upstream commit `0c034f85b` (2026-11-08, "utility: add boolean
+values to sheet quoting rules"), one commit after `v0.102.0`; no issue was filed for it.
+Nothing here guards or tests it yet. Take the release that carries the commit and add a test
+that opens the definedName back (`'TRUE'!`).
+
+**Open, filed as #216 and #217: three more ways rust_xlsxwriter 0.102.0 writes a workbook
+Excel cannot open** (measured and filed 2026-11-13).
+[#216](https://github.com/jmcnamara/rust_xlsxwriter/issues/216) is case 1 below,
+[#217](https://github.com/jmcnamara/rust_xlsxwriter/issues/217) is cases 2 and 3. Each report
+carries a program that saves to a buffer, reads the part back with the `zip` crate and prints
+the offending XML, so it needs no Excel. Found by writing 2083 workbooks through xlsxturbo 1.13.1
+(45 string-taking options x 50 hostile strings) and opening each in Excel through COM, then
+confirmed with a program that drives the crate alone: 13 cases refused by Excel, 6 controls
+opened, and the crate returned `Ok` for all 19.
+
+1. *A control character in a string the crate writes as an XML attribute gives XML that is
+   not well-formed.* U+0001, U+000B, U+001F, U+0000, U+FFFE and U+FFFF each did it in: sheet
+   name, table column header, data-validation titles and messages, hyperlink URL and internal
+   link, font name, number format, a `containing` conditional format, textbox alt text and
+   font, image alt text. The same characters in a cell value are written as `_x0001_` and
+   open (the control).
+2. *A table column header holding a tab or a carriage return* is written raw into
+   `<tableColumn name="...">`, where attribute normalisation turns it into a space, so the
+   name no longer matches the header cell. A line feed is written as `&#xA;` and opens (the
+   control). A header that is literally `_x000D_` fails for the same reason from the other
+   side: the cell is escaped to `_x005F_x000D_`, the attribute is not. A header of 256
+   characters is accepted by the crate and refused by Excel; 255 opens.
+3. *A sheet named `_x000D_` with an autofilter*, and a table named `_x000D_`. The sheet
+   without the filter opens.
+
+The realistic one for xlsxturbo is 2: a DataFrame column name with a tab or `\r\n` in it and
+a `table_style`. That one is guarded: `unwritable_table_header` (`src/parse/tables.rs`),
+called from `reject_unwritable_table_headers` in `apply_frame_features`, refuses the table
+with a `ConfigurationError`; `tests/test_table_headers.py` covers it, and replacing the call's
+`?` with a discarded result reddens 13 of its 32 tests. It cannot escape instead of refusing:
+the header string we pass is used for both the cell and the attribute, and the two need
+different escaping. 1 and 3 are not guarded.
+
+What the guard's rules were measured as, crate alone, opened in Excel: every C0 character
+tried except the line feed fails (U+0000, U+0001, U+0009, U+000D, U+001F), as do U+FFFE and
+U+FFFF; U+007F and U+0085 open. The escape shape is `_x` + four hex digits of either case +
+`_`; `_X000D_`, `_x00G0_`, `_x000D` and `_x0000D_` open. The length limit is 255 UTF-16 code
+units: 127 emoji open, 128 do not. What Excel itself writes into the attribute for such a
+header, built through COM and saved: `a_x0009_b` for a tab, `a_x000d_b` for a CR, `a_x000a_b`
+for an LF, `_x005f_x000D_` for the literal text `_x000D_`, and it cuts a 256-character header
+to 255. Remove a rule from the guard only when a crate release writes that header in a form
+Excel opens.
+
+Checked and found clean in the same session: the crate's sheet-name quoting against Excel's
+own for 6293 names (every string of 1 to 3 characters over `ABCEFRTXZ0159_.- é` plus 180
+patterns). Excel quotes four names the crate does not: `TRUE`, `FALSE` (above) and two with
+an Arabic-Indic digit, which Excel opens unquoted. The crate quotes 20 names Excel leaves
+bare, which is harmless. Two traps in that harness: the crate sorts `definedName` entries by
+name, so pair them with sheets by `localSheetId`, never by position; and the many refusals
+for `formula_columns`, `defined_names` values and `num_format` in the first run are invalid
+input, not defects.
+
 ## Name validation is ours now — upstream has drawn its line
 
 On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of

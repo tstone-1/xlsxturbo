@@ -87,6 +87,8 @@ Then regenerate the capability matrix: `python scripts/gen_capability_matrix.py 
 - *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
 - *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
 - *Closed: #213, `TempFileError` drops the `io::Error`* -- fixed in rust_xlsxwriter 0.101.0; `temp_file_failure` now maps the `io::Error`, so a refused temporary folder is `FilePermissionError`. No open upstream defect is pinned now.
+- *Open, fixed upstream but not released: a sheet named `TRUE` or `FALSE` with `autofilter=True` gives a workbook Excel cannot open* -- fix is upstream commit `0c034f85b`, after `v0.102.0`; no guard or test here yet.
+- *Open, filed as #216 and #217: three more ways rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open* -- control characters in attribute strings, a tab or CR in a table column header, `_x000D_`-shaped names; found by a 2083-workbook run against Excel. Only the table header case is guarded (`unwritable_table_header`).
 
 ## Name validation is ours now — upstream has drawn its line
 

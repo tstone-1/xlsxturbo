@@ -697,7 +697,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [errno 0.3.14](https://github.com/lambda-fairy/rust-errno)
+- [errno 0.3.15](https://github.com/lambda-fairy/rust-errno)
 
 ```text
 Copyright (c) 2014 Chris Wong
@@ -1660,7 +1660,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.5.0](https://github.com/zip-rs/zip2)
+- [zip 9.5.1](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)

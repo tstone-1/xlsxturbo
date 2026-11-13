@@ -9,6 +9,7 @@ use crate::apply::{
 use crate::errors::FileFailure;
 use crate::parse::{
     build_column_formats, parse_header_format, parse_table_style, parse_value, sanitize_table_name,
+    unwritable_table_header,
 };
 use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
@@ -982,6 +983,24 @@ fn warn_constant_memory_skips(
     Ok(())
 }
 
+/// Refuse a table whose column names include one the crate cannot write as a
+/// table header; see `unwritable_table_header` for the cases and the reason.
+fn reject_unwritable_table_headers(sheet_name: &str, columns: &[String]) -> Result<(), String> {
+    for name in columns {
+        if let Some(reason) = unwritable_table_header(name) {
+            // Debug formatting shows a control character as its escape; a long
+            // name is cut so the message stays readable.
+            let shown: String = name.chars().take(40).collect();
+            let cut = if shown.len() < name.len() { "..." } else { "" };
+            return Err(format!(
+                "sheet '{sheet_name}': column {shown:?}{cut} cannot be the header of a table: \
+                 {reason}. Rename the column, or leave out table_style for this sheet."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Apply the features bound to one frame's position, after its data is written:
 /// the table, formula columns, conditional formats, validations and the
 /// autofilter. Returns the frame's column count, formula columns included.
@@ -1018,6 +1037,7 @@ fn apply_frame_features(
             col_count > 0,
         ) {
             let style = parse_table_style(style_name)?;
+            reject_unwritable_table_headers(sheet_name, columns)?;
             let mut table = Table::new().set_style(style);
 
             if let Some(name) = config.table_name {

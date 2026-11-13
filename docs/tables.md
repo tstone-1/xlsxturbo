@@ -132,3 +132,22 @@ So `defined_names={"Table1": ...}` collides with the first auto-named table,
 and an explicit `table_name="Table2"` on one sheet collides with an auto-named
 table on the second. The message says which name was generated and where, so a
 name you never typed is not a mystery.
+
+### Column names a table cannot carry
+
+A table takes its column names from the header row, and Excel is stricter about a table
+column name than about a header cell. A column name is refused with `table_style` when it
+
+- contains a tab, a carriage return or another control character (a line feed is fine),
+- contains text of the form `_x000D_` (`_x`, four hex digits, `_`), which Excel reads as an
+  escaped character, or
+- is longer than 255 characters.
+
+```python
+df = pd.DataFrame({"Net\tAmount": [1, 2]})
+xlsxturbo.df_to_xlsx(df, "report.xlsx", table_style="Medium2")
+# ConfigurationError: sheet 'Sheet1': column "Net\tAmount" cannot be the header of a
+# table: it contains a tab. Rename the column, or leave out table_style for this sheet.
+```
+
+The same column name is written as it is on a sheet without a table.
