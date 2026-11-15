@@ -65,6 +65,25 @@ def sections(path: Path) -> list[str]:
     return [github_slug(h) for h in SECTION.findall(path.read_text(encoding="utf-8"))]
 
 
+# Agents load AGENTS.md on every session together with the maintainer's global
+# instruction files, and the total must stay under 140,000 characters. The global
+# files are allowed 110,000, which leaves this repo 30,000. The cap sits 5,000 below
+# that, so the global files can grow without pushing this repo over. A new entry
+# goes into dev-docs/ with one index line here; this test is what makes the file
+# stay an index. It reached 33,535 before this test existed (2026-11-15).
+AGENTS_MAX_CHARS = 25_000
+
+
+def test_agents_md_stays_within_its_budget() -> None:
+    """AGENTS.md stays short enough to load with the global files."""
+    size = len(AGENTS.read_text(encoding="utf-8"))
+    assert size > 1_000, "AGENTS.md read back almost empty; the size check would pass for the wrong reason"
+    assert size <= AGENTS_MAX_CHARS, (
+        f"AGENTS.md is {size} characters, over {AGENTS_MAX_CHARS}: move an entry into dev-docs/ "
+        "and keep one index line with a link"
+    )
+
+
 def test_the_index_has_links_to_check() -> None:
     """The emptiness control: a regex that matched nothing would pass every other test."""
     assert len(links()) >= 10

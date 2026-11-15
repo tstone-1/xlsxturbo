@@ -105,7 +105,7 @@ is a separate Cargo `[[bin]]` target that is **not** packaged -- it is built by 
 
 An option threads through several layers of Rust and Python, and missing one is usually
 a compile error or a named test failure rather than a silent bug -- but not always.
-**The checklist is in [AGENTS.md](AGENTS.md#adding-a-feature---the-touchpoint-checklist)**,
+**The checklist is in [dev-docs/adding-a-feature.md](dev-docs/adding-a-feature.md)**,
 with the reasoning behind each step and the guard test that enforces it. Follow it there
 rather than from a summary: this section used to restate the steps, and the copy drifted
 -- it still sent option shapes to the stub two releases after they moved to

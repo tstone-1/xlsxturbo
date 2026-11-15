@@ -101,8 +101,8 @@ values to sheet quoting rules"), one commit after `v0.102.0`; no issue was filed
 Nothing here guards or tests it yet. Take the release that carries the commit and add a test
 that opens the definedName back (`'TRUE'!`).
 
-**Open, filed as #216 and #217: three more ways rust_xlsxwriter 0.102.0 writes a workbook
-Excel cannot open** (measured and filed 2026-11-13).
+**Filed as #216 (fixed upstream, not released) and #217 (open): three more ways
+rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open** (measured and filed 2026-11-13).
 [#216](https://github.com/jmcnamara/rust_xlsxwriter/issues/216) is case 1 below,
 [#217](https://github.com/jmcnamara/rust_xlsxwriter/issues/217) is cases 2 and 3. Each report
 carries a program that saves to a buffer, reads the part back with the `zip` crate and prints
@@ -116,7 +116,16 @@ opened, and the crate returned `Ok` for all 19.
    name, table column header, data-validation titles and messages, hyperlink URL and internal
    link, font name, number format, a `containing` conditional format, textbox alt text and
    font, image alt text. The same characters in a cell value are written as `_x0001_` and
-   open (the control).
+   open (the control). **Fixed upstream, not released:** #216 was closed 2026-11-15 by commit
+   `da60a0138` ("xmlwriter: escape control characters in attributes and urls"), changelog
+   entry `0.102.1`. On 2026-11-15 the issue's program against main `1bd0291fa` found no raw
+   U+0001 in any part, and Excel 16.0 build 20527 through COM opened all seven files, where
+   the same program on `=0.102.0` gave six refusals and the cell control opening. That test
+   covered U+0001 in the six places of the report only. The same commit adds the null
+   character to the `SheetnameContainsInvalidCharacter` text, so U+0000 in a sheet name
+   becomes an error rather than an escape (read from the diff, not run). Main also carries `92d8735cd`
+   ("escape literal _xHHHH_ strings in attributes"), which may cover the `_x000D_` cases of
+   #217; not measured.
 2. *A table column header holding a tab or a carriage return* is written raw into
    `<tableColumn name="...">`, where attribute normalisation turns it into a space, so the
    name no longer matches the header cell. A line feed is written as `&#xA;` and opens (the
