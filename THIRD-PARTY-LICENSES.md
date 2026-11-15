@@ -23,7 +23,7 @@ their copyright notices to be distributed with the binaries, and this is that no
 
 Applies to:
 
-- [target-lexicon 0.13.5](https://github.com/bytecodealliance/target-lexicon)
+- [target-lexicon 0.13.6](https://github.com/bytecodealliance/target-lexicon)
 
 ```text
 
@@ -655,7 +655,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [cc 1.11.1](https://github.com/rust-lang/cc-rs)
+- [cc 1.11.2](https://github.com/rust-lang/cc-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
 - [find-msvc-tools 0.1.15](https://github.com/rust-lang/cc-rs)
 - [js-sys 0.3.107](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -1229,7 +1229,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [bumpalo 3.20.3](https://github.com/fitzgen/bumpalo)
+- [bumpalo 3.20.4](https://github.com/fitzgen/bumpalo)
 
 ```text
 Copyright (c) 2019 Nick Fitzgerald
@@ -1660,7 +1660,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zip 9.5.1](https://github.com/zip-rs/zip2)
+- [zip 9.6.0](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
@@ -1724,7 +1724,7 @@ THE SOFTWARE.
 
 Applies to:
 
-- [nix 0.31.3](https://github.com/nix-rust/nix)
+- [nix 0.32.0](https://github.com/nix-rust/nix)
 
 ```text
 The MIT License (MIT)
