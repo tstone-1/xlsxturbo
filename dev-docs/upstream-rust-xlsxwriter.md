@@ -101,7 +101,7 @@ values to sheet quoting rules"), one commit after `v0.102.0`; no issue was filed
 Nothing here guards or tests it yet. Take the release that carries the commit and add a test
 that opens the definedName back (`'TRUE'!`).
 
-**Filed as #216 (fixed upstream, not released) and #217 (open): three more ways
+**Filed as #216 and #217, both fixed upstream, not released: three more ways
 rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open** (measured and filed 2026-11-13).
 [#216](https://github.com/jmcnamara/rust_xlsxwriter/issues/216) is case 1 below,
 [#217](https://github.com/jmcnamara/rust_xlsxwriter/issues/217) is cases 2 and 3. Each report
@@ -123,9 +123,7 @@ opened, and the crate returned `Ok` for all 19.
    the same program on `=0.102.0` gave six refusals and the cell control opening. That test
    covered U+0001 in the six places of the report only. The same commit adds the null
    character to the `SheetnameContainsInvalidCharacter` text, so U+0000 in a sheet name
-   becomes an error rather than an escape (read from the diff, not run). Main also carries `92d8735cd`
-   ("escape literal _xHHHH_ strings in attributes"), which may cover the `_x000D_` cases of
-   #217; not measured.
+   becomes an error rather than an escape (read from the diff, not run).
 2. *A table column header holding a tab or a carriage return* is written raw into
    `<tableColumn name="...">`, where attribute normalisation turns it into a space, so the
    name no longer matches the header cell. A line feed is written as `&#xA;` and opens (the
@@ -134,6 +132,17 @@ opened, and the crate returned `Ok` for all 19.
    characters is accepted by the crate and refused by Excel; 255 opens.
 3. *A sheet named `_x000D_` with an autofilter*, and a table named `_x000D_`. The sheet
    without the filter opens.
+
+**2 and 3 are fixed upstream, not released:** #217 was closed 2026-11-15 by commit
+`a94fc21cf` ("xmlwriter: escape tabs, CRs and _xHHHH_ strings in more places"), changelog
+entry `0.102.1`, which also adds an error for a column name over 255 characters. On
+2026-11-15 the report's headers plus both case-3 workbooks were built against main
+`a94fc21cf` and `=0.102.0` and opened with `scripts/excel_open_check.ps1` in Excel 16.0
+build 20527: 0.102.0 had 10 of 13 refused, with the line-feed control, 255 `x` and 127 emoji
+opening; main opened all 11 files it wrote and returned `Err` for 256 `x` and 128 emoji.
+Read back through COM, every main table column name equals its header cell, code point
+for code point (tab, CR, CR LF, `_x000D_`, `_x000d_`, `a_x0041_b`), the table named
+`_x000D_` keeps that name, and the `_x000D_` sheet keeps its filter.
 
 The realistic one for xlsxturbo is 2: a DataFrame column name with a tab or `\r\n` in it and
 a `table_style`. That one is guarded: `unwritable_table_header` (`src/parse/tables.rs`),
