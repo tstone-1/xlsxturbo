@@ -205,6 +205,62 @@ error. Three things matter for xlsxturbo in particular, whatever the final API l
 - *A pivot table over a table is refused by Excel, and one over other cells shows `#SPILL!`.*
   xlsxturbo writes tables by default paths (`table_style`), so placement needs a rule.
 
+**Re-run at `30147bb` (2026-11-17, the branch squashed to one commit after the maintainer's
+fixes).** Debug and release builds give the same output and nothing panics. The inputs that
+got the repair prompt are now handled. An error from `add_pivot_table()` or `save()`:
+duplicate headers (also by case, and a number `1` beside a string `"1"`), a blank header, the
+first body row below the last row, a source past the grid, a pivot table whose first cell is
+on a worksheet table, a chartsheet as the place of the pivot table, swapped rows or columns, a
+source with only a header row, a repeated value field name. Written and correct in Excel: a
+formula, boolean or rich string header. 36 workbooks that still save were opened in Excel 16.0
+build 20527 in two runs: every one opens with alerts off, and `scripts/excel_open_check.ps1`
+found no dialog for any of them. Each pivot table was refreshed and read back.
+What that showed:
+
+- *A constant-memory or low-memory source needs the new `PivotTable::set_field_names()`.*
+  Without it `save()` returns an error that names the method; with it the file is written, also
+  on a second save, and Excel fills the table. The crate does not read the cells of such a
+  sheet, so the names are not compared with them. `["A", "B", "C", "D"]` with row field `A`
+  over headers `Region, Item, Volume, Month` saves with `Ok`, and Excel shows an empty pivot
+  table (range `A3:C20`, no cells), with and without a value field; the two controls with the
+  right names are filled. xlsxturbo knows the DataFrame's column names, so it must pass exactly
+  those. On an in-memory sheet a mismatch is an error.
+- *Excel accepts a duplicate or blank header when the names stored in the file are valid.*
+  Supplied names `Region, Item, Volume, Month` over the cells `Region, Item, Volume, Item` open,
+  and Excel names the fourth field `Item2`; over a blank cell it is `Field4`. A formula header
+  that calculates to an existing name gives `Item2` too. So the repair prompt at `238bc5b` came
+  from the repeated or empty `cacheField` names in the file, not from the cells.
+- *A formula header takes the formula's stored result as the field name.* With the default
+  result that is `0`: a field given by the real header text fails at `save()` with "doesn't
+  match a header", and two such headers fail as a duplicated header `0`. When the file is
+  written, Excel calculates the formula and uses that text.
+- *A number header is known to the crate by its plain value and to Excel by its formatted
+  text.* `1000` with format `#,##0.00` is `1000` in the crate and `1,000.00` in Excel. A boolean
+  header is `TRUE` on both sides.
+- *The placement checks cover the first column of the pivot table, from its first cell down
+  to the first body row, at the time of `add_pivot_table()`.* A source comment says so: the
+  full size is not known before Excel refreshes. All of these save with `Ok` and show `#SPILL!`
+  in Excel: a worksheet table one row below the first cell, two pivot tables side by side (A3
+  and B3), a pivot table in the last column or the last row, and a sheet renamed to the source
+  sheet's name after the pivot table was added on its own data. A merged range added after the
+  pivot table is not checked either; the one tried (A3:B3) did not disturb the table. Placement
+  still needs a rule here.
+- *A chartsheet can be the source.* Cells written to a chartsheet are not saved, the pivot
+  table saves with `Ok`, and the refresh in Excel fails with "Reference isn't valid".
+- *Accepted by Excel as written:* headers that differ only by a trailing space (two fields), a
+  300-character header, a header with `& < " ' >`, one field as row and value field. A
+  protected pivot sheet still opens with an empty table that cannot refresh. The `u16` count of
+  pivot tables is not changed, as the maintainer said.
+
+Three method notes from this run. Reading a pivot table back through COM: with alerts off, the
+refresh on load had not run two seconds after `Workbooks.Open` for most files, so `TableRange2`
+was one cell and the field names were the ones stored in the file; call `RefreshTable()` first,
+then read. `excel_open_check.ps1` prints `REFUSED ... RPC_E_CALL_REJECTED ... no dialog, the
+workbook loaded` for a workbook that Excel is still refreshing; that line is not a refusal.
+And the first wrong-names case differed from its control in two things (the names and a
+missing value field), which an independent read-only review found; the claim held only after
+both controls were added.
+
 Two method corrections came out of an independent read-only review of those findings, and
 both generalise. A COM "refused" is not yet a repair prompt, which is why
 `scripts/excel_open_check.ps1` now reads the dialog. And a case that differs from its
