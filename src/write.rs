@@ -1,6 +1,8 @@
 //! Shared worksheet cell writers.
 
-use crate::parse::{naive_date_to_excel, naive_datetime_to_excel};
+use crate::parse::{
+    naive_date_to_excel, naive_datetime_to_excel, NaiveDate, NaiveDateTime, NaiveTime,
+};
 use crate::types::CellValue;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDate, PyDateTime, PyFloat, PyInt, PyString};
@@ -320,9 +322,8 @@ pub(crate) fn write_py_value_with_format(
         let nanosecond = (us_since_epoch.rem_euclid(1_000_000) as u32)
             .checked_mul(1_000)
             .ok_or("numpy datetime64 microsecond remainder exceeds nanosecond range")?;
-        let dt = chrono::DateTime::from_timestamp(seconds, nanosecond)
-            .ok_or_else(|| format!("Invalid numpy datetime64 timestamp: {}", us_since_epoch))?
-            .naive_utc();
+        let dt = NaiveDateTime::from_unix_seconds(seconds, nanosecond)
+            .ok_or_else(|| format!("Invalid numpy datetime64 timestamp: {}", us_since_epoch))?;
         let excel_dt = naive_datetime_to_excel(dt);
         // Dates before 1900-03-01 (serial 61) can't be represented correctly
         // due to Excel's 1900 leap-year bug; fall back to string.
@@ -392,20 +393,20 @@ pub(crate) fn write_py_value_with_format(
             .and_then(|v| v.checked_add(nanosecond_remainder))
             .ok_or("Datetime fractional seconds exceed nanosecond range")?;
 
-        let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
+        let date = NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
             format!(
                 "Invalid datetime date: year={}, month={}, day={}",
                 year, month, day
             )
         })?;
-        let time = chrono::NaiveTime::from_hms_nano_opt(hour, minute, second, nanosecond)
-            .ok_or_else(|| {
+        let time =
+            NaiveTime::from_hms_nano_opt(hour, minute, second, nanosecond).ok_or_else(|| {
                 format!(
                     "Invalid datetime time: hour={}, minute={}, second={}, nanosecond={}",
                     hour, minute, second, nanosecond
                 )
             })?;
-        let dt = chrono::NaiveDateTime::new(date, time);
+        let dt = NaiveDateTime::new(date, time);
         let excel_dt = naive_datetime_to_excel(dt);
         // Dates before 1900-03-01 (serial 61) can't be represented correctly
         // due to Excel's 1900 leap-year bug; fall back to string.
@@ -422,7 +423,7 @@ pub(crate) fn write_py_value_with_format(
     if value.cast::<PyDate>().is_ok() || type_name == "date" {
         let (year, month, day) = extract_ymd(value, "date")?;
 
-        let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
+        let date = NaiveDate::from_ymd_opt(year, month, day)
             .ok_or_else(|| format!("Invalid date: year={}, month={}, day={}", year, month, day))?;
         let excel_date = naive_date_to_excel(date);
         // Dates before 1900-03-01 (serial 61) can't be represented correctly

@@ -137,6 +137,10 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 - *`cargo llvm-cov` alone reports 26% and is wrong here* -- use `python scripts/coverage_report.py`, which merges the Rust and Python-driven profiles.
 - *There is no coverage threshold, and adding one would be a regression* -- a Coverage job failure means the measurement broke. Full text: [dev-docs/testing.md](dev-docs/testing.md#coverage-and-why-the-obvious-command-lies).
 
+## Dates and times are our own code
+
+- *`src/parse/civil.rs` replaced the unmaintained `chrono` and keeps its exact rules* -- year range, text leniencies and arithmetic were proven identical over every date and 80 million texts before the swap; do not replace it with a date crate without the same comparison. Full text: [dev-docs/testing.md](dev-docs/testing.md#replacing-a-dependency-run-both-side-by-side-before-the-old-one-goes).
+
 ## Property tests
 
 - *State a property as an equivalence, and mutate the code to prove the generator reaches the failing case* -- `".*"` generates short strings; `proptest-regressions/` is gitignored, promote a real failure to a named test. Full text: [dev-docs/testing.md](dev-docs/testing.md#property-tests).

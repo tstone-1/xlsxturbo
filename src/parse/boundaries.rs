@@ -10,9 +10,10 @@
 //! 1900-02-29 happened, and it did not, so serials 1 through 60 are off by one
 //! from any correct calendar and serial 60 denotes a day that never existed.
 
-use super::{naive_date_to_excel, naive_datetime_to_excel, parse_value};
+use super::{
+    naive_date_to_excel, naive_datetime_to_excel, parse_value, NaiveDate, NaiveDateTime, NaiveTime,
+};
 use crate::types::{CellValue, DateOrder};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
 /// Parse an ISO date/datetime string with the default ordering.
 fn parse(text: &str) -> CellValue {
@@ -108,7 +109,7 @@ fn excels_last_representable_day_is_still_a_date() {
 #[test]
 fn midnight_carries_no_fraction() {
     let d = date(2024, 1, 15);
-    let midnight = NaiveTime::from_hms_opt(0, 0, 0).expect("valid time");
+    let midnight = NaiveTime::from_hms_nano_opt(0, 0, 0, 0).expect("valid time");
     // A date and a datetime at midnight are the same number, so a column that
     // mixes the two does not sort into two groups.
     assert_eq!(
@@ -120,7 +121,7 @@ fn midnight_carries_no_fraction() {
 #[test]
 fn a_microsecond_before_midnight_is_still_the_same_day() {
     let d = date(2024, 1, 15);
-    let last = NaiveTime::from_hms_micro_opt(23, 59, 59, 999_999).expect("valid time");
+    let last = NaiveTime::from_hms_nano_opt(23, 59, 59, 999_999_000).expect("valid time");
     let serial = naive_datetime_to_excel(NaiveDateTime::new(d, last));
     assert!(serial < naive_date_to_excel(d) + 1.0);
     assert!(serial > naive_date_to_excel(d) + 0.999_999);
@@ -152,7 +153,7 @@ fn sub_microsecond_precision_near_midnight_rolls_into_the_next_day() {
 
 #[test]
 fn a_leap_second_lands_on_the_following_midnight() {
-    // `%S` accepts 60, so a CSV really can contain one. chrono represents it as
+    // `%S` accepts 60, so a CSV really can contain one. It is stored as
     // 23:59:59 plus a full extra second in the nanosecond field, which makes
     // the time fraction exactly 1.0 -- the leap second becomes the next day's
     // midnight.

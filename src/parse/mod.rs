@@ -1,6 +1,7 @@
 //! Parsing and utility functions.
 
 mod cell_refs;
+mod civil;
 mod colors;
 mod context;
 mod formats;
@@ -9,6 +10,9 @@ mod tables;
 mod values;
 
 pub(crate) use cell_refs::{looks_like_cell_reference, parse_cell_range, parse_cell_ref};
+pub(crate) use civil::{
+    naive_date_to_excel, naive_datetime_to_excel, NaiveDate, NaiveDateTime, NaiveTime,
+};
 pub(crate) use colors::{parse_color, parse_color_enum};
 pub(crate) use context::WithOptionContext;
 pub(crate) use formats::{
@@ -17,7 +21,7 @@ pub(crate) use formats::{
 };
 pub(crate) use patterns::matches_pattern;
 pub(crate) use tables::{parse_table_style, sanitize_table_name, unwritable_table_header};
-pub(crate) use values::{naive_date_to_excel, naive_datetime_to_excel, parse_value};
+pub(crate) use values::parse_value;
 
 #[cfg(test)]
 mod boundaries;
@@ -246,12 +250,10 @@ mod tests {
         let CellValue::DateTime(serial) = value else {
             panic!("expected datetime");
         };
-        let expected = super::naive_datetime_to_excel(
-            chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
-                .unwrap()
-                .and_hms_milli_opt(10, 30, 0, 250)
-                .unwrap(),
-        );
+        let expected = super::naive_datetime_to_excel(super::NaiveDateTime::new(
+            super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            super::NaiveTime::from_hms_nano_opt(10, 30, 0, 250_000_000).unwrap(),
+        ));
         assert!((serial - expected).abs() < 0.000000001);
     }
 
@@ -480,14 +482,14 @@ mod tests {
         // `test_parse_value_pre_march_1900_falls_back_to_string` for the
         // caller-facing guard that rejects this range instead of writing an
         // off-by-one date.
-        let date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+        let date = super::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
         assert_eq!(naive_date_to_excel(date), 2.0);
     }
 
     #[test]
     fn test_naive_date_to_excel_known_date() {
         // 2024-01-15 is a known Excel serial date
-        let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let date = super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         assert_eq!(naive_date_to_excel(date), 45306.0);
     }
 
@@ -495,7 +497,7 @@ mod tests {
     fn test_naive_date_to_excel_boundary() {
         // 1900-03-01 is the first date the epoch-based formula gets right
         // (serial 61); everything before it is rejected by parse_value.
-        let date = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).unwrap();
+        let date = super::NaiveDate::from_ymd_opt(1900, 3, 1).unwrap();
         assert_eq!(naive_date_to_excel(date), 61.0);
     }
 
@@ -684,10 +686,10 @@ mod tests {
 
     #[test]
     fn test_naive_datetime_to_excel_noon() {
-        let dt = chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
-            .unwrap()
-            .and_hms_opt(12, 0, 0)
-            .unwrap();
+        let dt = super::NaiveDateTime::new(
+            super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            super::NaiveTime::from_hms_nano_opt(12, 0, 0, 0).unwrap(),
+        );
         let result = super::naive_datetime_to_excel(dt);
         // 2024-01-15 = 45306.0, noon = 0.5
         assert!((result - 45306.5).abs() < 0.001);
@@ -695,30 +697,30 @@ mod tests {
 
     #[test]
     fn test_naive_datetime_to_excel_midnight() {
-        let dt = chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap();
+        let dt = super::NaiveDateTime::new(
+            super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            super::NaiveTime::from_hms_nano_opt(0, 0, 0, 0).unwrap(),
+        );
         let result = super::naive_datetime_to_excel(dt);
         assert!((result - 45306.0).abs() < 0.001);
     }
 
     #[test]
     fn test_naive_datetime_to_excel_end_of_day() {
-        let dt = chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
-            .unwrap()
-            .and_hms_opt(23, 59, 59)
-            .unwrap();
+        let dt = super::NaiveDateTime::new(
+            super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            super::NaiveTime::from_hms_nano_opt(23, 59, 59, 0).unwrap(),
+        );
         let result = super::naive_datetime_to_excel(dt);
         assert!((result - 45307.0).abs() < 0.001); // just under next day
     }
 
     #[test]
     fn test_naive_datetime_to_excel_fractional_seconds() {
-        let dt = chrono::NaiveDate::from_ymd_opt(2024, 1, 15)
-            .unwrap()
-            .and_hms_micro_opt(12, 0, 0, 500_000)
-            .unwrap();
+        let dt = super::NaiveDateTime::new(
+            super::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            super::NaiveTime::from_hms_nano_opt(12, 0, 0, 500_000_000).unwrap(),
+        );
         let result = super::naive_datetime_to_excel(dt);
         assert!((result - 45306.50000578704).abs() < 0.000000001);
     }

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The `chrono` crate is no longer a dependency. It is unmaintained
+  ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543)), and xlsxturbo
+  used it only to check a date, count days and match the ten date and datetime patterns
+  of CSV type detection. That code is now in the project (`src/parse/civil.rs`). Output
+  does not change: before `chrono` was removed, both ran side by side over all
+  191,491,529 dates of the accepted year range, 899,496 times of day, 43 million
+  timestamps and 80 million generated texts, and every result was identical to the bit.
+  17 other crates that only `chrono` needed left the build, and
+  `THIRD-PARTY-LICENSES.md` is shorter by those.
+
 ## [1.13.2] - 2026-11-13
 
 ### Fixed

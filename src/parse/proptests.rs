@@ -30,7 +30,7 @@ use super::tables::is_logical_constant;
 use super::{
     looks_like_cell_reference, matches_pattern, naive_date_to_excel, naive_datetime_to_excel,
     parse_cell_range, parse_cell_ref, parse_color, parse_table_style, parse_value,
-    sanitize_table_name,
+    sanitize_table_name, NaiveDate, NaiveDateTime, NaiveTime,
 };
 use crate::types::{CellValue, DateOrder};
 use proptest::prelude::*;
@@ -602,8 +602,8 @@ proptest! {
     /// *non-uniform* shift, which it would not.
     #[test]
     fn excel_serials_are_linear_from_a_known_anchor(days in 0i64..80_000) {
-        let anchor = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
-        let date = anchor + chrono::Duration::days(days);
+        let anchor = NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
+        let date = anchor.plus_days(days);
         prop_assert_eq!(naive_date_to_excel(date), FIRST_SANE_SERIAL + days as f64);
     }
 
@@ -611,10 +611,10 @@ proptest! {
     /// serial `naive_date_to_excel` would give it.
     #[test]
     fn iso_dates_agree_with_the_serial_conversion(days in 0i64..80_000) {
-        let anchor = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
-        let date = anchor + chrono::Duration::days(days);
+        let anchor = NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
+        let date = anchor.plus_days(days);
         let expected = naive_date_to_excel(date);
-        let parsed = parse_value(&date.format("%Y-%m-%d").to_string(), DateOrder::Auto);
+        let parsed = parse_value(&date.iso(), DateOrder::Auto);
         prop_assert!(
             matches!(parsed, CellValue::Date(got) if got == expected),
             "expected Date({}), got {:?}", expected, parsed
@@ -624,11 +624,11 @@ proptest! {
     /// A datetime serial splits cleanly: whole part the date, fraction the time.
     #[test]
     fn datetime_serials_split_into_date_and_time(days in 0i64..80_000, secs in 0u32..86_400) {
-        let anchor = chrono::NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
-        let date = anchor + chrono::Duration::days(days);
-        let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, 0)
+        let anchor = NaiveDate::from_ymd_opt(1900, 3, 1).expect("valid date");
+        let date = anchor.plus_days(days);
+        let time = NaiveTime::from_hms_nano_opt(secs / 3_600, secs / 60 % 60, secs % 60, 0)
             .expect("seconds are within a day");
-        let serial = naive_datetime_to_excel(date.and_time(time));
+        let serial = naive_datetime_to_excel(NaiveDateTime::new(date, time));
         prop_assert_eq!(serial.floor(), naive_date_to_excel(date));
         prop_assert!((serial.fract() - secs as f64 / 86_400.0).abs() < 1e-9);
     }
@@ -639,9 +639,10 @@ proptest! {
     /// the property the two `excel_dt < 61.0` guards in `values.rs` exist for.
     #[test]
     fn dates_in_the_1900_gap_fall_back_to_string(day in 1u32..=59) {
-        let date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date")
-            + chrono::Duration::days(i64::from(day) - 1);
-        let text = date.format("%Y-%m-%d").to_string();
+        let date = NaiveDate::from_ymd_opt(1900, 1, 1)
+            .expect("valid date")
+            .plus_days(i64::from(day) - 1);
+        let text = date.iso();
         let parsed = parse_value(&text, DateOrder::Auto);
         prop_assert!(
             matches!(&parsed, CellValue::String(got) if got == &text),
