@@ -152,3 +152,6 @@ strict = ["python/xlsxturbo"]
 # scripts (asserts and non-crypto random data generation are expected there).
 [tool.bandit]
 exclude_dirs = ["tests", "benchmarks", "target", ".venv"]
+
+[tool.uv]
+exclude-newer = "3 days"  # only resolve releases at least 3 days old
