@@ -171,6 +171,46 @@ name, so pair them with sheets by `localSheetId`, never by position; and the man
 for `formula_columns`, `defined_names` values and `num_format` in the first run are invalid
 input, not defects.
 
+**Filed as [#221](https://github.com/jmcnamara/rust_xlsxwriter/issues/221), open
+(2026-11-17): a failed `Workbook::save(path)` leaves a 0-byte file and replaces a workbook
+that was at that path.** `save()` calls `File::create(path)` before `save_internal()`, and
+the save-time checks (duplicate table names, a chart series naming a missing sheet) run
+inside it. Measured on 0.102.0 and main `e6476c5`: 5437 bytes before, `Err(NameReused)`,
+0 bytes after. `save_to_buffer()` is not affected, and `save_to_writer()` returns these
+errors before it writes. **xlsxturbo is not affected and must stay that way:** `src/workbook.rs`
+saves through `save_to_writer()` into a temporary file and renames it on success. Do not
+replace that path with `Workbook::save()`, also not after #221 is closed without reading
+what the fix covers: a check moved before `File::create` does not help an error that occurs
+while the parts are written.
+
+**Pivot tables are upstream PR [#220](https://github.com/jmcnamara/rust_xlsxwriter/pull/220),
+not merged (2026-11-17). Before xlsxturbo exposes them, read the comment posted there.**
+The branch at `238bc5b` was probed with about 130 workbooks, each opened in Excel 16.0 build
+20527 with the dialog text read. Normal use works (all 36 combinations of layout, field shape
+and grand totals). Inputs that saved with `Ok` and got Excel's repair prompt: two source
+headers with the same name, also when they differ only by case and when the pivot table uses
+neither; a blank header; a header cell that is a formula, a boolean or a rich string (written
+as `<cacheField name="">`); a filter field that moves the table body below the last row; a
+source range past the grid; a pivot table placed on a worksheet table; first and last source
+column swapped (panic in a debug build). A pivot table on a chartsheet is dropped without an
+error. Three things matter for xlsxturbo in particular, whatever the final API looks like:
+
+- *The header row is read from the worksheet's in-memory cells at save time.* A source on a
+  constant-memory worksheet cannot be used: the header row is flushed and its strings are
+  `InlineString`, so every field lookup fails with "doesn't match a header in the source
+  data". xlsxturbo's `constant_memory` path would need its own refusal.
+- *Column names come from the DataFrame, so duplicate and empty names are ordinary input
+  here.* Each needs a pre-check with a `ConfigurationError` unless the released crate
+  validates them itself; re-run the cases against the release, do not assume.
+- *A pivot table over a table is refused by Excel, and one over other cells shows `#SPILL!`.*
+  xlsxturbo writes tables by default paths (`table_style`), so placement needs a rule.
+
+Two method corrections came out of an independent read-only review of those findings, and
+both generalise. A COM "refused" is not yet a repair prompt, which is why
+`scripts/excel_open_check.ps1` now reads the dialog. And a case that differs from its
+control in two things proves nothing about either: three of the first cases needed a second
+control before the claim held.
+
 ## Name validation is ours now — upstream has drawn its line
 
 On 2026-08-21 the rust_xlsxwriter maintainer closed the validation half of
