@@ -49,6 +49,7 @@
 - If multiple version-bump commits are awaiting release, tag each released version at its own commit; do not collapse distinct versions into one tag.
 - Linux release wheels intentionally use `manylinux_2_28` with maturin's `--find-interpreter` and PyO3 `abi3-py311`. Do not switch back to automatic manylinux selection without verifying Python 3.11+ abi3 wheels. (Raised from `abi3-py39` in 1.1.0 and `abi3-py310` in 1.13.0.)
 - *The release workflow smoke-tests every published wheel on a runner of its own architecture* -- each leg asserts its wheel's platform tag; `tests/test_stability_policy.py` ties the build and smoke matrices to `docs/stability.md`. Full text: [dev-docs/testing.md](dev-docs/testing.md).
+- *To build against a crate release still inside the 3-day publish-age window, use a scratch worktree with a `[patch]` to its git tag and a raised requirement* -- never the repo; copy back without the patch. Full text: [dev-docs/build-and-release.md](dev-docs/build-and-release.md#building-against-a-crate-release-inside-the-3-day-window).
 - *Confirm a release at `https://pypi.org/pypi/xlsxturbo/<version>/json`* -- the aggregate endpoint lags minutes behind. Full text: [dev-docs/build-and-release.md](dev-docs/build-and-release.md#confirming-a-release-on-pypi).
 - For multi-phase implementation work, run a deep diff review after each completed, verified phase before building the next phase on top of it.
 
@@ -78,10 +79,9 @@ Read [dev-docs/adding-a-feature.md](dev-docs/adding-a-feature.md) in full before
 - *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
 - *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
 - *Closed: #213, `TempFileError` drops the `io::Error`* -- fixed in rust_xlsxwriter 0.101.0; `temp_file_failure` now maps the `io::Error`, so a refused temporary folder is `FilePermissionError`. No open upstream defect is pinned now.
-- *Fixed in rust_xlsxwriter 0.103.0 (2026-11-18), not yet taken here: a sheet named `TRUE` or `FALSE` with `autofilter=True` gives a workbook Excel cannot open* -- upstream commit `0c034f85b`; no guard or test here yet. The 3-day publish-age rule holds 0.103.0 back until 2026-11-21 23:25 UTC.
-- *Filed as #216 and #217, both fixed in 0.103.0, not yet taken here: three more ways rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open* -- control characters in attributes, a tab or CR in a table column header, `_x000D_`-shaped names. Only the header case is guarded (`unwritable_table_header`); see the notes before removing it.
+- *Closed by rust_xlsxwriter 0.103.0: #216, #217 and the unquoted `TRUE`/`FALSE` sheet name* -- `tests/test_attribute_escaping.py` and `tests/test_table_headers.py` pin the escaped output; `unwritable_table_header` keeps only the 255-unit length rule, for its clearer message.
 - *Filed as #221, fixed in 0.103.0: a failed `Workbook::save(path)` leaves a 0-byte file and replaces an existing workbook* -- xlsxturbo saves through `save_to_writer()` into a temporary file and renames it; keep that path.
-- *Pivot tables shipped in 0.103.0 (`PivotTable`; PR #220 was closed, the feature landed separately): read the findings before exposing them* -- at `238bc5b` bad headers got Excel's repair prompt; `30147bb` handles them; a constant-memory source needs `set_field_names()`, wrong names there give an empty table, and placement is checked in the first column only.
+- *Pivot tables are `pivot_tables`, on rust_xlsxwriter 0.103.0's `PivotTable`: read the branch findings before changing `src/apply/pivot.rs`* -- the field names are always passed with `set_field_names()` (wrong ones give an empty table), and the crate checks placement in the first column only.
 
 ## Name validation is ours now — upstream has drawn its line
 
@@ -130,6 +130,7 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 ## Python Lint, Type, and Security Gates
 
 - *ruff, bandit, pyright and pytest run from the project-local `.venv`* -- `.venv\Scripts\<tool>.exe` on Windows, `.venv/bin/<tool>` elsewhere: `ruff check python tests benchmarks scripts`, `bandit -c pyproject.toml -r python`, `pyright`, `python -m pytest tests/ -q`.
+- *There is no formatter gate; never run `ruff format`* -- the tree is not formatted with it, so it rewrites `cli.py`, `types.py` and most of `tests/`; `ruff check` is the gate.
 - *Their scopes are deliberate; do not widen them* -- pyright strict on `python/xlsxturbo` only, `pythonPlatform = "Linux"`, bandit on `python/` only. Full text: [dev-docs/python-gates.md](dev-docs/python-gates.md).
 
 ## Coverage, and why the obvious command lies

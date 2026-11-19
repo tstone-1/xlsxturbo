@@ -72,6 +72,7 @@ from xlsxturbo.types import (
     ConditionalFormat,
     HeaderFormat,
     ImageOptions,
+    PivotTableOptions,
     RichTextFormat,
     SheetOptions,
     SparklineOptions,
@@ -153,6 +154,7 @@ class ExportOptions:
     textboxes: Mapping[str, str | TextboxOptions] | None = _UNSET
     charts: Mapping[str, ChartOptions] | None = _UNSET
     sparklines: Mapping[str, SparklineOptions] | None = _UNSET
+    pivot_tables: Mapping[str, PivotTableOptions] | None = _UNSET
 
     # Placement
     startrow: int | None = _UNSET

@@ -21,3 +21,36 @@ This repo uses a project-local `.venv` (an exception to any central-venv convent
 ## Confirming a release on PyPI
 
 To confirm a release on PyPI, query the version-specific endpoint `https://pypi.org/pypi/xlsxturbo/<version>/json` (authoritative within seconds). The aggregate `https://pypi.org/pypi/xlsxturbo/json` `info.version` field lags several minutes behind (CDN cache) and can still show the previous version; trust the publish job's green status over it.
+
+## Building against a crate release inside the 3-day window
+
+`~/.cargo/config.toml` holds `global-min-publish-age = "3 days"`, so `cargo update` does not
+resolve a crate version published less than three days ago. To write and test the code for
+such a release before then (done for rust_xlsxwriter 0.103.0 on 2026-11-19, with the
+owner's agreement), use a throwaway worktree, never the repo:
+
+1. `git worktree add --detach <scratch>/wt HEAD`, then `git diff HEAD --binary | git -C <scratch>/wt apply`.
+2. In the worktree's `Cargo.toml`, raise the requirement to the new version *and* add
+   `[patch.crates-io] <crate> = { git = "<repo url>", tag = "v<version>" }`. Without the
+   raised requirement cargo prints "patch ... was not used" and keeps the old version,
+   because `"0.102.0"` means `^0.102`, which excludes 0.103.
+3. `cargo update -p <crate>`, give the worktree its own venv
+   (`uv venv`, then `uv pip install -e ".[dev]" -r requirements-test.txt`) and run every gate there.
+4. Copy the changed files back except `Cargo.toml`'s `[patch]` block and `Cargo.lock`, and
+   check each copy with `cmp`. The repo then fails `cargo build` with "failed to select a
+   version" until the window ends, when one `cargo update -p <crate>` takes the registry copy.
+
+   For 0.103.0 the owner chose not to wait, so that `main` could hold the work and the
+   release be tagged from any machine: once the comparison below held,
+   `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p rust_xlsxwriter` took the
+   registry copy the same day, and every gate ran again in the repo.
+
+Building runs the new crate's code on this machine early, which is what the window exists
+to delay: check first that it has no `build.rs` and no new required dependencies.
+Regenerate `THIRD-PARTY-LICENSES.md` after the registry update, not from the worktree:
+the git source sorts the crate to another place in its license block, which
+`tests/test_third_party_licenses.py` does not see (it compares names and versions) and
+`scripts/gen_third_party_licenses.py --check` does. Before the copy-back, compare the
+published `.crate` with the tag: its checksum against the index, its
+`.cargo_vcs_info.json` commit against the tag, and every file with `cmp`
+(`Cargo.toml.orig` against the tag's `Cargo.toml`).

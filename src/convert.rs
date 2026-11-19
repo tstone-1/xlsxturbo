@@ -3,8 +3,8 @@
 use crate::apply::{
     apply_cells, apply_charts, apply_checkboxes, apply_column_widths,
     apply_column_widths_with_autofit_cap, apply_comments, apply_conditional_formats,
-    apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_rich_text,
-    apply_sparklines, apply_textboxes, apply_validations,
+    apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_pivot_tables,
+    apply_rich_text, apply_sparklines, apply_textboxes, apply_validations, FrameArea, PivotRequest,
 };
 use crate::errors::FileFailure;
 use crate::parse::{
@@ -535,6 +535,21 @@ pub(crate) struct FrameOutcome {
     pub(crate) col_count: u16,
     /// Estimated width per frame column; empty unless the capped autofit is on.
     pub(crate) content_widths: Vec<f64>,
+    /// The header texts in column order, formula columns last: what a pivot
+    /// table over this frame takes as its field names.
+    pub(crate) header_names: Vec<String>,
+}
+
+/// The cells a frame wrote, header and formula columns included, or `None`
+/// when it wrote no cell at all.
+pub(crate) fn frame_area(sheet: &str, startrow: u32, frame: &FrameOutcome) -> Option<FrameArea> {
+    (frame.rows > 0 && frame.total_cols > 0).then(|| FrameArea {
+        sheet: sheet.to_string(),
+        first_row: startrow,
+        first_col: 0,
+        last_row: startrow + frame.rows - 1,
+        last_col: frame.total_cols - 1,
+    })
 }
 
 /// Write one frame to a worksheet: its header, its data and the features bound
@@ -743,12 +758,20 @@ pub(crate) fn write_frame(
         opts,
     )?;
 
+    // Formula columns follow the frame's own, in the order they were given.
+    let mut header_names = columns;
+    if let Some(formulas) = opts.formula_columns {
+        let added = usize::from(total_cols - col_count);
+        header_names.extend(formulas.keys().take(added).cloned());
+    }
+
     Ok(FrameOutcome {
         // Rows written, not the last row index: the offset is not part of the frame.
         rows: row_idx - config.startrow,
         total_cols,
         col_count,
         content_widths,
+        header_names,
     })
 }
 
@@ -910,7 +933,7 @@ pub(crate) fn write_configured_sheet(
     sheet_name: &str,
     config: &WriteConfig<'_>,
     opts: EffectiveOpts<'_>,
-) -> Result<(u32, u16), ConvertError> {
+) -> Result<FrameOutcome, ConvertError> {
     let worksheet = add_named_worksheet(workbook, sheet_name, config.constant_memory)?;
     let frame =
         write_frame(py, worksheet, sheet_name, df, config, &opts).map_err(ConvertError::Config)?;
@@ -923,14 +946,23 @@ pub(crate) fn write_configured_sheet(
     )
     .map_err(ConvertError::Config)?;
     apply_cell_options(py, worksheet, config, &opts).map_err(ConvertError::Config)?;
-    Ok((frame.rows, frame.total_cols))
+    Ok(frame)
 }
 
 /// Complex feature options that still work under `constant_memory` because they
 /// are applied during the data-write phase (in `write_frame`) or once per sheet
 /// (`finish_sheet`), without revisiting a row. Every other present complex
 /// option is skipped.
-const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &["column_widths", "header_format", "column_formats"];
+///
+/// `pivot_tables` is applied after every sheet, but writes no cell: it needs
+/// only the frame's header texts, which xlsxturbo passes with
+/// `set_field_names()` because the crate cannot read a flushed header row.
+const CONSTANT_MEMORY_SAFE_OPTIONS: &[&str] = &[
+    "column_widths",
+    "header_format",
+    "column_formats",
+    "pivot_tables",
+];
 
 /// Emit a `RuntimeWarning` listing the features that `constant_memory` mode
 /// skips. The complex-feature list is derived from
@@ -1327,7 +1359,7 @@ pub(crate) fn convert_dataframe_to_xlsx(
 ) -> Result<(u32, u16), ConvertError> {
     let mut workbook = rust_xlsxwriter::Workbook::new();
 
-    let result = write_configured_sheet(
+    let frame = write_configured_sheet(
         py,
         &mut workbook,
         df,
@@ -1336,9 +1368,30 @@ pub(crate) fn convert_dataframe_to_xlsx(
         opts.as_effective(),
     )?;
 
+    if let Some(tables) = opts.pivot_tables.as_ref().filter(|t| !t.is_empty()) {
+        let areas: Vec<FrameArea> = frame_area(sheet_name, config.startrow, &frame)
+            .into_iter()
+            .collect();
+        let request = PivotRequest {
+            area: frame_area(sheet_name, config.startrow, &frame),
+            sheet: sheet_name.to_string(),
+            header: config.include_header,
+            field_names: frame.header_names.clone(),
+            tables,
+        };
+        apply_pivot_tables(
+            py,
+            &mut workbook,
+            &[sheet_name.to_string()],
+            &areas,
+            &[request],
+        )
+        .map_err(ConvertError::Config)?;
+    }
+
     finish_workbook(py, &mut workbook, options, output)?;
 
-    Ok(result)
+    Ok((frame.rows, frame.total_cols))
 }
 
 #[cfg(test)]

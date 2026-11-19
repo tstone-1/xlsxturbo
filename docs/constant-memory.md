@@ -47,7 +47,7 @@ xlsxturbo.dfs_to_xlsx([
 - `sparklines`
 - `cells`
 
-Plain `column_widths`, `header_format`, and `column_formats` remain supported. So do
+Plain `column_widths`, `header_format`, `column_formats` and `pivot_tables` remain supported. So do
 `freeze_panes`, `autofilter`, `tab_color` and `startrow`, which are properties of the sheet
 and need no second pass over the rows. `compression_level` applies too: it is set when the
 file is saved.

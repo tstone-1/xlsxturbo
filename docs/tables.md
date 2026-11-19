@@ -135,19 +135,18 @@ name you never typed is not a mystery.
 
 ### Column names a table cannot carry
 
-A table takes its column names from the header row, and Excel is stricter about a table
-column name than about a header cell. A column name is refused with `table_style` when it
-
-- contains a tab, a carriage return or another control character (a line feed is fine),
-- contains text of the form `_x000D_` (`_x`, four hex digits, `_`), which Excel reads as an
-  escaped character, or
-- is longer than 255 characters.
+A table takes its column names from the header row, and Excel allows at most 255
+characters in a table column name. A longer column name is refused with `table_style`:
 
 ```python
-df = pd.DataFrame({"Net\tAmount": [1, 2]})
+df = pd.DataFrame({"x" * 256: [1, 2]})
 xlsxturbo.df_to_xlsx(df, "report.xlsx", table_style="Medium2")
-# ConfigurationError: sheet 'Sheet1': column "Net\tAmount" cannot be the header of a
-# table: it contains a tab. Rename the column, or leave out table_style for this sheet.
+# ConfigurationError: sheet 'Sheet1': column "xxx...xxx" cannot be the header of a
+# table: it is 256 characters long and Excel allows 255. Rename the column, or leave
+# out table_style for this sheet.
 ```
+
+Tabs, carriage returns, other control characters and text of the form `_x000D_` are
+written into the table as Excel writes them. Up to 1.13.2 they were refused here too.
 
 The same column name is written as it is on a sheet without a table.

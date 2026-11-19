@@ -24,16 +24,18 @@ pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertErro
 pub use types::DateOrder;
 pub use workbook::Destination;
 
+use apply::{apply_pivot_tables, FrameArea, PivotRequest};
 use convert::{
     add_named_worksheet, apply_cell_options, claimed_table_name, convert_dataframe_to_xlsx,
-    dataframe_row_count, finish_sheet, finish_workbook, write_frame, FrameOutcome, WorkbookOptions,
+    dataframe_row_count, finish_sheet, finish_workbook, frame_area, write_frame, FrameOutcome,
+    WorkbookOptions,
 };
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
     extract_column_widths, extract_comments, extract_conditional_formats, extract_formula_columns,
     extract_header_format, extract_hyperlinks, extract_images, extract_merged_ranges,
-    extract_rich_text, extract_row_heights, extract_sheet_info, extract_sparklines,
-    extract_textboxes, extract_validations,
+    extract_pivot_tables, extract_rich_text, extract_row_heights, extract_sheet_info,
+    extract_sparklines, extract_textboxes, extract_validations,
 };
 use types::pytype_name;
 use types::ExtractedOptions;
@@ -295,6 +297,7 @@ struct RawOptions<'a, 'py> {
     textboxes: Option<&'a Bound<'py, PyAny>>,
     charts: Option<&'a Bound<'py, PyAny>>,
     sparklines: Option<&'a Bound<'py, PyAny>>,
+    pivot_tables: Option<&'a Bound<'py, PyAny>>,
     cells: Option<&'a Bound<'py, PyAny>>,
 }
 
@@ -362,6 +365,10 @@ fn extract_options(raw: &RawOptions<'_, '_>) -> PyResult<ExtractedOptions> {
         sparklines: raw
             .sparklines
             .map(|v| require_dict(v, "sparklines").and_then(|d| extract_sparklines(&d)))
+            .transpose()?,
+        pivot_tables: raw
+            .pivot_tables
+            .map(|v| require_dict(v, "pivot_tables").and_then(|d| extract_pivot_tables(&d)))
             .transpose()?,
         cells: raw
             .cells
@@ -709,6 +716,19 @@ fn csv_to_xlsx(
 ///                 negative_points, show_axis, color and the *_point colors, line_weight,
 ///                 custom_max, custom_min, group_max, group_min, date_range.
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
+///     pivot_tables: Dict mapping a location to a native Excel pivot table over this frame
+///                   (default: None). The source is the frame's written range, header row
+///                   and formula columns included, so every field is one of its headers.
+///                   "A3" places it on the frame's own sheet; "Summary!A3" on sheet
+///                   "Summary", created empty after every other sheet when the workbook
+///                   has none of that name. An anchor inside any frame is refused. Excel
+///                   builds the table when the file is opened, so anything to the right of
+///                   or below the anchor can make it show #SPILL!. Keys: rows, columns,
+///                   filters (lists of column names), values (column names, or dicts with
+///                   field, function, name, num_format), style ("Light16" default, None
+///                   for none), layout ("compact", "outline", "tabular"),
+///                   row_grand_totals, column_grand_totals.
+///                   Example: {"Summary!A3": {"rows": ["Region"], "values": ["Volume"]}}
 ///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
 ///               starts on the row below it (default: None, which is row 0). The rows above stay free for
 ///               cells, merged_ranges and rich_text. Cell references in every option stay
@@ -788,6 +808,7 @@ fn csv_to_xlsx(
     defined_names = None,
     cells = None,
     sparklines = None,
+    pivot_tables = None,
     startrow = None,
     autofilter = false,
     tab_color = None,
@@ -823,6 +844,7 @@ fn df_to_xlsx<'py>(
     defined_names: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
+    pivot_tables: Option<&Bound<'py, PyAny>>,
     startrow: Option<&Bound<'py, PyAny>>,
     autofilter: bool,
     tab_color: Option<&Bound<'py, PyAny>>,
@@ -852,6 +874,7 @@ fn df_to_xlsx<'py>(
         textboxes,
         charts,
         sparklines,
+        pivot_tables,
         cells,
     })?;
 
@@ -1014,6 +1037,19 @@ fn version() -> &'static str {
 ///                 Range key (e.g. "D2:D10") makes a grouped sparkline; single cell makes one.
 ///                 "range" must be sheet-qualified, e.g. "Sheet1!A2:C10".
 ///                 Example: {"D2:D10": {"range": "Sheet1!A2:C10", "type": "line", "markers": True}}
+///     pivot_tables: Dict mapping a location to a native Excel pivot table over this frame
+///                   (default: None). The source is the frame's written range, header row
+///                   and formula columns included, so every field is one of its headers.
+///                   "A3" places it on the frame's own sheet; "Summary!A3" on sheet
+///                   "Summary", created empty after every other sheet when the workbook
+///                   has none of that name. An anchor inside any frame is refused. Excel
+///                   builds the table when the file is opened, so anything to the right of
+///                   or below the anchor can make it show #SPILL!. Keys: rows, columns,
+///                   filters (lists of column names), values (column names, or dicts with
+///                   field, function, name, num_format), style ("Light16" default, None
+///                   for none), layout ("compact", "outline", "tabular"),
+///                   row_grand_totals, column_grand_totals.
+///                   Example: {"Summary!A3": {"rows": ["Region"], "values": ["Volume"]}}
 ///     startrow: Zero-based sheet row of the header, as in pandas' to_excel; the data
 ///               starts on the row below it (default: None, which is row 0). The rows above stay free for
 ///               cells, merged_ranges and rich_text. Cell references in every option stay
@@ -1094,6 +1130,7 @@ fn version() -> &'static str {
     defined_names = None,
     cells = None,
     sparklines = None,
+    pivot_tables = None,
     startrow = None,
     autofilter = false,
     tab_color = None,
@@ -1128,6 +1165,7 @@ fn dfs_to_xlsx<'py>(
     defined_names: Option<&Bound<'py, PyAny>>,
     cells: Option<&Bound<'py, PyAny>>,
     sparklines: Option<&Bound<'py, PyAny>>,
+    pivot_tables: Option<&Bound<'py, PyAny>>,
     startrow: Option<&Bound<'py, PyAny>>,
     autofilter: bool,
     tab_color: Option<&Bound<'py, PyAny>>,
@@ -1165,6 +1203,7 @@ fn dfs_to_xlsx<'py>(
         textboxes,
         charts,
         sparklines,
+        pivot_tables,
         cells,
     })?;
 
@@ -1356,6 +1395,41 @@ fn dfs_to_xlsx<'py>(
                     })?;
             }
         }
+    }
+
+    // Pivot tables go last: one may be placed on a sheet a later entry wrote, or
+    // on a new sheet, and every frame must be known to keep its anchor out of them.
+    let sheet_name_of = |index: usize| entries[entries[index].first].name.as_str();
+    let requests: Vec<PivotRequest<'_>> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let tables = effective[index].pivot_tables.filter(|t| !t.is_empty())?;
+            Some(PivotRequest {
+                area: frame_area(sheet_name_of(index), entry.startrow, &frames[index]),
+                sheet: sheet_name_of(index).to_string(),
+                header: entry.header,
+                field_names: frames[index].header_names.clone(),
+                tables,
+            })
+        })
+        .collect();
+    if !requests.is_empty() {
+        let sheet_names: Vec<String> = entries
+            .iter()
+            .enumerate()
+            .filter(|&(index, entry)| entry.first == index)
+            .map(|(_, entry)| entry.name.clone())
+            .collect();
+        let areas: Vec<FrameArea> = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                frame_area(sheet_name_of(index), entry.startrow, &frames[index])
+            })
+            .collect();
+        apply_pivot_tables(py, &mut workbook, &sheet_names, &areas, &requests)
+            .map_err(errors::configuration)?;
     }
 
     reject_table_name_collisions(&table_names, defined_names.as_ref())

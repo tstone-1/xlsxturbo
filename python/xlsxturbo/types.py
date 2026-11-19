@@ -57,6 +57,10 @@ __all__ = [
     "ImageOptions",
     "OutputTarget",
     "PathArg",
+    "PivotFunction",
+    "PivotLayout",
+    "PivotTableOptions",
+    "PivotValueField",
     "RichTextFormat",
     "SheetOptions",
     "SparklineOptions",
@@ -404,6 +408,50 @@ class ChartOptions(_ChartRequired, total=False):
     show_legend: bool  # Show chart legend (default True)
     legend_position: Literal["right", "left", "top", "bottom", "top_right"]
 
+
+PivotFunction = Literal[
+    "sum", "count", "average", "max", "min", "product",
+    "count_numbers", "std_dev", "std_dev_p", "var", "var_p",
+]
+PivotLayout = Literal["compact", "outline", "tabular"]
+
+
+class _PivotValueFieldRequired(TypedDict):
+    """Required field of :class:`PivotValueField`; see there for the full shape."""
+
+    field: str  # A column name of the frame
+
+
+class PivotValueField(_PivotValueFieldRequired, total=False):
+    """One value field of a pivot table: a column and how it is summarised."""
+
+    function: PivotFunction  # How the values are summarised (default 'sum')
+    name: str  # Caption in the pivot table (default Excel's, e.g. 'Sum of Volume')
+    num_format: str  # Excel number format of the values, e.g. '#,##0.00'
+
+
+class PivotTableOptions(TypedDict, total=False):
+    """Options for a native Excel pivot table over the frame it is given with.
+
+    The source is always the frame's own written range, header row included, so
+    every field is a column name of that frame. All keys are optional; a pivot
+    table with no fields is valid and shows Excel's empty field list.
+
+    The pivot data is not stored in the file: Excel builds it from the source
+    when the workbook is opened. An application that does not refresh pivot
+    tables on load shows an empty table, and Excel asks to save on close.
+    """
+
+    rows: list[str]  # Row fields, outermost first
+    columns: list[str]  # Column fields, outermost first
+    filters: list[str]  # Filter (page) fields, shown above the table
+    values: list[str | PivotValueField]  # A bare column name sums that column
+    style: str | None  # 'Light16' (default) ... 'Medium28', 'Dark1'...; None: no style
+    layout: PivotLayout  # Default 'compact'
+    row_grand_totals: bool  # Default True
+    column_grand_totals: bool  # Default True
+
+
 SparklineType = Literal["line", "column", "col", "win_loss", "win_lose", "winloss", "winlose"]
 
 
@@ -517,5 +565,6 @@ class SheetOptions(TypedDict, total=False):
     textboxes: Mapping[str, str | TextboxOptions] | None  # Cell ref -> text or textbox options
     charts: Mapping[str, ChartOptions] | None  # Cell ref -> native Excel chart options
     sparklines: Mapping[str, SparklineOptions] | None  # Location ref -> sparkline options
+    pivot_tables: Mapping[str, PivotTableOptions] | None  # 'A3' or 'Sheet!A3' -> pivot table over this frame
     # Cell ref -> value or options
     cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None

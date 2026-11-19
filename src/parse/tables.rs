@@ -129,46 +129,21 @@ pub(crate) fn sanitize_table_name(name: &str) -> String {
 /// Excel's limit for a table column name, in UTF-16 code units.
 const TABLE_HEADER_MAX_UTF16: usize = 255;
 
-/// Whether `name` holds an `_xHHHH_` sequence: `_x`, four hex digits, `_`.
-///
-/// Excel reads that shape as an escaped character. The `x` is lower case only
-/// (`_X000D_` opens), the hex digits may be either case.
-fn has_escape_shape(name: &str) -> bool {
-    name.as_bytes().windows(7).any(|w| {
-        w[0] == b'_' && w[1] == b'x' && w[6] == b'_' && w[2..6].iter().all(u8::is_ascii_hexdigit)
-    })
-}
-
 /// Why `name` cannot be the header of a table column, or `None` when it can.
 ///
-/// rust_xlsxwriter 0.102.0 writes the name into `<tableColumn name="...">`
-/// without the `_xHHHH_` escaping Excel uses there, so each of these headers
-/// gives a workbook Excel refuses to open, with `Ok` from the crate. Measured
-/// against Excel with the crate alone on 2026-11-13; the cases and their
-/// controls are in `dev-docs/upstream-rust-xlsxwriter.md`. A line feed is not
-/// in the list: the crate writes it as `&#xA;` and Excel opens that.
+/// Only the length is left. rust_xlsxwriter 0.102.0 wrote the name into
+/// `<tableColumn name="...">` without the escaping Excel uses there, so a tab,
+/// a carriage return, any other control character, U+FFFE, U+FFFF or literal
+/// `_xHHHH_` text gave a workbook Excel refused, and this function refused
+/// them. 0.103.0 escapes all of them (upstream #216 and #217; opened in Excel on
+/// its main branch at `a94fc21cf`), so they are written now. The cases and
+/// their controls are in `dev-docs/upstream-rust-xlsxwriter.md`.
 ///
-/// The same header is fine without a table, which is why this is a check on
-/// the table and not on the column name. Remove a rule here only when a crate
-/// release writes that header in a form Excel opens.
+/// A name over 255 UTF-16 units is refused here although 0.103.0 also returns
+/// an error for it: this message names the sheet and the column, the crate's
+/// names the table's position. The same header is fine without a table, which
+/// is why this is a check on the table and not on the column name.
 pub(crate) fn unwritable_table_header(name: &str) -> Option<String> {
-    if let Some(c) = name
-        .chars()
-        .find(|&c| (c < '\u{20}' && c != '\n') || c == '\u{fffe}' || c == '\u{ffff}')
-    {
-        let what = match c {
-            '\t' => "a tab".to_string(),
-            '\r' => "a carriage return".to_string(),
-            other => format!("the control character U+{:04X}", other as u32),
-        };
-        return Some(format!("it contains {what}"));
-    }
-    if has_escape_shape(name) {
-        return Some(
-            "it contains text of the form '_xHHHH_', which Excel reads as an escaped character"
-                .to_string(),
-        );
-    }
     let units = name.encode_utf16().count();
     if units > TABLE_HEADER_MAX_UTF16 {
         return Some(format!(
@@ -183,25 +158,22 @@ mod table_header_tests {
     use super::unwritable_table_header;
 
     #[test]
-    fn headers_excel_refuses_in_a_table_are_named() {
-        for (header, reason) in [
-            ("a\tb", "a tab"),
-            ("a\rb", "a carriage return"),
-            ("a\r\nb", "a carriage return"),
-            ("a\u{1}b", "U+0001"),
-            ("a\u{1f}b", "U+001F"),
-            ("a\u{0}b", "U+0000"),
-            ("a\u{fffe}b", "U+FFFE"),
-            ("a\u{ffff}b", "U+FFFF"),
-            ("_x000D_", "_xHHHH_"),
-            ("_x000d_", "_xHHHH_"),
-            ("a_x0041_b", "_xHHHH_"),
+    fn headers_the_writer_now_escapes_pass() {
+        // Refused until rust_xlsxwriter 0.103.0, which escapes each of them.
+        for header in [
+            "a\tb",
+            "a\rb",
+            "a\r\nb",
+            "a\u{1}b",
+            "a\u{1f}b",
+            "a\u{0}b",
+            "a\u{fffe}b",
+            "a\u{ffff}b",
+            "_x000D_",
+            "_x000d_",
+            "a_x0041_b",
         ] {
-            let found = unwritable_table_header(header);
-            assert!(
-                found.as_deref().is_some_and(|r| r.contains(reason)),
-                "{header:?}: {found:?}"
-            );
+            assert_eq!(unwritable_table_header(header), None, "{header:?}");
         }
     }
 

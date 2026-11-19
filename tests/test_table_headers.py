@@ -1,14 +1,17 @@
-"""A column name the table writer cannot express is refused, not written into a damaged file.
+"""Table column headers: what the writer escapes, and what is still refused.
 
-rust_xlsxwriter 0.102.0 writes a table column's name into ``<tableColumn name="...">``
-without the ``_xHHHH_`` escaping Excel uses in that attribute. A tab, a carriage return,
-another control character, a literal ``_x000D_`` or a name over 255 characters therefore
-gave a workbook Excel refused to open, with no error from the writer. Each case here was
-opened in Excel when the guard was written; the measurement is in
-``dev-docs/upstream-rust-xlsxwriter.md``.
+rust_xlsxwriter 0.102.0 wrote a table column's name into ``<tableColumn name="...">``
+without the escaping Excel uses in that attribute, so a tab, a carriage return, another
+control character or a literal ``_x000D_`` gave a workbook Excel refused to open, and
+xlsxturbo refused those headers. 0.103.0 escapes them (upstream #216 and #217), and the
+fix was opened in Excel on its main branch at ``a94fc21cf``: every table column name equal
+to its header cell. ``TestHeadersTheWriterNowEscapes`` pins the escaped forms the release
+writes. A name over 255 UTF-16 units stays refused: Excel cuts it, and the crate now raises
+its own error, which the guard turns into a ``ConfigurationError`` naming the column. The
+measurements are in ``dev-docs/upstream-rust-xlsxwriter.md``.
 
 openpyxl cannot stand in for Excel on this: the refused files are about what Excel accepts,
-so the tests pin the refusal and the three ways around it, not the damaged output.
+so the tests pin the refusal and the raw attribute text, not openpyxl's reading of it.
 """
 
 from __future__ import annotations
@@ -22,16 +25,22 @@ import pytest
 import xlsxturbo
 
 REFUSED = [
-    ("a\tb", "a tab"),
-    ("a\rb", "a carriage return"),
-    ("a\r\nb", "a carriage return"),
-    ("a\x01b", "U+0001"),
-    ("a\x00b", "U+0000"),
-    ("a￾b", "U+FFFE"),
-    ("_x000D_", "_xHHHH_"),
-    ("total_x0041_", "_xHHHH_"),
     ("x" * 256, "256 characters"),
     ("\U0001f600" * 128, "256 characters"),
+]
+
+# Header -> the raw text of its <tableColumn name="..."> attribute in rust_xlsxwriter
+# 0.103.0. A tab and a CR are character references, which XML attribute normalisation
+# leaves alone; other control characters and a literal _xHHHH_ use Excel's own escape.
+ESCAPED = [
+    ("a\tb", "a&#x9;b"),
+    ("a\rb", "a&#xD;b"),
+    ("a\r\nb", "a&#xD;&#xA;b"),
+    ("a\x01b", "a_x0001_b"),
+    ("a\x00b", "a_x0000_b"),
+    ("a\ufffeb", "a_xFFFE_b"),
+    ("_x000D_", "_x005f_x000D_"),
+    ("total_x0041_", "total_x005f_x0041_"),
 ]
 
 ACCEPTED = ["a\nb", "  a  ", "_X000D_", "_x000D", "x" * 255, "\U0001f600" * 127]
@@ -62,11 +71,6 @@ class TestUnwritableTableHeaderIsRefused:
         assert reason in message
         assert "table_style" in message
 
-    def test_the_message_shows_the_control_character_escaped(self, tmp_path: Path) -> None:
-        """A tab is shown in its escaped form so the column can be found."""
-        with pytest.raises(xlsxturbo.ConfigurationError, match=r'column "Net\\tAmount"'):
-            xlsxturbo.df_to_xlsx(_frame("Net\tAmount"), str(tmp_path / "t.xlsx"), table_style="Medium2")
-
     def test_a_long_name_is_cut_in_the_message(self, tmp_path: Path) -> None:
         """A 256-character name does not fill the message."""
         with pytest.raises(xlsxturbo.ConfigurationError) as caught:
@@ -77,7 +81,7 @@ class TestUnwritableTableHeaderIsRefused:
         """In a workbook of several sheets the message names the sheet at fault."""
         with pytest.raises(xlsxturbo.ConfigurationError, match="sheet 'Bad'"):
             xlsxturbo.dfs_to_xlsx(
-                [(_frame("a"), "Good"), (_frame("a\tb"), "Bad")],
+                [(_frame("a"), "Good"), (_frame("x" * 256), "Bad")],
                 str(tmp_path / "t.xlsx"),
                 table_style="Medium2",
             )
@@ -96,7 +100,7 @@ class TestTheSameHeaderIsFineWhereNoTableIsWritten:
     def test_with_header_false_no_table_is_made(self, tmp_path: Path) -> None:
         """A sheet without a header row gets no table, so the name is never a table header."""
         path = tmp_path / "t.xlsx"
-        xlsxturbo.df_to_xlsx(_frame("a\tb"), str(path), table_style="Medium2", header=False)
+        xlsxturbo.df_to_xlsx(_frame("x" * 256), str(path), table_style="Medium2", header=False)
         with zipfile.ZipFile(path) as archive:
             assert not [n for n in archive.namelist() if n.startswith("xl/tables/")]
 
@@ -105,8 +109,19 @@ class TestTheSameHeaderIsFineWhereNoTableIsWritten:
         path = tmp_path / "t.xlsx"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            xlsxturbo.df_to_xlsx(_frame("a\tb"), str(path), table_style="Medium2", constant_memory=True)
+            xlsxturbo.df_to_xlsx(_frame("x" * 256), str(path), table_style="Medium2", constant_memory=True)
         assert path.exists()
+
+
+class TestHeadersTheWriterNowEscapes:
+    """What 0.102.0 wrote raw, 0.103.0 escapes; the guard no longer refuses these headers."""
+
+    @pytest.mark.parametrize(("header", "attribute"), ESCAPED)
+    def test_the_table_is_written_with_the_escaped_name(self, tmp_path: Path, header: str, attribute: str) -> None:
+        """The table column name is the release's escaped form of the header."""
+        path = tmp_path / "t.xlsx"
+        xlsxturbo.df_to_xlsx(_frame(header), str(path), table_style="Medium2")
+        assert f'<tableColumn id="1" name="{attribute}"' in _table_xml(path)
 
 
 class TestHeadersExcelOpensStillMakeATable:

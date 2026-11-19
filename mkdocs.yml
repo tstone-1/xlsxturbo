@@ -71,6 +71,7 @@ nav:
       - Data validation: data-validation.md
       - Individual cells: cells.md
       - Charts and media: charts-and-media.md
+      - Pivot tables: pivot-tables.md
       - CSV conversion: csv-conversion.md
       - Constant memory mode: constant-memory.md
       - Reusable option bundles: export-options.md

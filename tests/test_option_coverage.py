@@ -278,6 +278,16 @@ def _check_sparklines(path: str, _factory: PathFactory) -> None:
         assert "<x14:sparklineGroup" in xml
 
 
+def _check_pivot_tables(path: str, _factory: PathFactory) -> None:
+    """Pivot tables must add a pivot table part and its cache definition."""
+    first_column = str(_base_df().columns[0])
+    xlsxturbo.df_to_xlsx(_base_df(), path, pivot_tables={"Pivot!A3": {"rows": [first_column]}})
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+    assert "xl/pivotTables/pivotTable1.xml" in names
+    assert "xl/pivotCache/pivotCacheDefinition1.xml" in names
+
+
 def _check_cells(path: str, _factory: PathFactory) -> None:
     """Cells must write the given value to the given cell."""
     xlsxturbo.df_to_xlsx(_base_df(), path, cells={"D1": "Coverage label"})
@@ -315,6 +325,7 @@ COVERAGE: dict[str, Callable[[str, PathFactory], None]] = {
     "textboxes": _check_textboxes,
     "charts": _check_charts,
     "sparklines": _check_sparklines,
+    "pivot_tables": _check_pivot_tables,
     "cells": _check_cells,
 }
 

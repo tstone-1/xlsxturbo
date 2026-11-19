@@ -7,7 +7,8 @@ use crate::types::{
     mapping_as_dict, pydict_to_hashmap, pytype_name,
     reject_unknown_keys as types_reject_unknown_keys, sequence_as_list, CellWrite, ChartConfig,
     CheckboxConfig, Comment, ConditionalFormatConfigs, FreezePanes, Hyperlink, ImageConfig,
-    MergedRange, RichTextSegment, SheetConfig, SparklineConfig, TextboxConfig, ValidationConfig,
+    MergedRange, PivotTableConfig, RichTextSegment, SheetConfig, SparklineConfig, TextboxConfig,
+    ValidationConfig,
 };
 use indexmap::IndexMap;
 use pyo3::prelude::*;
@@ -38,6 +39,7 @@ const SHEET_OPTION_NAMES: &[&str] = &[
     "textboxes",
     "charts",
     "sparklines",
+    "pivot_tables",
     "cells",
 ];
 
@@ -413,6 +415,13 @@ pub(crate) fn extract_sheet_info<'py>(
         extract_dict_field!(opts, config, "textboxes", textboxes, extract_textboxes);
         extract_dict_field!(opts, config, "charts", charts, extract_charts);
         extract_dict_field!(opts, config, "sparklines", sparklines, extract_sparklines);
+        extract_dict_field!(
+            opts,
+            config,
+            "pivot_tables",
+            pivot_tables,
+            extract_pivot_tables
+        );
 
         extract_dict_field!(opts, config, "cells", cells, extract_cells);
 
@@ -1365,6 +1374,29 @@ pub(crate) fn extract_sparklines(
     }
 
     Ok(sparklines)
+}
+
+/// Extract pivot tables from Python dict (location -> pivot table options dict).
+/// Uses IndexMap so the pivot tables are written in key order.
+pub(crate) fn extract_pivot_tables(
+    py_dict: &Bound<'_, pyo3::types::PyDict>,
+) -> PyResult<IndexMap<String, PivotTableConfig>> {
+    let mut pivot_tables: IndexMap<String, PivotTableConfig> = IndexMap::new();
+
+    for (location, value) in py_dict.iter() {
+        let location: String = extract_typed!(location, "a string location", "pivot_tables key");
+        let inner_dict = value.cast::<pyo3::types::PyDict>().map_err(|_| {
+            crate::errors::configuration_type(format!(
+                "pivot_tables['{}']: expected dict, got {}",
+                location,
+                pytype_name(&value)
+            ))
+        })?;
+        let inner = pydict_to_hashmap(inner_dict, &format!("pivot_tables['{}']", location))?;
+        pivot_tables.insert(location, inner);
+    }
+
+    Ok(pivot_tables)
 }
 
 /// Look up an optional sub-value of a `cells` entry dict.

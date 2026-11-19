@@ -25,6 +25,10 @@ from xlsxturbo.types import (
     ImageOptions as ImageOptions,
     OutputTarget as OutputTarget,
     PathArg as PathArg,
+    PivotFunction as PivotFunction,
+    PivotLayout as PivotLayout,
+    PivotTableOptions as PivotTableOptions,
+    PivotValueField as PivotValueField,
     RichTextFormat as RichTextFormat,
     SheetOptions as SheetOptions,
     SparklineOptions as SparklineOptions,
@@ -57,6 +61,10 @@ __all__ = [
     "OptionError",
     "OutputTarget",
     "PathArg",
+    "PivotFunction",
+    "PivotLayout",
+    "PivotTableOptions",
+    "PivotValueField",
     "RichTextFormat",
     "SheetOptions",
     "SparklineOptions",
@@ -196,6 +204,7 @@ def df_to_xlsx(
     defined_names: Mapping[str, str] | None = None,
     cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: Mapping[str, SparklineOptions] | None = None,
+    pivot_tables: Mapping[str, PivotTableOptions] | None = None,
     startrow: int | None = None,
     autofilter: bool = False,
     tab_color: str | None = None,
@@ -295,6 +304,17 @@ def df_to_xlsx(
             places a grouped sparkline, one per row of the data range. 'range' is required and
             must be sheet-qualified (e.g. 'Sheet1!A2:C10'), like a chart range.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
+        pivot_tables: Dict mapping a location to a native Excel pivot table over this
+            frame. The source is the frame's written range, header row included, so every
+            field is one of its column names. 'A3' places the pivot table on the frame's
+            own sheet; 'Summary!A3' places it on sheet 'Summary', which is created empty
+            when the workbook has no sheet of that name. A location inside the frame's
+            data is refused. Excel builds the table when the file is opened, so its size
+            is not known when it is written: anything to the right of or below the
+            location can make Excel show #SPILL!. Needs header=True and at least one
+            data row, and the column names must be unique and not empty.
+            Example: {'Summary!A3': {'rows': ['Region'], 'columns': ['Month'],
+                      'values': [{'field': 'Volume', 'function': 'sum'}]}}
         startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
             data starts on the row below it (default: None, which is row 0). The rows
             above stay free for ``cells``, ``merged_ranges`` and ``rich_text``. Cell
@@ -364,6 +384,7 @@ def dfs_to_xlsx(
     defined_names: Mapping[str, str] | None = None,
     cells: Mapping[str, str | int | float | bool | date | datetime | CellValueOptions | None] | None = None,
     sparklines: Mapping[str, SparklineOptions] | None = None,
+    pivot_tables: Mapping[str, PivotTableOptions] | None = None,
     startrow: int | None = None,
     autofilter: bool = False,
     tab_color: str | None = None,
@@ -446,6 +467,17 @@ def dfs_to_xlsx(
             Range key (e.g. 'D2:D10') makes a grouped sparkline; single cell makes one.
             'range' must be sheet-qualified, e.g. 'Sheet1!A2:C10'.
             Example: {'D2:D10': {'range': 'Sheet1!A2:C10', 'type': 'line', 'markers': True}}
+        pivot_tables: Dict mapping a location to a native Excel pivot table over this
+            frame. The source is the frame's written range, header row included, so every
+            field is one of its column names. 'A3' places the pivot table on the frame's
+            own sheet; 'Summary!A3' places it on sheet 'Summary', which is created empty
+            when the workbook has no sheet of that name. A location inside the frame's
+            data is refused. Excel builds the table when the file is opened, so its size
+            is not known when it is written: anything to the right of or below the
+            location can make Excel show #SPILL!. Needs header=True and at least one
+            data row, and the column names must be unique and not empty.
+            Example: {'Summary!A3': {'rows': ['Region'], 'columns': ['Month'],
+                      'values': [{'field': 'Volume', 'function': 'sum'}]}}
         startrow: Zero-based sheet row of the header, as in pandas' ``to_excel``; the
             data starts on the row below it (default: None, which is row 0). The rows
             above stay free for ``cells``, ``merged_ranges`` and ``rich_text``. Cell

@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pivot_tables`: native Excel pivot tables over the frame they are given with, on the
+  frame's own sheet (`'F3'`) or on another sheet (`'Summary!A3'`), which is created when
+  the workbook has none of that name. Row, column, filter and value fields, the eleven
+  value functions, captions, number formats, the style gallery, the three layouts and the
+  grand totals. Works under `constant_memory`. Excel builds the table when the file is
+  opened. See [Pivot tables](https://tstone-1.github.io/xlsxturbo/pivot-tables/).
+
+### Fixed
+- A control character such as U+0001, U+000B or U+001F, or U+FFFE or U+FFFF, in a sheet
+  name, a font name, a number format, a validation title or message, a hyperlink, a
+  textbox or an image alt text gave a workbook Excel refused to open. It is now written in
+  Excel's escaped form. U+0000 in a sheet name, which Excel does not allow, now raises
+  `ConfigurationError` instead.
+- A sheet or table named with literal `_xHHHH_` text, such as `_x000D_`, kept that text
+  only in the cells: Excel read the name as an escaped character. It is now escaped.
+- A sheet named `TRUE` or `FALSE` (any case) with `autofilter=True` gave a workbook Excel
+  refused to open, because the filter range named the sheet without quotes.
+- A table column name with a tab, a carriage return, another control character or
+  `_xHHHH_` text is now written into the table instead of being refused. 1.13.2 refused
+  these because the writer could not express them; rust_xlsxwriter 0.103.0 can. A name
+  longer than 255 characters is still refused.
+
 ### Changed
+- rust_xlsxwriter 0.103.0, which brings the fixes above (upstream #216, #217) and pivot
+  tables.
 - The `chrono` crate is no longer a dependency. It is unmaintained
   ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543)), and xlsxturbo
   used it only to check a date, count days and match the ten date and datetime patterns

@@ -243,13 +243,14 @@ REQUIRED_FIELDS: dict[str, tuple[str, dict[str, object]]] = {
     "ChartOptions": ("type", {"charts": {"D2": {}}}),
     "SparklineOptions": ("range", {"sparklines": {"D2": {}}}),
     "CellValueOptions": ("value", {"cells": {"D1": {}}}),
+    "PivotValueField": ("field", {"pivot_tables": {"Pivot!A3": {"values": [{}]}}}),
 }
 
 # Shapes where every field really is optional, so `total=False` throughout is
 # correct. Listed rather than inferred, so that a shape gaining a required field
 # and not gaining a required base fails the partition check below.
 FULLY_OPTIONAL = frozenset(
-    {"HeaderFormat", "ColumnFormat", "RichTextFormat", "TextboxFont", "SheetOptions"}
+    {"HeaderFormat", "ColumnFormat", "RichTextFormat", "TextboxFont", "SheetOptions", "PivotTableOptions"}
 )
 
 

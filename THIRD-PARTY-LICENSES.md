@@ -1319,7 +1319,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 Applies to:
 
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.102.0](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.103.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-link 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.61.2](https://github.com/microsoft/windows-rs)
 

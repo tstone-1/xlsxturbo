@@ -127,6 +127,9 @@ pub(crate) type ChartConfig = HashMap<String, Py<PyAny>>;
 /// Type alias for sparkline config: location ref -> sparkline options dict
 pub(crate) type SparklineConfig = HashMap<String, Py<PyAny>>;
 
+/// Type alias for pivot table config: location -> pivot table options dict
+pub(crate) type PivotTableConfig = HashMap<String, Py<PyAny>>;
+
 /// Type alias for conditional format configs: column/pattern -> list of format config dicts
 pub(crate) type ConditionalFormatConfigs = IndexMap<String, Vec<HashMap<String, Py<PyAny>>>>;
 
@@ -680,6 +683,7 @@ pub(crate) struct SheetConfig {
     pub(crate) textboxes: Option<IndexMap<String, TextboxConfig>>,
     pub(crate) charts: Option<IndexMap<String, ChartConfig>>, // cell_ref -> chart options
     pub(crate) sparklines: Option<IndexMap<String, SparklineConfig>>, // location ref -> sparkline options
+    pub(crate) pivot_tables: Option<IndexMap<String, PivotTableConfig>>, // location -> pivot table over this frame
     pub(crate) cells: Option<Vec<CellWrite>>,
 }
 
@@ -840,6 +844,7 @@ define_options! {
     textboxes: IndexMap<String, TextboxConfig>,
     charts: IndexMap<String, ChartConfig>,
     sparklines: IndexMap<String, SparklineConfig>,
+    pivot_tables: IndexMap<String, PivotTableConfig>,
     cells: Vec<CellWrite>,
 }
 
@@ -858,6 +863,7 @@ pub(crate) const CELL_ADDRESSED_OPTIONS: &[&str] = &[
     "textboxes",
     "charts",
     "sparklines",
+    "pivot_tables",
     "cells",
 ];
 
@@ -903,6 +909,7 @@ impl<'a> EffectiveOpts<'a> {
         self.textboxes = own.textboxes.as_ref();
         self.charts = own.charts.as_ref();
         self.sparklines = own.sparklines.as_ref();
+        self.pivot_tables = own.pivot_tables.as_ref();
         self.cells = own.cells.as_ref();
         self.column_widths = sheet_column_widths;
         self

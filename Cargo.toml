@@ -38,7 +38,7 @@ required-features = ["cli"]
 # rule priorities on repeated ranges, and the quadratic time of placing many
 # comments, images or charts on a sheet with `row_heights` or `column_widths`
 # (the 1.12.2 changelog entry).
-rust_xlsxwriter = { version = "0.102.0", features = ["constant_memory"] }
+rust_xlsxwriter = { version = "0.103.0", features = ["constant_memory"] }
 csv = "1.4"
 clap = { version = "4.6", features = ["derive"], optional = true }
 pyo3 = { version = "0.30", features = ["abi3-py311"] }

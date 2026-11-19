@@ -66,6 +66,7 @@ SAMPLE_VALUES: dict[str, Any] = {
     "textboxes": {"L1": "a textbox"},
     "charts": {"M2": {"type": "bar", "data_range": "Sheet1!$B$2:$B$3"}},
     "sparklines": {"N2": {"range": "Sheet1!A2:B2"}},
+    "pivot_tables": {"Pivot!A3": {"rows": ["Name"]}},
     "constant_memory": False,
     "defined_names": {"MyName": "Sheet1!$A$1"},
 }

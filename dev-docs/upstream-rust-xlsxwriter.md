@@ -152,6 +152,20 @@ with a `ConfigurationError`; `tests/test_table_headers.py` covers it, and replac
 the header string we pass is used for both the cell and the attribute, and the two need
 different escaping. 1 and 3 are not guarded.
 
+With 0.103.0 the guard keeps only its length rule: the release writes every other header
+it refused in the form Excel opened on main `a94fc21cf`, and
+`tests/test_table_headers.py::TestHeadersTheWriterNowEscapes` pins that form. The length
+rule stays for its message, which names the sheet and the column; the crate's own error
+for it names only the table's position.
+
+1 and 3 reach users of xlsxturbo 1.x through ordinary options, measured 2026-11-19 on
+0.102.0: U+0001 in `sheet_name`, a `header_format` `font_name`, a `column_formats`
+`num_format`, a validation `input_title` or a textbox `alt_text` each leaves one part that
+is not well-formed XML; `sheet_name="_x000D_"` and `table_name="_x000D_"` are written raw.
+`tests/test_attribute_escaping.py` pins the 0.103.0 output for all of them, plus the quoted
+`'TRUE'` in the autofilter's defined name (upstream `0c034f85b`). It fails on 0.102.0 by
+design, and goes green with the crate update alone, with no guard in xlsxturbo.
+
 What the guard's rules were measured as, crate alone, opened in Excel: every C0 character
 tried except the line feed fails (U+0000, U+0001, U+0009, U+000D, U+001F), as do U+FFFE and
 U+FFFF; U+007F and U+0085 open. The escape shape is `_x` + four hex digits of either case +
@@ -183,8 +197,10 @@ replace that path with `Workbook::save()`, also not after #221 is closed without
 what the fix covers: a check moved before `File::create` does not help an error that occurs
 while the parts are written.
 
-**Pivot tables are upstream PR [#220](https://github.com/jmcnamara/rust_xlsxwriter/pull/220),
-not merged (2026-11-17). Before xlsxturbo exposes them, read the comment posted there.**
+**Pivot tables shipped in rust_xlsxwriter 0.103.0 (2026-11-18) as `PivotTable` and
+`Worksheet::add_pivot_table()`; PR [#220](https://github.com/jmcnamara/rust_xlsxwriter/pull/220)
+was closed and the feature landed separately. The findings below were measured on the branch
+(`238bc5b`, then `30147bb`); re-run them against the release before xlsxturbo exposes the feature.**
 The branch at `238bc5b` was probed with about 130 workbooks, each opened in Excel 16.0 build
 20527 with the dialog text read. Normal use works (all 36 combinations of layout, field shape
 and grand totals). Inputs that saved with `Ok` and got Excel's repair prompt: two source

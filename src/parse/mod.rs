@@ -9,7 +9,9 @@ mod patterns;
 mod tables;
 mod values;
 
-pub(crate) use cell_refs::{looks_like_cell_reference, parse_cell_range, parse_cell_ref};
+pub(crate) use cell_refs::{
+    looks_like_cell_reference, parse_cell_range, parse_cell_ref, MAX_ROW_1BASED,
+};
 pub(crate) use civil::{
     naive_date_to_excel, naive_datetime_to_excel, NaiveDate, NaiveDateTime, NaiveTime,
 };

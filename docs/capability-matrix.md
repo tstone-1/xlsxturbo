@@ -40,6 +40,7 @@ drift from the implementation -- see `scripts/gen_capability_matrix.py`.
 | `defined_names` | yes | yes | -- | -- | applies |
 | `cells` | yes | yes | -- | yes | skipped |
 | `sparklines` | yes | yes | -- | yes | skipped |
+| `pivot_tables` | yes | yes | -- | yes | applies |
 | `startrow` | yes | yes | -- | yes | applies |
 | `autofilter` | yes | yes | -- | yes | applies |
 | `tab_color` | yes | yes | -- | yes | applies |
@@ -54,10 +55,10 @@ formatting or feature options. CSV conversion is a straight-through fast path, n
 reduced-feature version of the DataFrame path: to format a CSV export, read it into a
 DataFrame and use `df_to_xlsx`.
 
-`constant_memory=True` keeps 3 of the feature options (`column_widths`, `header_format`, `column_formats`) and skips
+`constant_memory=True` keeps 4 of the feature options (`column_widths`, `header_format`, `column_formats`, `pivot_tables`) and skips
 16. Those three are the ones applied while rows are being written; everything
 else needs to revisit a cell after the fact, which streaming output cannot do. A new
 option defaults to skipped, so this list only grows deliberately.
 
-Of the 31 options, 25 can be overridden per sheet in `dfs_to_xlsx`. The rest are
+Of the 32 options, 26 can be overridden per sheet in `dfs_to_xlsx`. The rest are
 workbook-wide.
