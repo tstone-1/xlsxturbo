@@ -72,6 +72,8 @@ Titles and messages can be supplied independently; every supplied value must be 
 - With neither bound, `whole_number` accepts any whole number from -2147483648 to 2147483647 and `text_length` any length; `decimal` needs at least one bound and raises `ConfigurationError` without one
 - `whole_number` `min`/`max` are bounded to the i32 range (-2147483648 to 2147483647); a value outside that range raises `ValueError` naming the field and range
 - `decimal` bounds must be finite numbers; `NaN` and infinity are refused
+- A `decimal` bound may be at most 9.99999999999999E+307 either side of zero, Excel's largest number. Excel cannot open a workbook whose validation holds a larger one, such as `1e308` or `sys.float_info.max`, so such a bound raises `ConfigurationError`; to leave a side open, leave the bound out
+- `min` above `max` is accepted and written as given; Excel opens the file, and the rule then rejects every entry
 - Booleans are not numeric bounds, including for `whole_number`
 - List validation values are limited to 255 total characters (Excel limitation)
 - A list value may not contain a comma: Excel splits the list at commas, so `"Smith, John"` would become two entries. Such a value, and an empty `values` list, raise `ConfigurationError`

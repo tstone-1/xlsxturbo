@@ -16,7 +16,6 @@ so the tests pin the refusal and the raw attribute text, not openpyxl's reading 
 
 from __future__ import annotations
 
-import warnings
 import zipfile
 from pathlib import Path
 
@@ -72,10 +71,13 @@ class TestUnwritableTableHeaderIsRefused:
         assert "table_style" in message
 
     def test_a_long_name_is_cut_in_the_message(self, tmp_path: Path) -> None:
-        """A 256-character name does not fill the message."""
+        """A 256-character name is shown as its first 40 characters and a ``...`` marker."""
         with pytest.raises(xlsxturbo.ConfigurationError) as caught:
             xlsxturbo.df_to_xlsx(_frame("x" * 256), str(tmp_path / "t.xlsx"), table_style="Medium2")
-        assert len(str(caught.value)) < 300
+        message = str(caught.value)
+        assert f'column "{"x" * 40}"... cannot be the header of a table' in message
+        assert "x" * 41 not in message
+        assert len(message) < 300
 
     def test_a_later_sheet_is_checked_and_named(self, tmp_path: Path) -> None:
         """In a workbook of several sheets the message names the sheet at fault."""
@@ -107,10 +109,43 @@ class TestTheSameHeaderIsFineWhereNoTableIsWritten:
     def test_constant_memory_makes_no_table(self, tmp_path: Path) -> None:
         """constant_memory skips the table, with its usual warning, and does not refuse."""
         path = tmp_path / "t.xlsx"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
+        with pytest.warns(RuntimeWarning, match="table_style"):
             xlsxturbo.df_to_xlsx(_frame("x" * 256), str(path), table_style="Medium2", constant_memory=True)
-        assert path.exists()
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+        assert "xl/worksheets/sheet1.xml" in names
+        assert not [n for n in names if n.startswith("xl/tables/")]
+
+
+#: Every name ``table_style`` accepts, in the families its error message advertises.
+TABLE_STYLES = (
+    [f"Light{n}" for n in range(1, 22)]
+    + [f"Medium{n}" for n in range(1, 29)]
+    + [f"Dark{n}" for n in range(1, 12)]
+)
+
+
+class TestEveryTableStyleReachesTheXml:
+    """Each style name selects its own style, not merely some style."""
+
+    @pytest.mark.parametrize("style", TABLE_STYLES)
+    def test_every_table_style_name_reaches_the_xml(self, tmp_path: Path, style: str) -> None:
+        """The table part names ``TableStyle`` plus the name, so no name maps to a neighbour."""
+        path = tmp_path / "t.xlsx"
+        xlsxturbo.df_to_xlsx(_frame("a"), str(path), table_style=style)
+        assert f'<tableStyleInfo name="TableStyle{style}" ' in _table_xml(path)
+
+    def test_the_list_is_the_whole_family(self) -> None:
+        """Control: 21 + 28 + 11 names, no duplicate."""
+        assert len(set(TABLE_STYLES)) == 60
+
+    def test_style_none_writes_a_table_without_a_style_name(self, tmp_path: Path) -> None:
+        """``"None"`` is a table with no style, not a missing table."""
+        path = tmp_path / "t.xlsx"
+        xlsxturbo.df_to_xlsx(_frame("a"), str(path), table_style="None")
+        xml = _table_xml(path)
+        assert "<tableStyleInfo " in xml
+        assert "TableStyle" not in xml.split("<tableStyleInfo ", 1)[1].split("/>", 1)[0]
 
 
 class TestHeadersTheWriterNowEscapes:

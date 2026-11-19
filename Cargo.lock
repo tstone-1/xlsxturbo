@@ -852,6 +852,7 @@ dependencies = [
  "rust_xlsxwriter",
  "tempfile",
  "unicode-normalization",
+ "zip",
 ]
 
 [[package]]

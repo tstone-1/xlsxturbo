@@ -180,9 +180,12 @@ Excel has no NaN or infinity, so a CSV field holding one becomes an empty cell. 
 `NaN`, `+nan`, `inf`, `-Inf`, `infinity`, `INFINITY`.
 
 The trap is that some of those are also ordinary words. A text column whose values include
-`NAN` or `Inf.` loses them to empty cells, because nothing distinguishes the word from the
-number at that point. If a column is meant to be text, say so with a `column_format` — or
-check for the spellings above before exporting.
+`NAN`, `Inf` or `Infinity` loses them to empty cells, because nothing distinguishes the word
+from the number at that point. A spelling the parser does not accept, such as `Inf.`, stays
+text. `csv_to_xlsx` takes no `column_formats`, so if a column is meant to be text, read the
+CSV into a DataFrame with that column as strings (for pandas, `dtype=str,
+keep_default_na=False`) and export it with `df_to_xlsx`, or check for the spellings above
+before exporting.
 
 ### Dates before 1900-03-01
 

@@ -460,10 +460,12 @@ mod tests {
 
     #[test]
     fn test_parse_table_style_valid() {
-        assert!(parse_table_style("None").is_ok());
-        assert!(parse_table_style("Light1").is_ok());
-        assert!(parse_table_style("Medium14").is_ok());
-        assert!(parse_table_style("Dark11").is_ok());
+        // `TableStyle` has no `Debug`; its `Display` is the XML style name.
+        let xml_name = |style: &str| parse_table_style(style).map(|s| s.to_string());
+        assert_eq!(xml_name("None"), Ok("TableStyleNone".to_string()));
+        for style in ["Light1", "Light21", "Medium14", "Dark11"] {
+            assert_eq!(xml_name(style), Ok(format!("TableStyle{style}")));
+        }
     }
 
     #[test]

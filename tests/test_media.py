@@ -7,12 +7,13 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from xml.etree import ElementTree
 
 import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, TINY_PNG_B64, active_ws, load_workbook
+from tests.helpers import TINY_PNG_B64, active_ws, load_workbook
 
 if TYPE_CHECKING:
     from xlsxturbo.types import (
@@ -24,7 +25,82 @@ if TYPE_CHECKING:
         TextboxOptions,
     )
 
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+NS = {
+    "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+}
+
+# A drawing measures in EMU; one pixel at 96 dpi is 9525 EMU.
+EMU_PER_PX = 9525
+# The default column width (8.43 characters) and row height (15 points), in pixels.
+# A drawing anchor counts whole cells plus an offset, so the anchor converts to a
+# pixel position only across columns and rows left at these defaults.
+DEFAULT_COL_PX = 64
+DEFAULT_ROW_PX = 20
+
+
+def _drawing(path: str, number: int = 1) -> ElementTree.Element:
+    """Return ``xl/drawings/drawing<number>.xml`` of a written workbook, parsed."""
+    with zipfile.ZipFile(path) as zf:
+        return ElementTree.fromstring(zf.read(f"xl/drawings/drawing{number}.xml"))  # noqa: S314 - our own output
+
+
+def _sheet_drawing(path: str, sheet: int) -> ElementTree.Element:
+    """Return the drawing that worksheet ``sheet`` (1-based) points at, parsed.
+
+    Followed through the sheet's relationships rather than assumed from the part
+    number, so a test about which sheet got which shape cannot pass on a
+    numbering coincidence.
+    """
+    with zipfile.ZipFile(path) as zf:
+        rels = ElementTree.fromstring(zf.read(f"xl/worksheets/_rels/sheet{sheet}.xml.rels"))  # noqa: S314
+        targets = [
+            rel.attrib["Target"]
+            for rel in rels
+            if rel.attrib.get("Type", "").endswith("/drawing")
+        ]
+        assert len(targets) == 1, f"sheet{sheet} has drawings {targets}"
+        name = "xl/drawings/" + targets[0].rsplit("/", 1)[-1]
+        return ElementTree.fromstring(zf.read(name))  # noqa: S314 - our own output
+
+
+def _anchor_px(drawing: ElementTree.Element) -> tuple[int, int, int, int]:
+    """Pixel position of the first anchor's two corners: ``(x_from, y_from, x_to, y_to)``.
+
+    Valid only where every column and row the anchor spans has the default size.
+    """
+    anchor = drawing.find("xdr:twoCellAnchor", NS)
+    assert anchor is not None, "the drawing has no two-cell anchor"
+
+    def corner(tag: str) -> tuple[int, int]:
+        def number(field: str) -> int:
+            node = anchor.find(f"xdr:{tag}/xdr:{field}", NS)
+            assert node is not None, f"no {tag}/{field}"
+            assert node.text is not None, f"empty {tag}/{field}"
+            return int(node.text)
+
+        x = number("col") * DEFAULT_COL_PX + number("colOff") // EMU_PER_PX
+        y = number("row") * DEFAULT_ROW_PX + number("rowOff") // EMU_PER_PX
+        return x, y
+
+    x_from, y_from = corner("from")
+    x_to, y_to = corner("to")
+    return x_from, y_from, x_to, y_to
+
+
+def _shape_extent_px(drawing: ElementTree.Element) -> tuple[int, int]:
+    """Width and height of the first shape or picture, from its ``a:ext``, in pixels."""
+    ext = drawing.find(".//a:xfrm/a:ext", NS)
+    assert ext is not None, "the drawing has no a:ext"
+    return int(ext.attrib["cx"]) // EMU_PER_PX, int(ext.attrib["cy"]) // EMU_PER_PX
+
+
+def _write_png(factory: Callable[..., str]) -> str:
+    """Write the one-pixel PNG to a fresh temporary path and return the path."""
+    img_path = factory(".png")
+    Path(img_path).write_bytes(base64.b64decode(TINY_PNG_B64))
+    return img_path
 
 
 class TestImages:
@@ -47,24 +123,51 @@ class TestImages:
             assert any(n.endswith(".png") for n in media)
 
     def test_image_with_options(self, tmp_xlsx_factory: Callable[..., str]) -> None:
-        """Image with scaling options."""
+        """Image scale_width and scale_height reach the picture's size.
+
+        The two scales differ, so a width applied as the height (or one scale
+        applied to both) fails too. The image is one pixel square.
+        """
         df = pd.DataFrame({"A": [1]})
         path = tmp_xlsx_factory()
-        png_data = base64.b64decode(TINY_PNG_B64)
-        img_path = tmp_xlsx_factory(".png")
-        with Path(img_path).open("wb") as f:
-            f.write(png_data)
+        img_path = _write_png(tmp_xlsx_factory)
 
         xlsxturbo.df_to_xlsx(
             df,
             path,
-            images={"B5": {"path": img_path, "scale_width": 2.0, "scale_height": 2.0}},
+            images={"B5": {"path": img_path, "scale_width": 2.0, "scale_height": 3.0}},
         )
         with zipfile.ZipFile(path) as zf:
             media = [n for n in zf.namelist() if n.startswith("xl/media/")]
             assert media, "no embedded image found in xl/media/"
-            # A drawing relationship must anchor the image to the sheet.
-            assert any(n.startswith("xl/drawings/") for n in zf.namelist())
+        assert _shape_extent_px(_drawing(path)) == (2, 3)
+
+    def test_image_without_options_keeps_its_size(self, tmp_xlsx_factory: Callable[..., str]) -> None:
+        """The control for the scale test: unscaled, the one-pixel image stays one pixel."""
+        path = tmp_xlsx_factory()
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), path, images={"B5": _write_png(tmp_xlsx_factory)})
+        assert _shape_extent_px(_drawing(path)) == (1, 1)
+
+    def test_image_alt_text_reaches_the_drawing(self, tmp_xlsx_factory: Callable[..., str]) -> None:
+        """alt_text becomes the picture's ``descr``, which screen readers announce."""
+        path = tmp_xlsx_factory()
+        xlsxturbo.df_to_xlsx(
+            pd.DataFrame({"A": [1]}),
+            path,
+            images={"B5": {"path": _write_png(tmp_xlsx_factory), "alt_text": "Quarterly logo"}},
+        )
+        props = _drawing(path).find(".//xdr:pic/xdr:nvPicPr/xdr:cNvPr", NS)
+        assert props is not None
+        assert props.attrib.get("descr") == "Quarterly logo"
+
+    def test_image_unknown_key_raises(self, tmp_xlsx_factory: Callable[..., str]) -> None:
+        """A typo in an image option is refused with the valid keys, not dropped."""
+        bad: Any = {"path": _write_png(tmp_xlsx_factory), "scale": 2.0}
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"images\['B5'\]: unknown option 'scale'\. Valid: scale_width, scale_height, alt_text",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_xlsx_factory(), images={"B5": bad})
 
 
 class TestCheckboxes:
@@ -74,7 +177,6 @@ class TestCheckboxes:
         """Checkboxes with plain bool values."""
         df = pd.DataFrame({"A": [1, 2, 3]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, checkboxes={"D1": True, "D2": False})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # Checkboxes render as boolean TRUE/FALSE in cells
@@ -85,7 +187,6 @@ class TestCheckboxes:
         """Checkbox with dict specifying checked state."""
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, checkboxes={"B2": {"checked": True}})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["B2"].value is True
@@ -98,10 +199,11 @@ class TestCheckboxes:
             tmp_xlsx,
             checkboxes={"C3": {"checked": True, "format": {"bg_color": "#C6EFCE", "bold": True}}},
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["C3"].value is True
+        assert ws["C3"].font.bold is True
+        assert ws["C3"].fill.fgColor.rgb == "FFC6EFCE"
 
     def test_checkbox_missing_checked_key_raises(self, tmp_xlsx: str) -> None:
         """Dict form without 'checked' raises a clear error."""
@@ -134,7 +236,7 @@ class TestCheckboxes:
     def test_checkbox_invalid_cell_ref_raises(self, tmp_xlsx: str) -> None:
         """Invalid cell reference raises."""
         df = pd.DataFrame({"A": [1]})
-        with pytest.raises(ValueError):  # noqa: PT011
+        with pytest.raises(ValueError, match=r"checkboxes\['not_a_ref'\]: Invalid row number in cell reference"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, checkboxes={"not_a_ref": True})
 
     def test_checkbox_wrong_value_type_raises(self, tmp_xlsx: str) -> None:
@@ -155,7 +257,6 @@ class TestCheckboxes:
             ],
             tmp_xlsx,
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         assert wb["S1"]["D1"].value is True
         assert wb["S2"]["D1"].value is False
@@ -170,7 +271,12 @@ class TestCheckboxes:
             comments={"A1": "Names"},
             validations={"Name": {"type": "text_length", "min": 1, "max": 100}},
         )
-        assert Path(tmp_xlsx).exists()
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert (ws["D1"].value, ws["D2"].value) == (True, False)
+        comment = ws["A1"].comment
+        assert comment is not None
+        assert "Names" in comment.text
+        assert [dv.type for dv in ws.data_validations.dataValidation] == ["textLength"]
 
 
 class TestTextboxes:
@@ -189,10 +295,16 @@ class TestTextboxes:
         """Textbox dict form with required 'text' key."""
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"text": "Hello"}})
-        assert Path(tmp_xlsx).exists()
+        texts = [node.text for node in _drawing(tmp_xlsx).iterfind(".//xdr:txBody//a:t", NS)]
+        assert texts == ["Hello"]
 
     def test_textbox_with_all_options(self, tmp_xlsx: str) -> None:
-        """Textbox with every supported option."""
+        """Every textbox option reaches the drawing.
+
+        Size and offsets are read from the shape's ``a:ext`` and its anchor,
+        the font from the run properties, and the line colour from ``a:ln``.
+        The control below shows that none of the asserted values is a default.
+        """
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.df_to_xlsx(
             df,
@@ -213,7 +325,7 @@ class TestTextboxes:
                         "color": "#FF0000",
                     },
                     "fill_color": "#F0F0F0",
-                    "line_color": "#000000",
+                    "line_color": "#00B050",
                     "alt_text": "A textbox annotation",
                 }
             },
@@ -226,16 +338,62 @@ class TestTextboxes:
             assert "F0F0F0" in drawing.upper()
             assert "FF0000" in drawing.upper()
 
+        root = _drawing(tmp_xlsx)
+        assert _shape_extent_px(root) == (200, 100)
+        x_from, y_from, x_to, y_to = _anchor_px(root)
+        # B2 is column 1, row 1; the offsets move the top-left corner inside it.
+        assert (x_from, y_from) == (1 * DEFAULT_COL_PX + 10, 1 * DEFAULT_ROW_PX + 5)
+        assert (x_to - x_from, y_to - y_from) == (200, 100)
+
+        run = root.find(".//xdr:txBody//a:rPr", NS)
+        assert run is not None
+        assert run.attrib.get("sz") == "1400"
+        assert run.attrib.get("b") == "1"
+        assert run.attrib.get("i") == "1"
+        assert run.attrib.get("u") == "sng"
+        latin = run.find("a:latin", NS)
+        assert latin is not None
+        assert latin.attrib.get("typeface") == "Arial"
+
+        line = root.find(".//xdr:spPr/a:ln/a:solidFill/a:srgbClr", NS)
+        assert line is not None, "line_color did not reach the shape outline"
+        assert line.attrib.get("val") == "00B050"
+
+    def test_textbox_without_options_has_the_default_look(self, tmp_xlsx: str) -> None:
+        """The control for the test above: none of what it asserts is a default.
+
+        A plain textbox is 192 x 120 pixels at the cell's corner, with an 11 point
+        run that is neither bold, italic nor underlined, and a theme-coloured
+        outline. If any of these were the asserted value, the test above could
+        not tell an option that arrived from one that was dropped.
+        """
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"A": [1]}), tmp_xlsx, textboxes={"B2": "plain"})
+        root = _drawing(tmp_xlsx)
+        assert _shape_extent_px(root) == (192, 120)
+        assert _anchor_px(root)[:2] == (1 * DEFAULT_COL_PX, 1 * DEFAULT_ROW_PX)
+        run = root.find(".//xdr:txBody//a:rPr", NS)
+        assert run is not None
+        assert run.attrib.get("sz") == "1100"
+        assert not {"b", "i", "u"} & set(run.attrib)
+        assert run.find("a:latin", NS) is None
+        assert root.find(".//xdr:spPr/a:ln/a:solidFill/a:srgbClr", NS) is None
+
     def test_textbox_font_partial(self, tmp_xlsx: str) -> None:
         """Partial font options work (only some keys set)."""
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"text": "T", "font": {"bold": True}}})
-        assert Path(tmp_xlsx).exists()
+        run = _drawing(tmp_xlsx).find(".//xdr:txBody//a:rPr", NS)
+        assert run is not None
+        assert run.attrib.get("b") == "1"
+        # Only the key that was set: no italic, no underline, the default size.
+        assert "i" not in run.attrib
+        assert "u" not in run.attrib
+        assert run.attrib.get("sz") == "1100"
 
     def test_textbox_missing_text_raises(self, tmp_xlsx: str) -> None:
         """Dict form without 'text' raises ValueError."""
         df = pd.DataFrame({"A": [1]})
-        with pytest.raises(ValueError, match="text"):
+        with pytest.raises(ValueError, match=r"textboxes\['B2'\] dict missing 'text' key"):
             # Deliberately omits the required 'text' key.
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"width": 100}})  # type: ignore[dict-item]
 
@@ -279,10 +437,16 @@ class TestTextboxes:
         assert "dict" in message.lower()
 
     def test_textbox_offsets_only(self, tmp_xlsx: str) -> None:
-        """Offsets without size/font still writes file (exercises insert_shape_with_offset path)."""
+        """Offsets alone move the textbox's corner and leave its size alone.
+
+        The 25-pixel ``y_offset`` is larger than the 20-pixel row, so the anchor
+        rolls over into row 3; the pixel position is what must come out right.
+        """
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"text": "T", "x_offset": 15, "y_offset": 25}})
-        assert Path(tmp_xlsx).exists()
+        root = _drawing(tmp_xlsx)
+        assert _anchor_px(root)[:2] == (1 * DEFAULT_COL_PX + 15, 1 * DEFAULT_ROW_PX + 25)
+        assert _shape_extent_px(root) == (192, 120)
 
     def test_textbox_wrong_value_type_raises(self, tmp_xlsx: str) -> None:
         """Non-string, non-dict value raises TypeError."""
@@ -294,13 +458,13 @@ class TestTextboxes:
     def test_textbox_invalid_color_raises(self, tmp_xlsx: str) -> None:
         """Invalid color string surfaces the parse error."""
         df = pd.DataFrame({"A": [1]})
-        with pytest.raises(ValueError, match="color"):
+        with pytest.raises(ValueError, match=r"textboxes\['B2'\]: 'fill_color': Unknown color: not_a_color"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"B2": {"text": "T", "fill_color": "not_a_color"}})
 
     def test_textbox_invalid_cell_ref_raises(self, tmp_xlsx: str) -> None:
         """Invalid cell reference raises."""
         df = pd.DataFrame({"A": [1]})
-        with pytest.raises(ValueError):  # noqa: PT011
+        with pytest.raises(ValueError, match=r"textboxes\['not_a_ref'\]: Invalid row number in cell reference"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, textboxes={"not_a_ref": "T"})
 
     def test_textbox_with_dfs_to_xlsx_per_sheet(self, tmp_xlsx: str) -> None:
@@ -314,7 +478,15 @@ class TestTextboxes:
             ],
             tmp_xlsx,
         )
-        assert Path(tmp_xlsx).exists()
+        first, second = _sheet_drawing(tmp_xlsx, 1), _sheet_drawing(tmp_xlsx, 2)
+        assert [t.text for t in first.iterfind(".//a:t", NS)] == ["Sheet 1 note"]
+        assert [t.text for t in second.iterfind(".//a:t", NS)] == ["Sheet 2"]
+        first_run, second_run = first.find(".//a:rPr", NS), second.find(".//a:rPr", NS)
+        assert first_run is not None
+        assert second_run is not None
+        # Each sheet keeps its own font: the bold is S2's alone.
+        assert "b" not in first_run.attrib
+        assert second_run.attrib.get("b") == "1"
 
     def test_textbox_combined_with_other_features(self, tmp_xlsx: str) -> None:
         """Textboxes coexist with images, checkboxes, comments on the same sheet."""
@@ -326,7 +498,14 @@ class TestTextboxes:
             checkboxes={"E1": True},
             comments={"A1": "Names column"},
         )
-        assert Path(tmp_xlsx).exists()
+        root = _drawing(tmp_xlsx)
+        assert [t.text for t in root.iterfind(".//a:t", NS)] == ["Notes"]
+        assert _shape_extent_px(root) == (150, 60)
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["E1"].value is True
+        comment = ws["A1"].comment
+        assert comment is not None
+        assert "Names column" in comment.text
 
 
 class TestCharts:
@@ -362,6 +541,83 @@ class TestCharts:
             # chart XML, not just produce a well-formed but empty chart.
             assert "Sheet1!$B$2:$B$4" in chart_xml
             assert "Sheet1!$A$2:$A$4" in chart_xml
+
+    @staticmethod
+    def _chart(path: str) -> ElementTree.Element:
+        """Return ``xl/charts/chart1.xml`` of a written workbook, parsed."""
+        with zipfile.ZipFile(path) as zf:
+            return ElementTree.fromstring(zf.read("xl/charts/chart1.xml"))  # noqa: S314 - our own output
+
+    @staticmethod
+    def _axis_title(chart: ElementTree.Element, axis: str) -> str | None:
+        """The title text of the chart's ``c:catAx`` or ``c:valAx``, or None."""
+        texts = [t.text or "" for t in chart.iterfind(f".//c:plotArea/c:{axis}/c:title//a:t", NS)]
+        return "".join(texts) if texts else None
+
+    def test_chart_geometry_legend_and_axis_names(self, tmp_xlsx: str) -> None:
+        """width, height, both offsets, legend_position and both axis names reach the XML.
+
+        A column chart, where ``x_axis_name`` titles the category axis; a bar
+        chart turns the axes round. The size and the offsets are read from the
+        drawing anchor, in pixels.
+        """
+        df = pd.DataFrame({"Month": ["Jan", "Feb", "Mar"], "Sales": [120, 145, 160]})
+        xlsxturbo.df_to_xlsx(
+            df,
+            tmp_xlsx,
+            charts={
+                "D2": {
+                    "type": "column",
+                    "data_range": "Sheet1!$B$2:$B$4",
+                    "width": 720,
+                    "height": 480,
+                    "x_offset": 15,
+                    "y_offset": 25,
+                    "legend_position": "bottom",
+                    "x_axis_name": "Month",
+                    "y_axis_name": "Units sold",
+                }
+            },
+        )
+        x_from, y_from, x_to, y_to = _anchor_px(_drawing(tmp_xlsx))
+        # D2 is column 3, row 1.
+        assert (x_from, y_from) == (3 * DEFAULT_COL_PX + 15, 1 * DEFAULT_ROW_PX + 25)
+        assert (x_to - x_from, y_to - y_from) == (720, 480)
+
+        chart = self._chart(tmp_xlsx)
+        legend_pos = chart.find(".//c:legend/c:legendPos", NS)
+        assert legend_pos is not None
+        assert legend_pos.attrib.get("val") == "b"
+        assert self._axis_title(chart, "catAx") == "Month"
+        assert self._axis_title(chart, "valAx") == "Units sold"
+
+    def test_chart_defaults_are_not_what_the_test_above_asserts(self, tmp_xlsx: str) -> None:
+        """The control: a chart with none of those options is 480 x 288 at the cell, legend right, no axis titles."""
+        df = pd.DataFrame({"Month": ["Jan", "Feb", "Mar"], "Sales": [120, 145, 160]})
+        xlsxturbo.df_to_xlsx(
+            df, tmp_xlsx, charts={"D2": {"type": "column", "data_range": "Sheet1!$B$2:$B$4"}}
+        )
+        x_from, y_from, x_to, y_to = _anchor_px(_drawing(tmp_xlsx))
+        assert (x_from, y_from) == (3 * DEFAULT_COL_PX, 1 * DEFAULT_ROW_PX)
+        assert (x_to - x_from, y_to - y_from) == (480, 288)
+        chart = self._chart(tmp_xlsx)
+        legend_pos = chart.find(".//c:legend/c:legendPos", NS)
+        assert legend_pos is not None
+        assert legend_pos.attrib.get("val") == "r"
+        assert self._axis_title(chart, "catAx") is None
+        assert self._axis_title(chart, "valAx") is None
+
+    def test_chart_invalid_legend_position_raises(self, tmp_xlsx: str) -> None:
+        """An unknown legend position is refused with the valid ones."""
+        df = pd.DataFrame({"A": [1, 2]})
+        charts: Any = {
+            "D2": {"type": "bar", "data_range": "Sheet1!$A$2:$A$3", "legend_position": "middle"}
+        }
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=r"charts\['D2'\]: Unknown legend position 'middle'\. Valid: right, left, top, bottom, top_right",
+        ):
+            xlsxturbo.df_to_xlsx(df, tmp_xlsx, charts=charts)
 
     def test_multi_series_chart(self, tmp_xlsx: str) -> None:
         """Charts support explicit multiple series."""
@@ -788,6 +1044,57 @@ class TestSparklines:
         assert 'dateAxis="1"' in xml
         assert "<xm:f>Sheet1!A1:C1</xm:f>" in xml  # the supplied date range
 
+    @pytest.mark.parametrize(
+        ("key", "value", "expected"),
+        [
+            ("markers", True, 'markers="1"'),
+            ("high_point", True, 'high="1"'),
+            ("low_point", True, 'low="1"'),
+            ("first_point", True, 'first="1"'),
+            ("last_point", True, 'last="1"'),
+            ("negative_points", True, 'negative="1"'),
+            ("show_axis", True, 'displayXAxis="1"'),
+            ("show_hidden_data", True, 'displayHidden="1"'),
+            ("group_max", True, 'maxAxisType="group"'),
+            ("group_min", True, 'minAxisType="group"'),
+            ("right_to_left", True, 'rightToLeft="1"'),
+            # Read by column: the first sparkline of the group takes column A.
+            ("column_order", True, "<xm:f>Sheet1!A2:A3</xm:f>"),
+            ("color", "#112233", '<x14:colorSeries rgb="FF112233"/>'),
+            ("high_point_color", "#112234", '<x14:colorHigh rgb="FF112234"/>'),
+            ("low_point_color", "#112235", '<x14:colorLow rgb="FF112235"/>'),
+            ("first_point_color", "#112236", '<x14:colorFirst rgb="FF112236"/>'),
+            ("last_point_color", "#112237", '<x14:colorLast rgb="FF112237"/>'),
+            ("negative_points_color", "#112238", '<x14:colorNegative rgb="FF112238"/>'),
+            ("markers_color", "#112239", '<x14:colorMarkers rgb="FF112239"/>'),
+            # Style 5 draws from theme colour 8; the default, style 1, from 4.
+            ("style", 5, '<x14:colorSeries theme="8"'),
+            ("line_weight", 2.5, 'lineWeight="2.5"'),
+        ],
+    )
+    def test_every_sparkline_toggle_and_colour_reaches_the_xml(
+        self, tmp_xlsx_factory: Callable[..., str], key: str, value: object, expected: str
+    ) -> None:
+        """One sparkline per key, and each key's own attribute or colour element.
+
+        Every case is checked against a sparkline without the key as well, so
+        an expected string that is there by default cannot pass. A grouped
+        location (one sparkline per row of A2:B3) is used for all of them,
+        because ``column_order`` changes nothing on a single sparkline.
+
+        The keys are those ``SPARKLINE_KEYS`` in src/apply/sparklines.rs lists
+        besides ``range``, ``type``, ``custom_max``, ``custom_min`` and
+        ``date_range``, which the tests above cover.
+        """
+        df = pd.DataFrame({"a": [1, -2], "b": [3, 4]})
+        base: Any = {"range": "Sheet1!A2:B3"}
+        with_key: Any = {**base, key: value}
+        plain, configured = tmp_xlsx_factory(), tmp_xlsx_factory()
+        xlsxturbo.df_to_xlsx(df, plain, sparklines={"D2:D3": base})
+        xlsxturbo.df_to_xlsx(df, configured, sparklines={"D2:D3": with_key})
+        assert expected not in self._sheet_xml(plain), f"{expected!r} is there without {key!r}"
+        assert expected in self._sheet_xml(configured), f"{key!r} did not reach the XML as {expected!r}"
+
 
 class TestNumbersReachingTheXmlAreChecked:
     """NaN, infinity and negative sizes were written into the XML verbatim.
@@ -818,6 +1125,9 @@ class TestNumbersReachingTheXmlAreChecked:
         df = pd.DataFrame({"q1": [10], "q2": [30]})
         config: Any = {"range": "Sheet1!A2:B2", "line_weight": 0.0}
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, sparklines={"C2": config})
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert 'lineWeight="0"' in xml
 
     @pytest.mark.parametrize("size", [float("nan"), -3.0], ids=["nan", "negative"])
     def test_textbox_font_size(self, tmp_xlsx: str, size: float) -> None:

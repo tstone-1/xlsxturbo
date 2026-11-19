@@ -320,17 +320,22 @@ proptest! {
     /// The message promises "Light1-Light21, Medium1-Medium28, Dark1-Dark11".
     /// That is a claim about the code, and until now nothing checked it. Meant
     /// to catch drift in either direction: a variant dropped from the match, or
-    /// a message that over-promises.
+    /// a message that over-promises. An accepted name must also select its own
+    /// variant, whose XML name is `TableStyle` plus the name: `is_ok()` alone
+    /// passed with `"Light21"` mapped to `Light20`.
     #[test]
     fn table_style_families_match_their_documented_ranges(
         idx in 0usize..TABLE_STYLE_FAMILIES.len(),
         n in 1u32..40,
     ) {
         let (family, highest) = TABLE_STYLE_FAMILIES[idx];
-        prop_assert_eq!(
-            parse_table_style(&format!("{}{}", family, n)).is_ok(),
-            n <= highest
-        );
+        let name = format!("{}{}", family, n);
+        let parsed = parse_table_style(&name).map(|style| style.to_string());
+        if n <= highest {
+            prop_assert_eq!(parsed, Ok(format!("TableStyle{}", name)));
+        } else {
+            prop_assert!(parsed.is_err(), "'{}' was accepted", name);
+        }
     }
 
     /// The lookup is case-sensitive; `medium9` is not `Medium9`.

@@ -10,9 +10,7 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestUnwritableTempFolder:
@@ -60,7 +58,7 @@ class TestConstantMemoryMode:
         """File is created in constant memory mode."""
         df = pd.DataFrame({"A": list(range(100)), "B": list(range(100, 200))})
         rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx, constant_memory=True)
-        assert rows > 0
+        assert rows == 101  # header + 100 data rows
         assert cols == 2
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
@@ -89,7 +87,7 @@ class TestConstantMemoryMode:
                 validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
                 rich_text={"B1": [("Bold", {"bold": True})]},
             )
-        assert rows > 0
+        assert rows == 4  # header + 3 data rows
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # Table should NOT be created

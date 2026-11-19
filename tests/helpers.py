@@ -7,23 +7,18 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# openpyxl is a hard test requirement (`requirements-test.txt`), so it is imported
+# unconditionally. It used to be imported inside `try`/`except ImportError`, and a
+# missing openpyxl then turned every module carrying a skip mark for it into a
+# green row of skips -- several hundred tests, refusal tests that never read a
+# workbook among them. A missing requirement must fail the collection.
+from openpyxl import load_workbook
+
 if TYPE_CHECKING:
-    from openpyxl import load_workbook
     from openpyxl.workbook.workbook import Workbook
     from openpyxl.worksheet.worksheet import Worksheet
 
-    HAS_OPENPYXL = True
-else:
-    try:
-        from openpyxl import load_workbook
-
-        HAS_OPENPYXL = True
-    except ImportError:
-        load_workbook = None
-        HAS_OPENPYXL = False
-
 __all__ = [
-    "HAS_OPENPYXL",
     "REPO_ROOT",
     "TIMESTAMPED_PART",
     "TINY_PNG_B64",
@@ -85,7 +80,9 @@ def get_temp_path(suffix: str = ".xlsx") -> str:
         suffix: File extension (including the dot) for the temp path.
 
     Returns:
-        The path to a newly created, empty temporary file.
+        The path to a newly created, empty temporary file. Because the file
+        already exists, ``assert Path(path).exists()`` after an export proves
+        nothing about the export; read back what the test is about instead.
     """
     fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)

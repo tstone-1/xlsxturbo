@@ -22,7 +22,7 @@ pub(crate) use conditional_formats::apply_conditional_formats;
 pub(crate) use dimensions::{apply_column_widths, apply_column_widths_with_autofit_cap};
 pub(crate) use formulas::apply_formula_columns;
 pub(crate) use media::{apply_checkboxes, apply_images, apply_textboxes};
-pub(crate) use pivot::{apply_pivot_tables, FrameArea, PivotRequest};
+pub(crate) use pivot::{cell_writes, plan_pivot_tables, FrameArea, PivotRequest};
 pub(crate) use rich_text::apply_rich_text;
 pub(crate) use sparklines::apply_sparklines;
 pub(crate) use validations::apply_validations;

@@ -22,9 +22,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, TIMESTAMPED_PART, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import TIMESTAMPED_PART, active_ws, load_workbook
 
 
 def archive_parts(data: bytes) -> dict[str, bytes]:

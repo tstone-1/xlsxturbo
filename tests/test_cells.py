@@ -9,9 +9,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestCells:
@@ -46,11 +44,11 @@ class TestCells:
         """Dict-style cell with num_format preserves text format."""
         df = pd.DataFrame({"a": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, cells={
-            "D6": {"value": "934728173849", "num_format": "@"}
+            "D6": {"value": "000123456789", "num_format": "@"}
         })
         wb = load_workbook(tmp_xlsx)
         cell = active_ws(wb)["D6"]
-        assert cell.value == "934728173849"
+        assert cell.value == "000123456789"
         assert cell.number_format == "@"
         wb.close()
 

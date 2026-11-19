@@ -31,7 +31,7 @@ xlsxturbo.df_to_xlsx(df, "report.xlsx",
 xlsxturbo.df_to_xlsx(df, "report.xlsx",
     cells={
         'C5': 'Total',
-        'C6': {'value': '934728173849', 'num_format': '@'},  # Text format
+        'C6': {'value': '000123456789', 'num_format': '@'},  # Text format
         'C7': {'value': 0.15, 'num_format': '0.00%'}         # Percentage
     }
 )

@@ -34,7 +34,9 @@ The key is the pivot table's first cell:
 - `'Summary!A3'` places it on sheet `Summary`. When the workbook has a sheet of that name
   (compared without case, as Excel does), the pivot table goes there; otherwise an empty
   sheet is created for it after every other sheet. A name that needs quotes in Excel is
-  written the same way here: `"'Q1 summary'!A3"`.
+  written the same way here: `"'Q1 summary'!A3"`. A sheet name is taken as written; an
+  unquoted one with spaces before or after it is refused, so a sheet whose name really
+  starts or ends with a space is given in quotes: `"' Data '!A3"`.
 
 A first cell inside the header or data of any frame in the workbook is refused, and so is a
 second pivot table at the same cell.
@@ -60,16 +62,27 @@ place of the pivot table. A sheet of its own is the safe choice.
 A value field dict takes `field` (a column name, required), `function` (`'sum'`, `'count'`,
 `'average'`, `'max'`, `'min'`, `'product'`, `'count_numbers'`, `'std_dev'`, `'std_dev_p'`,
 `'var'`, `'var_p'`; default `'sum'`), `name` (its caption; default Excel's, such as
-`Sum of Volume`) and `num_format`. Two value fields may not have the same caption.
+`Sum of Volume`) and `num_format`. Two value fields may not be given the same `name`;
+captions Excel makes itself are not checked. A `name` may not equal a column name of the
+frame either, compared without case, as Excel does: `{'field': 'Volume', 'name': 'item'}`
+beside a column `Item` raises `ConfigurationError`. A frame column that happens to be
+named like a default caption, such as `Sum of Volume` beside a `Volume` value field
+without a `name`, is not refused; give that value field a `name` to keep the two apart.
 
-Field names are matched exactly, case included. A name that is not a column of the frame
-raises `ConfigurationError` listing the columns that exist.
+A field may be used once across `rows`, `columns` and `filters`; it may also be a value
+field. Field names are matched exactly, case included. A name that is not a column of the
+frame raises `ConfigurationError` listing the columns that exist. A column whose name is
+not a string is given by its text: a column `2024` is the field `'2024'`.
 
 ## What the frame needs
 
 - A header row: `header=False` is refused, because the header texts are the field names.
-- At least one data row.
+- At least one column and at least one data row.
 - Column names that are unique without regard to case, and not empty.
+- A header row that keeps its texts: `cells`, `hyperlinks`, `merged_ranges`, `rich_text`
+  or `checkboxes` writing into a header cell of the frame raises `ConfigurationError`
+  naming both options and the cell, before anything is written. Writes anywhere else,
+  data cells included, are allowed.
 
 ## When the table appears
 
@@ -85,7 +98,11 @@ source cells when the workbook is opened. Two things follow:
 
 In `dfs_to_xlsx`, `pivot_tables` belongs to the entry that gives it. A workbook-wide
 `pivot_tables` applies to the first frame of each sheet, not to a second frame on the same
-sheet, in the same way as `charts`. Pivot tables from several frames may share one sheet:
+sheet, in the same way as `charts`. So a workbook-wide key works only for the frame's own
+sheet (`'F3'`): a key that names a sheet (`'Summary!A3'`) places every sheet's pivot table
+at that one cell, and the second sheet is refused for it. A sheet's options dict switches
+the workbook-wide `pivot_tables` off with `{}`; `None` there keeps it, as for every other
+option. Pivot tables from several frames may share one sheet:
 
 ```python
 xlsxturbo.dfs_to_xlsx([

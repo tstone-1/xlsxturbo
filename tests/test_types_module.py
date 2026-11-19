@@ -23,6 +23,8 @@ import pytest
 import xlsxturbo
 from xlsxturbo import types as types_module
 
+from tests.helpers import active_ws, load_workbook
+
 
 def _frame() -> pd.DataFrame:
     """Return the smallest DataFrame the option probes can be applied to."""
@@ -133,10 +135,20 @@ class TestRuntimeUsability:
         assert "bold" in types_module.HeaderFormat.__annotations__
         assert "bg_color" in types_module.HeaderFormat.__annotations__
 
-    def test_a_typeddict_accepts_a_conforming_dict(self) -> None:
-        """Annotating a dict literal with a shape works without a guard."""
+    def test_a_typeddict_accepts_a_conforming_dict(self, tmp_path: Path) -> None:
+        """A dict annotated with a shape is a plain dict the entry points take as is.
+
+        Annotating it needs no guard (pyright checks the literal here), and at
+        runtime it is passed straight through: the header comes out bold at 12
+        points, read back from the workbook.
+        """
         header: types_module.HeaderFormat = {"bold": True, "font_size": 12.0}
-        assert header["bold"] is True
+        assert type(header) is dict
+        out = tmp_path / "shape.xlsx"
+        xlsxturbo.df_to_xlsx(_frame(), out, header_format=header)
+        cell = active_ws(load_workbook(out))["A1"]
+        assert cell.font.bold is True
+        assert cell.font.size == 12
 
     def test_module_imports_without_the_extension(self) -> None:
         """``types.py`` depends only on the standard library.

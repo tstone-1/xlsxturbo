@@ -24,10 +24,13 @@ To confirm a release on PyPI, query the version-specific endpoint `https://pypi.
 
 ## Building against a crate release inside the 3-day window
 
-`~/.cargo/config.toml` holds `global-min-publish-age = "3 days"`, so `cargo update` does not
-resolve a crate version published less than three days ago. To write and test the code for
-such a release before then (done for rust_xlsxwriter 0.103.0 on 2026-11-19, with the
-owner's agreement), use a throwaway worktree, never the repo:
+The project resolves only releases at least three days old: `pyproject.toml` sets
+`[tool.uv] exclude-newer = "3 days"` for the Python side, and on a machine whose Cargo
+configuration sets `[registry] global-min-publish-age = "3 days"` (Cargo 1.100 or later),
+`cargo update` does not resolve a crate version published less than three days ago and
+moves a locked version that young back to an older one. To write and test the code for
+such a release before then (done for rust_xlsxwriter 0.103.0 on 2026-11-19), use a
+throwaway worktree, never the repo:
 
 1. `git worktree add --detach <scratch>/wt HEAD`, then `git diff HEAD --binary | git -C <scratch>/wt apply`.
 2. In the worktree's `Cargo.toml`, raise the requirement to the new version *and* add
@@ -40,12 +43,13 @@ owner's agreement), use a throwaway worktree, never the repo:
    check each copy with `cmp`. The repo then fails `cargo build` with "failed to select a
    version" until the window ends, when one `cargo update -p <crate>` takes the registry copy.
 
-   For 0.103.0 the owner chose not to wait, so that `main` could hold the work and the
-   release be tagged from any machine: once the comparison below held,
+   For 0.103.0 the window was not waited out, so that `main` could hold the work with a
+   lockfile every clone can build: once the comparison below held,
    `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p rust_xlsxwriter` took the
-   registry copy the same day, and every gate ran again in the repo.
+   registry copy the same day, and every gate ran again in the repo. That variable overrides
+   the minimum publish age for one command.
 
-Building runs the new crate's code on this machine early, which is what the window exists
+Building runs the new crate's code on the building machine early, which is what the window exists
 to delay: check first that it has no `build.rs` and no new required dependencies.
 Regenerate `THIRD-PARTY-LICENSES.md` after the registry update, not from the worktree:
 the git source sorts the crate to another place in its license block, which

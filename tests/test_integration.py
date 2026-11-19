@@ -8,12 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
-import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, TINY_PNG_B64, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import TINY_PNG_B64, active_ws, load_workbook
 
 
 class TestAllFeaturesCombined:
@@ -34,14 +31,22 @@ class TestAllFeaturesCombined:
             header_format={"bold": True, "bg_color": "#4F81BD", "font_color": "white"},
             freeze_panes=True,
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert "StudentScores" in ws.tables
         # freeze_panes=True must freeze the header row (split below row 1).
         assert ws.freeze_panes == "A2"
-        # Note: table_style overrides header_format styling
-        # This is expected Excel behavior - tables have their own header styles
+        # header_format is written as the header cells' own format, so it is
+        # there beside the table style rather than replaced by it.
+        header = ws["A1"]
+        assert header.font.bold is True
+        assert header.fill.fgColor.rgb == "FF4F81BD"
+        assert header.font.color is not None
+        assert header.font.color.rgb == "FFFFFFFF"
+        # The index key wins over the "_all" cap for column A.
+        width_a = ws.column_dimensions["A"].width
+        assert width_a is not None
+        assert 20 <= width_a < 21
         wb.close()
 
     def test_all_features_dfs_to_xlsx(self, tmp_xlsx: str) -> None:
@@ -74,7 +79,6 @@ class TestAllFeaturesCombined:
             autofit=True,
             freeze_panes=True,
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         assert "NumbersTable" in wb["Numbers"].tables
         assert "LettersTable" in wb["Letters"].tables
@@ -102,7 +106,6 @@ class TestV10AllFeatures:
             rich_text={"D1": [("Legend:", {"bold": True}), " student scores"]},
             images={"E1": img_path},
         )
-        assert Path(path).exists()
 
         wb = load_workbook(path)
         ws = active_ws(wb)
@@ -142,7 +145,6 @@ class TestV10AllFeatures:
             ],
             tmp_xlsx,
         )
-        assert Path(tmp_xlsx).exists()
 
         wb = load_workbook(tmp_xlsx)
         # Sheet1: the per-sheet comment must land on its own sheet.

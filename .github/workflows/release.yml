@@ -193,9 +193,10 @@ jobs:
 
       - name: Generate Rust SBOM (CycloneDX, cargo-cyclonedx 0.5.9)
         run: |
-          # Pinned: this job runs only on a tag, `github-release` needs its
-          # `sbom` artifact, and a breaking cargo-cyclonedx release would fail
-          # the GitHub Release step after PyPI publish has already happened.
+          # Pinned: this job runs on every run of this workflow, a tag or a
+          # manual run, and on a tag both the PyPI upload and `github-release`
+          # wait for it. A breaking cargo-cyclonedx release would stop the
+          # release before the upload; pinning keeps that from happening at all.
           # `--locked` pins the tool's dependencies, not the tool -- the version
           # has to be written out. It is in the step name too, because
           # `cargo install` prints `Successfully installed` for a version that
@@ -318,7 +319,9 @@ jobs:
     runs-on: ubuntu-latest
     # `release-check` is listed although every build job already needs it, so
     # the upload does not depend on that staying true of each build job.
-    needs: [release-check, linux, windows, macos, sdist, smoke-test]
+    # `sbom` is listed because `github-release` needs it: if it failed after the
+    # upload, PyPI would have a release with no GitHub Release beside it.
+    needs: [release-check, linux, windows, macos, sdist, smoke-test, sbom]
     if: startsWith(github.ref, 'refs/tags/')
     environment:
       name: pypi

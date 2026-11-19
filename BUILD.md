@@ -269,7 +269,9 @@ After pushing the tag:
    - **windows** (x64)
    - **macos** (x86_64, aarch64)
    - **sdist**
-   - **sbom** - CycloneDX SBOM for the Rust dependencies linked into the extension, attached to the release
+   - **sbom** - CycloneDX SBOM for the Rust dependencies linked into the extension, attached to the release.
+     The PyPI upload waits for it as well as the GitHub Release, so a failed SBOM stops the
+     release before anything is uploaded.
    - **smoke-test** - one leg per published wheel, each on a runner of that wheel's own
      architecture (ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest,
      macos-15-intel). Each asserts the downloaded wheel's platform tag before running
@@ -322,4 +324,4 @@ uv run --no-sync maturin develop --release
 | Workflow | Trigger | Jobs |
 |----------|---------|------|
 | CI | Push/PR to main | `test` (`cargo test --release` + build), `python-test` / `python-test-windows` / `python-test-macos` (pytest against a maturin-built wheel per OS), `lint` (fmt + clippy), `python-lint` (ruff + bandit + pyright), `coverage` (informational), `cargo-audit`, `pip-audit`, `codeql` (python, rust), `action-pins`, `dependency-review` (pull requests only) |
-| Release | Push tag `v*` (a manual run builds and tests but publishes nothing) | `release-check` (tag equals the package version, CHANGELOG section exists; needed by every build job and by `release`), `linux` (x86_64, aarch64), `windows` (x64), `macos` (x86_64, aarch64), `sdist`, `sbom`, `smoke-test` (five legs, one per published wheel, each on a runner of that wheel's architecture), `release` (PyPI publish), `github-release` (tagged Release with wheels and SBOMs) |
+| Release | Push tag `v*` (a manual run builds and tests but publishes nothing) | `release-check` (tag equals the package version, CHANGELOG section exists; needed by every build job and by `release`), `linux` (x86_64, aarch64), `windows` (x64), `macos` (x86_64, aarch64), `sdist`, `sbom`, `smoke-test` (five legs, one per published wheel, each on a runner of that wheel's architecture), `release` (PyPI publish, after every job above, `sbom` included), `github-release` (tagged Release with wheels and SBOMs) |

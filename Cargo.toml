@@ -22,7 +22,7 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
-# 0.102.0 is a floor, not a preference: each release up to it fixed something
+# 0.103.0 is a floor, not a preference: each release up to it fixed something
 # this crate relies on or a changelog entry promises. 0.98.2 fixed the
 # `define_name` panic on an empty name (upstream #186) and 0.99.0 the missing
 # name validation (#189), which is what makes a table name colliding with a
@@ -37,7 +37,14 @@ required-features = ["cli"]
 # `conditional_formats` whose value holds a double quote or non-ASCII text,
 # rule priorities on repeated ranges, and the quadratic time of placing many
 # comments, images or charts on a sheet with `row_heights` or `column_widths`
-# (the 1.12.2 changelog entry).
+# (the 1.12.2 changelog entry). 0.103.0 added `PivotTable` and
+# `Worksheet::add_pivot_table()`, which `pivot_tables` (src/apply/pivot.rs) is
+# built on; escaped control characters in attributes (#216) and tabs, CRs and
+# `_xHHHH_` text in table column names and other places (#217), which
+# `tests/test_attribute_escaping.py` and `tests/test_table_headers.py` pin;
+# quoted a sheet named `TRUE` or `FALSE` in the autofilter's defined name; and
+# fixed a failed `Workbook::save(path)` leaving a 0-byte file (#221), a path
+# xlsxturbo avoids anyway by saving through `save_to_writer()`.
 rust_xlsxwriter = { version = "0.103.0", features = ["constant_memory"] }
 csv = "1.4"
 clap = { version = "4.6", features = ["derive"], optional = true }
@@ -60,6 +67,10 @@ unicode-normalization = "0.1"
 # false` drops the `fork`/`timeout` features, which pull in `rusty-fork` and
 # `wait-timeout` and are unused here; `std` is still needed for the runner.
 proptest = { version = "1.11", default-features = false, features = ["std", "bit-set"] }
+# Reads the parts of the workbooks the CLI writes (tests/cli.rs). Already in the
+# tree via rust_xlsxwriter with the same features, so this adds no download and
+# does not reach the shipped binary or the license notice.
+zip = { version = "9.6", default-features = false, features = ["deflate"] }
 
 [profile.release]
 opt-level = 3

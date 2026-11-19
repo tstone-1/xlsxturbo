@@ -8,6 +8,7 @@ from the sources, and the generator's parsers silently matching nothing.
 from __future__ import annotations
 
 import importlib
+import re
 import subprocess
 import sys
 from types import ModuleType
@@ -18,6 +19,17 @@ from tests.helpers import REPO_ROOT, repo_checkout_available
 
 SCRIPT = REPO_ROOT / "scripts" / "gen_capability_matrix.py"
 DOC = REPO_ROOT / "docs" / "capability-matrix.md"
+
+# Count words the generated prose could use instead of a digit.
+NUMBER_WORDS = {
+    word: value
+    for value, word in enumerate(
+        [
+            "zero", "one", "two", "three", "four", "five", "six",
+            "seven", "eight", "nine", "ten", "eleven", "twelve",
+        ]
+    )
+}
 
 # This module audits the generator script and its committed output, neither of
 # which ships in the wheel. Outside a checkout there is nothing here to test --
@@ -100,6 +112,31 @@ class TestGeneratorParsers:
             f"the constant_memory safe list grew to {len(safe)} ({safe}). That is allowed, but it "
             "should be a deliberate decision -- update this bound if so."
         )
+
+    def test_constant_memory_prose_states_only_computed_counts(self) -> None:
+        """Every count in the constant_memory paragraph is one the generator computed.
+
+        The paragraph once said "keeps 4 ... Those three are the ones applied while
+        rows are being written": the first number was computed, the second was typed
+        when the list had three entries. The freshness test cannot see that, because
+        it compares the page with the generator's own output.
+        """
+        gen = _load_generator()
+        computed = {len(gen.parse_constant_memory_safe())}
+        text = gen.build_matrix()
+        start = text.index("`constant_memory=True` keeps")
+        paragraph = text[start : text.index("\n\n", start)]
+        disabled_count = re.search(r"\) and skips\s+(\d+)\.", paragraph)
+        assert disabled_count, f"the paragraph no longer states the skipped count:\n{paragraph}"
+        computed.add(int(disabled_count.group(1)))
+        count = re.compile(r"\b(\d+|" + "|".join(NUMBER_WORDS) + r")\b", re.IGNORECASE)
+        stated = [
+            (word, int(word) if word.isdigit() else NUMBER_WORDS[word.lower()])
+            for word in (match.group(0) for match in count.finditer(paragraph))
+        ]
+        assert stated, f"found no count at all in the paragraph:\n{paragraph}"
+        wrong = [word for word, value in stated if value not in computed]
+        assert not wrong, f"counts {wrong} disagree with the computed {sorted(computed)}:\n{paragraph}"
 
     def test_constant_memory_disabled_scalars_non_empty(self) -> None:
         """The hand-listed scalar flags parse out of the warning function."""

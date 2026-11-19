@@ -358,10 +358,18 @@ def main() -> int:
     # Steps 1 and 2 build into `target/` only. From step 3 on the venv holds an
     # instrumented extension, so everything after it runs inside the `try` whose
     # `finally` puts an ordinary build back, on success and on failure alike.
+    # A failed restore after a successful report still fails the run: the report is
+    # right, but the venv is left measuring the wrong build, and an exit code of 0
+    # would let a script or CI step carry on with it. After a failed report the
+    # report's own failure is the one that propagates.
+    restored = False
     try:
         report_both_halves(args, instrument, profile_env, test_binaries, other_binaries, profdata_tool, cov_tool)
     finally:
-        restore_uninstrumented_build()
+        restored = restore_uninstrumented_build()
+    if not restored:
+        print("[FAIL] the coverage report is complete, but the venv was not restored (see above)")
+        return 1
     return 0
 
 

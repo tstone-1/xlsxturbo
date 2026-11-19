@@ -517,6 +517,23 @@ mod tests {
     }
 
     #[test]
+    fn second_60_keeps_its_fraction() {
+        // The fraction rides on top of the leap second: 23:59:60.5 is half a
+        // second into the next day, not the next day itself.
+        let leap = parse_datetime("2016-12-31T23:59:60.5", ISO_DATETIME).expect("a datetime");
+        let next = parse_datetime("2017-01-01T00:00:00.5", ISO_DATETIME).expect("a datetime");
+        assert_eq!(naive_datetime_to_excel(leap), naive_datetime_to_excel(next));
+        assert_eq!(
+            serial("2024-01-15T10:30:60.25"),
+            serial("2024-01-15T10:31:00.25")
+        );
+        assert_ne!(
+            serial("2024-01-15T10:30:60.25"),
+            serial("2024-01-15T10:31:00")
+        );
+    }
+
+    #[test]
     fn every_pattern_in_use_is_one_this_module_reads() {
         use crate::types::{DateOrder, DATETIME_PATTERNS};
         // A pattern with a field this module does not know never matches, so

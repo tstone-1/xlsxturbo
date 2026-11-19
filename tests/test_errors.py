@@ -18,8 +18,9 @@ Three properties, in order of how much they are worth:
    both state the bases; a drift between those and the runtime classes would
    otherwise only show up as a user's broken ``except`` clause.
 
-See ``docs/roadmap-1.0.md`` decision D6 for why the hierarchy has these five
-classes and not the ones originally planned.
+See ``docs/roadmap-1.0.md`` decision D6 for why the hierarchy shipped with the
+classes it did and not the ones originally planned. Classes have been added
+since; ``EXPECTED_BASES`` below is the current list, not D6.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ import pytest
 import xlsxturbo
 
 from tests.helpers import (
-    HAS_OPENPYXL,
     REPO_ROOT,
     active_ws,
     load_workbook,
@@ -316,8 +316,8 @@ class TestHierarchyShape:
         """``except XlsxTurboError`` is sufficient for every trigger.
 
         Written as try/except rather than ``pytest.raises`` so the failure names
-        the trigger: a bare "DID NOT RAISE" from inside a loop over five triggers
-        does not say which one stopped raising.
+        the trigger: a bare "DID NOT RAISE" from inside a loop over every entry
+        in ``TRIGGERS`` does not say which one stopped raising.
         """
         for name, trigger in sorted(TRIGGERS.items()):
             try:
@@ -645,7 +645,6 @@ class TestCellsDictValuesStayInTheHierarchy:
                 f"message does not name {expected!r}: {message!r}"
             )
 
-    @pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required to read the workbook back")
     @pytest.mark.parametrize("key", sorted(CELL_VALUE_PROBES))
     def test_an_explicit_none_reads_as_unset(self, key: str, tmp_path: Path) -> None:
         """A ``None`` sub-value writes the cell as if the key were absent.

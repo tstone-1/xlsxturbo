@@ -71,7 +71,7 @@ earlier, so upgrading cannot break a handler you already have:
 ```python
 # Written against 0.18. Still correct, and still catches exactly what it did.
 try:
-    xlsxturbo.df_to_xlsx(df, path, column_widths={"A": 12})
+    xlsxturbo.df_to_xlsx(df, path, column_widths={-1: 12})
 except ValueError as exc:
     ...
 ```

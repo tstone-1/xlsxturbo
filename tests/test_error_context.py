@@ -36,6 +36,8 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
+from tests.helpers import active_ws, load_workbook
+
 # Two columns so a pattern-keyed option has something to be ambiguous about:
 # with one column, "which entry?" has only one possible answer and the test
 # could pass on a message that named nothing.
@@ -293,6 +295,17 @@ class TestFailuresNameTheOptionThatCausedThem:
             merged_ranges=[("H1:I1", "T", {"bg_color": "yellow"})],
             textboxes={"J2": {"text": "T", "font": {"color": "red"}}},
         )
+        # The calls went through *and* applied what they were given: a screen
+        # that accepted the options and then dropped them would pass a bare call.
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["A1"].fill.fgColor.rgb == "FF4472C4"
+        assert [dv.type for dv in ws.data_validations.dataValidation] == ["whole"]
+        assert ws["F1"].value == "x"
+        comment = ws["G1"].comment
+        assert comment is not None
+        assert comment.text.endswith("hi")
+        assert (ws["H1"].value, ws["H1"].fill.fgColor.rgb) == ("T", "FFFFFF00")
+        assert len(ws.conditional_formatting) == 1
 
 
 class TestColumnWidthFailuresNameTheColumn:
@@ -315,3 +328,11 @@ class TestColumnWidthFailuresNameTheColumn:
         the frame has), which is the one whose loop the other two skip.
         """
         xlsxturbo.df_to_xlsx(FRAME, tmp_xlsx, column_widths={"0": 30.0, "9": 12.0})
+        ws = active_ws(load_workbook(tmp_xlsx))
+        # openpyxl reports the stored width, which carries the writer's padding;
+        # only the order of magnitude is the point here.
+        width_a, width_j = ws.column_dimensions["A"].width, ws.column_dimensions["J"].width
+        assert width_a is not None
+        assert 30 <= width_a < 31, width_a
+        assert width_j is not None
+        assert 12 <= width_j < 13, width_j

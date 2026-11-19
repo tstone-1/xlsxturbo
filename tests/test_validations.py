@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestValidations:
@@ -152,15 +150,13 @@ class TestValidations:
             tmp_xlsx,
             validations={"Status": {"type": "list", "values": ["Open", "Closed", "Pending"]}},
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
-        assert len(ws.data_validations.dataValidation) > 0
-        dv = ws.data_validations.dataValidation[0]
-        # Assert the type and that the dropdown values actually landed.
+        (dv,) = ws.data_validations.dataValidation
+        # The type, every dropdown value in order, and the data rows of Status only.
         assert dv.type == "list"
-        assert "Open" in dv.formula1
-        assert "Pending" in dv.formula1
+        assert dv.formula1 == '"Open,Closed,Pending"'
+        assert str(dv.sqref) == "A2:A3"
         wb.close()
 
     def test_number_validation(self, tmp_xlsx: str) -> None:
@@ -171,15 +167,15 @@ class TestValidations:
             tmp_xlsx,
             validations={"Score": {"type": "whole_number", "min": 0, "max": 100}},
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
-        assert len(ws.data_validations.dataValidation) > 0
-        dv = ws.data_validations.dataValidation[0]
-        # Assert the type and the min/max bounds, not just presence.
+        (dv,) = ws.data_validations.dataValidation
+        # The type, the min/max bounds as a "between" rule, and the data rows.
         assert dv.type == "whole"
+        assert dv.operator is None  # "between", the attribute's default
         assert dv.formula1 == "0"
         assert dv.formula2 == "100"
+        assert str(dv.sqref) == "A2:A3"
         wb.close()
 
     def test_validation_with_messages(self, tmp_xlsx: str) -> None:
@@ -200,13 +196,116 @@ class TestValidations:
                 }
             },
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
-        assert len(ws.data_validations.dataValidation) > 0
-        dv = ws.data_validations.dataValidation[0]
+        (dv,) = ws.data_validations.dataValidation
+        assert dv.type == "decimal"
+        assert (dv.formula1, dv.formula2) == ("0", "100")
         assert dv.promptTitle == "Enter Value"
+        assert dv.prompt == "Must be between 0 and 100"
         assert dv.errorTitle == "Invalid"
+        assert dv.error == "Value out of range"
+        # "stop", the attribute's default, so it is left out of the XML.
+        assert dv.errorStyle is None
+        assert dv.showInputMessage
+        assert dv.showErrorMessage
+        wb.close()
+
+    @pytest.mark.parametrize("field", ["input_message", "error_message"])
+    def test_each_message_reaches_the_rule_without_its_title(self, tmp_xlsx: str, field: str) -> None:
+        """A message on its own is written, and the other message stays absent."""
+        config: Any = {"type": "whole_number", "min": 0, "max": 1, field: "Synthetic message"}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        (dv,) = active_ws(wb).data_validations.dataValidation
+        written = {"input_message": dv.prompt, "error_message": dv.error}
+        other = "error_message" if field == "input_message" else "input_message"
+        assert written[field] == "Synthetic message"
+        assert written[other] is None
+        assert (dv.promptTitle, dv.errorTitle) == (None, None)
+        wb.close()
+
+    @pytest.mark.parametrize(
+        ("alias", "config", "written_type"),
+        [
+            ("whole_number", {"min": 0, "max": 9}, "whole"),
+            ("whole", {"min": 0, "max": 9}, "whole"),
+            ("integer", {"min": 0, "max": 9}, "whole"),
+            ("decimal", {"min": 0, "max": 9}, "decimal"),
+            ("number", {"min": 0, "max": 9}, "decimal"),
+            ("text_length", {"min": 0, "max": 9}, "textLength"),
+            ("textlength", {"min": 0, "max": 9}, "textLength"),
+            ("length", {"min": 0, "max": 9}, "textLength"),
+            ("list", {"values": ["p", "q"]}, "list"),
+            ("WHOLE", {"min": 0, "max": 9}, "whole"),
+        ],
+    )
+    def test_every_documented_type_name_writes_its_rule(
+        self, tmp_xlsx: str, alias: str, config: dict[str, Any], written_type: str,
+    ) -> None:
+        """Each type name and alias in docs/data-validation.md writes its rule type.
+
+        The type name is matched without case, so an upper-case alias is one more case.
+        """
+        validation: Any = {"type": alias, **config}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": validation})
+        wb = load_workbook(tmp_xlsx)
+        (dv,) = active_ws(wb).data_validations.dataValidation
+        assert dv.type == written_type
+        if "max" in config:
+            assert (dv.formula1, dv.formula2) == ("0", "9")
+        wb.close()
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("max", sys.float_info.max), ("max", 1e308), ("min", -1e308), ("min", sys.float_info.max)],
+    )
+    def test_a_decimal_bound_above_excels_largest_number_is_refused(
+        self, tmp_xlsx: str, field: str, value: float,
+    ) -> None:
+        """A bound beyond 9.99999999999999E+307 gives a file Excel refuses to open.
+
+        Measured in Excel 16.0 for ``max=1e308`` and ``max=sys.float_info.max``: the
+        export succeeded and Excel could not open the workbook. Refused under the
+        documented-contract bug-fix exception, for the reason the 1.13.1 one-sided
+        rule replaced the ``f64::MAX`` stand-in.
+        """
+        config: Any = {"type": "decimal", field: value}
+        with pytest.raises(
+            xlsxturbo.ConfigurationError,
+            match=rf"validations\['a'\]: '{field}' is .*beyond Excel's largest number 9\.99999999999999E\+307",
+        ):
+            xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+
+    @pytest.mark.parametrize(("field", "value"), [("max", 9.99999999999999e307), ("min", -9.99999999999999e307)])
+    def test_excels_largest_number_is_still_a_decimal_bound(self, tmp_xlsx: str, field: str, value: float) -> None:
+        """Control: Excel's largest number itself opens in Excel, and is written."""
+        config: Any = {"type": "decimal", field: value}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        (dv,) = active_ws(wb).data_validations.dataValidation
+        assert float(dv.formula1) == value
+        assert dv.formula2 is None
+        wb.close()
+
+    @pytest.mark.parametrize(
+        ("kind", "low", "high"),
+        [("whole_number", 10, 0), ("decimal", 1.5, -1.5), ("text_length", 9, 2)],
+    )
+    def test_min_above_max_is_accepted_deliberately(self, tmp_xlsx: str, kind: str, low: float, high: float) -> None:
+        """``min`` above ``max`` is written as given, not refused.
+
+        Excel opens such a file; the rule then rejects every entry. Released versions
+        accept the call, so refusing it now would be a breaking change under
+        docs/stability.md, not a repair of a file Excel cannot open. This pins that
+        choice; change it only together with the conditional-format ``between`` case.
+        """
+        config: Any = {"type": kind, "min": low, "max": high}
+        xlsxturbo.df_to_xlsx(pd.DataFrame({"a": [1]}), tmp_xlsx, validations={"a": config})
+        wb = load_workbook(tmp_xlsx)
+        (dv,) = active_ws(wb).data_validations.dataValidation
+        assert dv.operator is None  # "between"
+        assert (dv.formula1, dv.formula2) == (str(low), str(high))
         wb.close()
 
     def test_whole_number_max_outside_i32_range_raises(self, tmp_xlsx: str) -> None:
@@ -240,7 +339,6 @@ class TestValidations:
         xlsxturbo.df_to_xlsx(
             df, tmp_xlsx, validations={"score_*": {"type": "whole_number", "min": 0, "max": 100}}
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # One validation per score column, none on 'name'.

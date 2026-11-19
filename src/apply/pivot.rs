@@ -13,12 +13,24 @@
 //! adds what xlsxturbo knows and the crate does not: where every frame is.
 //!
 //! The field names are always passed with `set_field_names()`, the header texts
-//! exactly as `write_frame` wrote them. A constant-memory sheet needs that (the
-//! crate cannot read its flushed header row), and on any other sheet the names
-//! equal the cells, so the crate's comparison passes.
+//! as `write_frame` wrote them. A constant-memory sheet needs that (the crate
+//! cannot read its flushed header row). On any other sheet the crate compares
+//! the names with the header cells when the workbook is saved, and the
+//! cell-addressed options (`cells`, `hyperlinks`, `merged_ranges`, `rich_text`,
+//! `checkboxes`) run after `write_frame` and may overwrite a header cell. So a
+//! write into the header row of a frame with pivot tables is refused here,
+//! before the save; left to the crate it fails the save as a `FileError`.
+//!
+//! The same holds for the crate's other save-time rule, a value field caption
+//! equal to a column name without regard to case: `build_pivot_table` refuses it.
+//!
+//! The caller creates the sheets a plan needs ([`PivotPlan::new_sheets`]) with
+//! its own error mapping, then adds the tables ([`PivotPlan::add_to`]).
 
-use crate::parse::{parse_cell_ref, MAX_ROW_1BASED};
-use crate::types::{pydict_to_hashmap_str, sequence_as_list, OptionMap, PivotTableConfig};
+use crate::parse::{parse_cell_range, parse_cell_ref, MAX_ROW_1BASED};
+use crate::types::{
+    pydict_to_hashmap_str, sequence_as_list, EffectiveOpts, OptionMap, PivotTableConfig,
+};
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rust_xlsxwriter::{
@@ -68,13 +80,111 @@ impl FrameArea {
 /// One frame's `pivot_tables`, with what they need to know about the frame.
 pub(crate) struct PivotRequest<'a> {
     /// The frame's written cells; `None` when it wrote nothing at all.
-    pub(crate) area: Option<FrameArea>,
+    pub(crate) area: Option<&'a FrameArea>,
     /// The frame's sheet, for messages, as the workbook spells it.
-    pub(crate) sheet: String,
+    pub(crate) sheet: &'a str,
     pub(crate) header: bool,
     /// The header texts, in column order: frame columns, then formula columns.
-    pub(crate) field_names: Vec<String>,
+    pub(crate) field_names: &'a [String],
     pub(crate) tables: &'a IndexMap<String, PivotTableConfig>,
+}
+
+/// The cells one cell-addressed option entry writes a value into.
+pub(crate) struct CellWriteSpan {
+    /// The sheet, as the workbook spells it.
+    sheet: String,
+    /// The option and key as the caller wrote them, e.g. `cells['A1']`.
+    option: String,
+    first_row: u32,
+    first_col: u16,
+    last_row: u32,
+    last_col: u16,
+}
+
+impl CellWriteSpan {
+    fn new(sheet: &str, option: String, span: (u32, u16, u32, u16)) -> Self {
+        let (first_row, first_col, last_row, last_col) = span;
+        CellWriteSpan {
+            sheet: sheet.to_string(),
+            option,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+        }
+    }
+}
+
+/// Every cell value one entry's cell-addressed options write on `sheet`:
+/// `cells`, `hyperlinks`, `merged_ranges` (every cell of the range), `rich_text`
+/// and `checkboxes`. Comments, images, textboxes, charts and sparklines write
+/// no cell value. A reference that does not parse is left out; the option's own
+/// step has refused it before this runs.
+pub(crate) fn cell_writes(sheet: &str, opts: &EffectiveOpts<'_>) -> Vec<CellWriteSpan> {
+    let mut writes = Vec::new();
+    let mut one_cell = |option: String, cell: &str| {
+        if let Ok((row, col)) = parse_cell_ref(cell) {
+            writes.push(CellWriteSpan::new(sheet, option, (row, col, row, col)));
+        }
+    };
+    for (cell, _, _) in opts.hyperlinks.into_iter().flatten() {
+        one_cell(format!("hyperlinks['{}']", cell), cell);
+    }
+    for cell in opts.rich_text.into_iter().flat_map(|m| m.keys()) {
+        one_cell(format!("rich_text['{}']", cell), cell);
+    }
+    for cell in opts.checkboxes.into_iter().flat_map(|m| m.keys()) {
+        one_cell(format!("checkboxes['{}']", cell), cell);
+    }
+    for (range, _, _) in opts.merged_ranges.into_iter().flatten() {
+        if let Ok(span) = parse_cell_range(range) {
+            writes.push(CellWriteSpan::new(
+                sheet,
+                format!("merged_ranges['{}']", range),
+                span,
+            ));
+        }
+    }
+    for cell in opts.cells.into_iter().flatten() {
+        writes.push(CellWriteSpan::new(
+            sheet,
+            cell.context.clone(),
+            (cell.row, cell.col, cell.row, cell.col),
+        ));
+    }
+    writes
+}
+
+/// Refuse a cell-addressed write into the frame's header row: the header texts
+/// are the pivot table's field names, and the crate compares them with the
+/// cells only when the workbook is saved.
+fn reject_header_writes(
+    context: &str,
+    area: &FrameArea,
+    writes: &[CellWriteSpan],
+) -> Result<(), String> {
+    let header_row = area.first_row;
+    let sheet = area.sheet.to_lowercase();
+    let hit = writes.iter().find(|w| {
+        w.sheet.to_lowercase() == sheet
+            && (w.first_row..=w.last_row).contains(&header_row)
+            && w.first_col <= area.last_col
+            && area.first_col <= w.last_col
+    });
+    let Some(write) = hit else {
+        return Ok(());
+    };
+    let cell = |col: u16| rust_xlsxwriter::utility::row_col_to_cell(header_row, col);
+    Err(format!(
+        "{}: {} writes cell {}, in the header row {}:{} of the frame the pivot table \
+         is built from; the header texts are its field names, so keep that write \
+         out of the header row",
+        context,
+        write.option,
+        cell(write.first_col.max(area.first_col)),
+        cell(area.first_col),
+        cell(area.last_col),
+    ))
 }
 
 /// A location key split into its sheet (if any) and its cell.
@@ -93,6 +203,18 @@ fn parse_location(key: &str) -> Result<Location, String> {
                 .and_then(|s| s.strip_suffix('\''))
             {
                 Some(quoted) => quoted.replace("''", "'"),
+                // `sheet_name` is taken as given, never trimmed, so white space
+                // around an unquoted sheet part is refused rather than trimmed:
+                // trimming would pick another sheet than the one the text names.
+                None if sheet_part.trim() != sheet_part => {
+                    return Err(format!(
+                        "sheet name '{}' has white space around it; write a sheet \
+                         name with leading or trailing spaces in quotes, as '{}'!{}",
+                        sheet_part,
+                        sheet_part.replace('\'', "''"),
+                        cell.trim()
+                    ));
+                }
                 None => sheet_part.to_string(),
             };
             if sheet.is_empty() {
@@ -235,6 +357,12 @@ fn check_source(context: &str, request: &PivotRequest<'_>) -> Result<(), String>
             context
         ));
     }
+    if request.field_names.is_empty() {
+        return Err(format!(
+            "{}: a pivot table needs at least one column; the frame has none",
+            context
+        ));
+    }
     let data_rows = request
         .area
         .as_ref()
@@ -246,7 +374,7 @@ fn check_source(context: &str, request: &PivotRequest<'_>) -> Result<(), String>
         ));
     }
     let mut seen: HashMap<String, &str> = HashMap::new();
-    for name in &request.field_names {
+    for name in request.field_names {
         if name.is_empty() {
             return Err(format!(
                 "{}: a pivot table needs a name for every column; the frame has an empty column name",
@@ -283,12 +411,12 @@ fn build_pivot_table(
             area.last_row,
             area.last_col,
         ))
-        .set_field_names(&request.field_names);
+        .set_field_names(request.field_names);
 
     for key in ["rows", "columns", "filters"] {
         for item in list_items(&view, key)? {
             let name = field_name(&view, key, &item)?;
-            require_field(context, &name, &request.field_names)?;
+            require_field(context, &name, request.field_names)?;
             table = match key {
                 "rows" => table.add_row_field(&name),
                 "columns" => table.add_column_field(&name),
@@ -299,7 +427,7 @@ fn build_pivot_table(
 
     for item in list_items(&view, "values")? {
         let value_field = if let Ok(name) = item.extract::<String>() {
-            require_field(context, &name, &request.field_names)?;
+            require_field(context, &name, request.field_names)?;
             PivotTableValueField::new(&name)
         } else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
             let inner_context = format!("{}: values", context);
@@ -307,7 +435,7 @@ fn build_pivot_table(
             let inner = OptionMap::new(py, &map, inner_context);
             inner.reject_unknown(VALUE_FIELD_KEYS)?;
             let name = inner.required_string("field")?;
-            require_field(context, &name, &request.field_names)?;
+            require_field(context, &name, request.field_names)?;
             let mut value_field = PivotTableValueField::new(&name);
             if let Some(function) = inner.string("function")? {
                 value_field = value_field.set_function(
@@ -315,6 +443,20 @@ fn build_pivot_table(
                 );
             }
             if let Some(caption) = inner.string("name")? {
+                // The crate refuses this only when the workbook is saved, as a
+                // file error; Excel compares field names without case.
+                let folded = caption.to_lowercase();
+                if let Some(column) = request
+                    .field_names
+                    .iter()
+                    .find(|f| f.to_lowercase() == folded)
+                {
+                    return Err(format!(
+                        "{}: value field name '{}' is the column name '{}'; a caption \
+                         must differ from every column name, case aside",
+                        context, caption, column
+                    ));
+                }
                 value_field = value_field.set_custom_name(caption);
             }
             if let Some(num_format) = inner.string("num_format")? {
@@ -354,29 +496,62 @@ fn build_pivot_table(
     Ok(table)
 }
 
-/// Check, place and add every requested pivot table.
+/// One pivot table, checked and built, waiting for its sheet.
+struct Planned {
+    /// `sheet '<frame's sheet>': pivot_tables['<key>']`, for every later error.
+    context: String,
+    sheet: String,
+    row: u32,
+    col: u16,
+    table: PivotTable,
+}
+
+/// Every pivot table of a workbook, checked and built; nothing is added yet.
+pub(crate) struct PivotPlan {
+    /// Sheets to create, in the spelling of their first mention, each with the
+    /// context of the key that first named it.
+    new_sheets: Vec<(String, String)>,
+    tables: Vec<Planned>,
+}
+
+impl PivotPlan {
+    /// The sheets the caller must create, empty and in this order, before
+    /// [`PivotPlan::add_to`]: `(name, context)`, the context naming the key.
+    pub(crate) fn new_sheets(&self) -> &[(String, String)] {
+        &self.new_sheets
+    }
+
+    /// Add every pivot table to its sheet. Each error names the key it came from.
+    pub(crate) fn add_to(&self, workbook: &mut Workbook) -> Result<(), String> {
+        for plan in &self.tables {
+            let worksheet = workbook
+                .worksheet_from_name(&plan.sheet)
+                .map_err(|e| format!("{}: sheet '{}': {}", plan.context, plan.sheet, e))?;
+            worksheet
+                .add_pivot_table(plan.row, plan.col, &plan.table)
+                .map_err(|e| format!("{}: {}", plan.context, e))?;
+        }
+        Ok(())
+    }
+}
+
+/// Check, place and build every requested pivot table.
 ///
 /// `areas` holds every frame in the workbook, with or without pivot tables, so
 /// that an anchor inside any of them is refused. `sheets` is every sheet the
-/// workbook has, in its own spelling. Everything is checked before the first
-/// sheet is created or the first pivot table added; a refusal raises before the
-/// save, so no file is written either way.
-pub(crate) fn apply_pivot_tables(
+/// workbook has, in its own spelling. `writes` holds the cell values every
+/// cell-addressed option writes, so that one in a header row is refused.
+/// Nothing is created or added here: a refusal raises before the save, so no
+/// file is written.
+pub(crate) fn plan_pivot_tables(
     py: Python<'_>,
-    workbook: &mut Workbook,
-    sheets: &[String],
-    areas: &[FrameArea],
+    sheets: &[&str],
+    areas: &[&FrameArea],
     requests: &[PivotRequest<'_>],
-) -> Result<(), String> {
-    struct Planned {
-        sheet: String,
-        row: u32,
-        col: u16,
-        table: PivotTable,
-    }
-
-    let existing: HashMap<String, &String> = sheets.iter().map(|s| (s.to_lowercase(), s)).collect();
-    let mut new_sheets: IndexMap<String, String> = IndexMap::new();
+    writes: &[CellWriteSpan],
+) -> Result<PivotPlan, String> {
+    let existing: HashMap<String, &str> = sheets.iter().map(|s| (s.to_lowercase(), *s)).collect();
+    let mut new_sheets: IndexMap<String, (String, String)> = IndexMap::new();
     let mut anchors: HashMap<(String, u32, u16), String> = HashMap::new();
     let mut planned: Vec<Planned> = Vec::new();
 
@@ -387,19 +562,20 @@ pub(crate) fn apply_pivot_tables(
             check_source(&context, request)?;
             let area = request
                 .area
-                .as_ref()
                 .expect("check_source refuses a frame without an area");
+            reject_header_writes(&context, area, writes)?;
 
             // The target sheet in the workbook's spelling; a new one is created later.
             let target = match &location.sheet {
-                None => request.sheet.clone(),
+                None => request.sheet.to_string(),
                 Some(name) => {
                     let folded = name.to_lowercase();
                     match existing.get(&folded) {
-                        Some(&spelled) => spelled.clone(),
+                        Some(&spelled) => spelled.to_string(),
                         None => new_sheets
                             .entry(folded)
-                            .or_insert_with(|| name.clone())
+                            .or_insert_with(|| (name.clone(), context.clone()))
+                            .0
                             .clone(),
                     }
                 }
@@ -429,6 +605,7 @@ pub(crate) fn apply_pivot_tables(
 
             let table = build_pivot_table(py, &context, config, request, area)?;
             planned.push(Planned {
+                context,
                 sheet: target,
                 row: location.row,
                 col: location.col,
@@ -437,31 +614,10 @@ pub(crate) fn apply_pivot_tables(
         }
     }
 
-    for name in new_sheets.values() {
-        crate::convert::add_named_worksheet(workbook, name, false).map_err(|e| match e {
-            crate::convert::ConvertError::Config(message) => format!("pivot_tables: {}", message),
-            crate::convert::ConvertError::File(failure) => {
-                format!("pivot_tables: {}", failure.message)
-            }
-        })?;
-    }
-
-    for plan in &planned {
-        let worksheet = workbook
-            .worksheet_from_name(&plan.sheet)
-            .map_err(|e| format!("pivot_tables: sheet '{}': {}", plan.sheet, e))?;
-        worksheet
-            .add_pivot_table(plan.row, plan.col, &plan.table)
-            .map_err(|e| {
-                format!(
-                    "pivot_tables: sheet '{}', cell {}: {}",
-                    plan.sheet,
-                    rust_xlsxwriter::utility::row_col_to_cell(plan.row, plan.col),
-                    e
-                )
-            })?;
-    }
-    Ok(())
+    Ok(PivotPlan {
+        new_sheets: new_sheets.into_values().collect(),
+        tables: planned,
+    })
 }
 
 #[cfg(test)]
@@ -479,12 +635,29 @@ mod tests {
         );
         let quoted = parse_location("'It''s here'!A1").unwrap();
         assert_eq!(quoted.sheet.as_deref(), Some("It's here"));
+        // Quoted, white space belongs to the name; the cell part is trimmed.
+        let spaced = parse_location("' Data '!A3 ").unwrap();
+        assert_eq!(
+            (spaced.sheet.as_deref(), spaced.row, spaced.col),
+            (Some(" Data "), 2, 0)
+        );
     }
 
     #[test]
     fn bad_locations_are_refused() {
         for key in [
-            "", "A0", "XFE1", "A1048577", "A1:B2", "Pivot!", "!A3", "''!A3",
+            "",
+            "A0",
+            "XFE1",
+            "A1048577",
+            "A1:B2",
+            "Pivot!",
+            "!A3",
+            "''!A3",
+            " Data !A3",
+            "Data !A3",
+            " Data!A3",
+            " 'Data'!A3",
         ] {
             assert!(parse_location(key).is_err(), "{key:?}");
         }

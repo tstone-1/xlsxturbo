@@ -20,10 +20,11 @@ which is not the notice the license asks for.
 Five things that cost time to find:
 
 - **cargo-about 0.9 on Windows refuses to write to a redirected stdout when PowerShell is a
-  parent process** (`ERROR ... please use the -o, --output-file option`), and an agent shell
-  always has one. The generator therefore passes `--output-file`; do not switch it back to
-  capturing stdout. Found during the 1.5.1 release, when Dependabot's rust_xlsxwriter bump
-  (#42) needed the notice regenerated and the script could not run on the desktop.
+  parent process** (`ERROR ... please use the -o, --output-file option`), and a shell
+  started from PowerShell always has one. The generator therefore passes `--output-file`;
+  do not switch it back to capturing stdout. Found during the 1.5.1 release, when
+  Dependabot's rust_xlsxwriter bump (#42) needed the notice regenerated and the script
+  could not run on Windows.
 - **`cargo install cargo-about` installs nothing and exits 0.** Its binary is behind a
   feature: `cargo install cargo-about --features cli`. Without it you get a warning, a
   clean exit, and no `cargo-about` on PATH.

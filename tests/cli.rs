@@ -1,15 +1,69 @@
 //! Integration tests for the `xlsxturbo` CLI binary.
 //!
 //! Cargo builds the binary for integration tests and exposes its path via the
-//! `CARGO_BIN_EXE_xlsxturbo` env var, so these drive the real compiled binary
-//! without any extra test dependency.
+//! `CARGO_BIN_EXE_xlsxturbo` env var, so these drive the real compiled binary.
+//! The `zip` dev-dependency reads the parts of the workbook it writes, so a
+//! flag is checked by what reaches the file, not by an exit code.
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_xlsxturbo")
+}
+
+/// The text of one part of the workbook at `xlsx`.
+fn read_part(xlsx: &Path, part: &str) -> String {
+    let file = fs::File::open(xlsx).expect("output xlsx exists");
+    let mut archive = zip::ZipArchive::new(file).expect("output is a zip archive");
+    let mut entry = archive
+        .by_name(part)
+        .unwrap_or_else(|e| panic!("{part} missing: {e}"));
+    let mut text = String::new();
+    entry.read_to_string(&mut text).expect("part is UTF-8");
+    text
+}
+
+/// The `<c>` element of `cell` in a worksheet part, start tag to end tag.
+fn cell_xml<'a>(sheet: &'a str, cell: &str) -> &'a str {
+    let open = format!("<c r=\"{cell}\"");
+    let start = sheet
+        .find(&open)
+        .unwrap_or_else(|| panic!("no cell {cell} in {sheet}"));
+    let rest = &sheet[start..];
+    let end = rest.find("</c>").map(|i| i + 4).unwrap_or_else(|| {
+        rest.find("/>")
+            .map(|i| i + 2)
+            .expect("cell element is closed")
+    });
+    &rest[..end]
+}
+
+/// The `<v>` text of `cell`, or `None` when the cell has no value element.
+fn cell_value<'a>(sheet: &'a str, cell: &str) -> Option<&'a str> {
+    let xml = cell_xml(sheet, cell);
+    let start = xml.find("<v>")? + 3;
+    let end = xml[start..].find("</v>")? + start;
+    Some(&xml[start..end])
+}
+
+/// Run the CLI over `csv` into `xlsx` with `extra` arguments; assert it succeeded.
+fn convert(csv: &Path, xlsx: &Path, extra: &[&str]) -> String {
+    let output = Command::new(bin())
+        .arg(csv)
+        .arg(xlsx)
+        .args(extra)
+        .output()
+        .expect("failed to run xlsxturbo binary");
+    assert!(
+        output.status.success(),
+        "{extra:?}: expected exit 0, got {:?}, stderr {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 /// Unique temp path for this process + tag, so parallel tests don't collide.
@@ -154,6 +208,46 @@ fn parallel_flag_exits_zero_and_produces_file() {
     let _ = fs::remove_file(&xlsx);
 }
 
+/// `--parallel` writes the same cells as the sequential run: numbers, text,
+/// a date and an empty field, each cell compared by its whole element.
+#[test]
+fn parallel_run_writes_the_same_cells_as_the_sequential_run() {
+    let csv = temp_path("par_same", "csv");
+    let seq = temp_path("par_same_seq", "xlsx");
+    let par = temp_path("par_same_par", "xlsx");
+    fs::write(&csv, "n,s,d\n1,x,2024-03-15\n2.5,,2024-03-16\n-3,y z,\n").unwrap();
+
+    let seq_out = convert(&csv, &seq, &[]);
+    let par_out = convert(&csv, &par, &["--parallel"]);
+    assert_eq!(seq_out, par_out);
+
+    let (seq_sheet, par_sheet) = (
+        read_part(&seq, "xl/worksheets/sheet1.xml"),
+        read_part(&par, "xl/worksheets/sheet1.xml"),
+    );
+    for cell in ["A1", "B1", "C1", "A2", "B2", "C2", "A3", "C3", "A4", "B4"] {
+        assert_eq!(
+            cell_xml(&seq_sheet, cell),
+            cell_xml(&par_sheet, cell),
+            "cell {cell}"
+        );
+    }
+    // The values themselves, so two runs that agree on a wrong value fail too.
+    assert_eq!(cell_value(&par_sheet, "A2"), Some("1"));
+    assert_eq!(cell_value(&par_sheet, "A3"), Some("2.5"));
+    assert_eq!(cell_value(&par_sheet, "A4"), Some("-3"));
+    assert_eq!(cell_value(&par_sheet, "C2"), Some("45366"));
+    // A cell's `s` is an index into the styles in order of first use, so the
+    // same index can name another number format: compare the styles too.
+    for part in ["xl/sharedStrings.xml", "xl/styles.xml"] {
+        assert_eq!(read_part(&seq, part), read_part(&par, part), "{part}");
+    }
+
+    for path in [&csv, &seq, &par] {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// A CSV that `flexible(true)` genuinely refuses, plus the 1-based row it fails on.
 ///
 /// Picking the input is the whole difficulty: the reader is deliberately
@@ -292,16 +386,18 @@ fn sheet_name_flag_is_respected() {
     // The CLI CSV reader treats every line as data (no header row), so "a,b\n1,2\n"
     // is 2 rows x 2 cols.
     assert!(stdout.trim().ends_with("2 2"), "stdout was: {:?}", stdout);
-    // --verbose echoes the sheet name to stderr, giving us a cheap way to
-    // confirm the flag was actually threaded through without adding an
-    // xlsx-reading dependency to the test suite.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Sheet:  MySheet"),
         "stderr was: {:?}",
         stderr
     );
-    assert!(xlsx.exists(), "output xlsx was not created");
+    let workbook = read_part(&xlsx, "xl/workbook.xml");
+    assert!(
+        workbook.contains("<sheet name=\"MySheet\" sheetId=\"1\""),
+        "workbook.xml was: {workbook}"
+    );
+    assert!(!workbook.contains("Sheet1"), "workbook.xml was: {workbook}");
 
     let _ = fs::remove_file(&csv);
     let _ = fs::remove_file(&xlsx);
@@ -357,6 +453,38 @@ fn non_default_date_order_exits_zero() {
 
     let _ = fs::remove_file(&csv);
     let _ = fs::remove_file(&xlsx);
+}
+
+/// `--date-order` decides what `01-02-2024` means, on both CSV paths: 1 February
+/// (serial 45323) for `dmy`, 2 January (serial 45293) for `mdy`.
+#[test]
+fn date_order_changes_the_serial() {
+    let csv = temp_path("dateorder", "csv");
+    fs::write(&csv, "a\n01-02-2024\n").unwrap();
+
+    for parallel in [false, true] {
+        let mut serials = Vec::new();
+        for (order, expected) in [("dmy", "45323"), ("mdy", "45293")] {
+            let xlsx = temp_path(&format!("dateorder_{order}_{parallel}"), "xlsx");
+            let mut extra = vec!["--date-order", order];
+            if parallel {
+                extra.push("--parallel");
+            }
+            convert(&csv, &xlsx, &extra);
+            let sheet = read_part(&xlsx, "xl/worksheets/sheet1.xml");
+            let serial = cell_value(&sheet, "A2").map(str::to_owned);
+            assert_eq!(
+                serial.as_deref(),
+                Some(expected),
+                "{order}, parallel {parallel}"
+            );
+            serials.push(serial);
+            let _ = fs::remove_file(&xlsx);
+        }
+        assert_ne!(serials[0], serials[1], "parallel {parallel}");
+    }
+
+    let _ = fs::remove_file(&csv);
 }
 
 /// `--compression-level` reaches the writer: level 1 gives a larger file than 9.

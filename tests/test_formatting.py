@@ -11,9 +11,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestColumnWidthCap:
@@ -23,7 +21,6 @@ class TestColumnWidthCap:
         """Set width for all columns via the '_all' key."""
         df = pd.DataFrame({"A": ["x" * 100], "B": ["y" * 100], "C": ["z" * 100]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={"_all": 20})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         for col in ["A", "B", "C"]:
@@ -34,7 +31,6 @@ class TestColumnWidthCap:
         """Override '_all' with a specific column width."""
         df = pd.DataFrame({"A": ["x"], "B": ["y"], "C": ["z"]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: 30, "_all": 10})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws.column_dimensions["A"].width > 25
@@ -45,7 +41,6 @@ class TestColumnWidthCap:
         """Use '_all' as a cap when combined with autofit."""
         df = pd.DataFrame({"Short": ["x"], "VeryLongColumnName": ["y" * 100]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, autofit=True, column_widths={"_all": 25})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # Long column should be capped at ~25
@@ -63,7 +58,6 @@ class TestColumnWidthCap:
             ],
             tmp_xlsx,
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         # Sheet1 should have narrower column than Sheet2
         w1 = wb["Sheet1"].column_dimensions["A"].width or 0
@@ -899,6 +893,8 @@ class TestHeaderFormat:
         ws = active_ws(wb)
         # First row should be data, not header
         assert ws["A1"].value == 1
+        # ... and the header format must not land on that data row instead.
+        assert ws["A1"].font.bold is not True
         wb.close()
 
     def test_per_sheet_header_format(self, tmp_xlsx: str) -> None:
@@ -1092,7 +1088,13 @@ class TestRichText:
         xlsxturbo.df_to_xlsx(
             df, tmp_xlsx, rich_text={"A3": ["Plain text ", ("bold", {"bold": True}), " more plain"]}
         )
-        assert Path(tmp_xlsx).exists()
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["A3"].value == "Plain text bold more plain"
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
+        # Three runs, and only the middle one bold.
+        assert shared.count("<r>") == 3
+        assert shared.count("<b/>") == 1
 
 
 class TestRowHeights:
@@ -1102,7 +1104,6 @@ class TestRowHeights:
         """Set specific row heights."""
         df = pd.DataFrame({"A": [1, 2, 3]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, row_heights={0: 30, 2: 40})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # openpyxl is 1-indexed; Excel may round heights slightly
@@ -1119,7 +1120,6 @@ class TestRowHeights:
             [(df, "Sheet1", {"row_heights": {0: 25}})],
             tmp_xlsx,
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = wb["Sheet1"]
         assert abs(ws.row_dimensions[1].height - 25) < 1
@@ -1130,7 +1130,6 @@ class TestRowHeights:
         df = pd.DataFrame({"A": [1]})
         with pytest.warns(RuntimeWarning, match="row_heights"):
             xlsxturbo.df_to_xlsx(df, tmp_xlsx, constant_memory=True, row_heights={0: 50})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # Row height should NOT be set (constant memory ignores it)
@@ -1244,7 +1243,12 @@ class TestRowHeightsValidation:
             per_sheet: Which entry point to drive.
         """
         self._export(per_sheet, tmp_xlsx, {1_048_575: 20})
-        assert Path(tmp_xlsx).exists()
+        with zipfile.ZipFile(tmp_xlsx) as zf:
+            sheet = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        # Excel's last row is 1048576 one-based; read from the XML, because
+        # openpyxl would materialise every row up to it. 20 points is stored as
+        # 20.25, the nearest whole number of pixels.
+        assert '<row r="1048576" ht="20.25" customHeight="1"' in sheet
 
     @pytest.mark.parametrize("per_sheet", [False, True], ids=["df_to_xlsx", "dfs_to_xlsx"])
     def test_string_key_is_refused(self, tmp_xlsx: str, per_sheet: bool) -> None:
@@ -1392,7 +1396,10 @@ class TestColumnWidthValues:
         """
         df = pd.DataFrame({"A": [1], "B": [2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: 0})
-        assert Path(tmp_xlsx).exists()
+        ws = active_ws(load_workbook(tmp_xlsx))
+        # Width zero is a hidden column; B is untouched.
+        assert ws.column_dimensions["A"].hidden is True
+        assert ws.column_dimensions["B"].hidden is not True
 
 
 class TestBorderStyles:
@@ -1614,8 +1621,8 @@ class TestBorderStyles:
         assert header.border.right.style == "thick"
         wb.close()
 
-    def test_header_format_border_right_only(self, tmp_xlsx: str) -> None:
-        """Support per-side borders in header_format."""
+    def test_header_format_border_bottom_only(self, tmp_xlsx: str) -> None:
+        """Support per-side borders in header_format: a bottom border alone."""
         df = pd.DataFrame({"A": [1], "B": [2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format={
             "border_bottom": "medium"

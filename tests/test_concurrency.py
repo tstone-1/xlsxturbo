@@ -1,9 +1,10 @@
 """Tests for what the library does while another thread is inside it.
 
 Both classes exist because `df_to_xlsx` and `dfs_to_xlsx` release the GIL for the
-archive write. `TestConcurrentWrites` covers the hazard that creates -- Rust code
-running with the interpreter unlocked -- and `TestSaveReleasesTheGil` covers the
-benefit, which is the only reason to accept the hazard.
+archive write, and `csv_to_xlsx` for its whole conversion. `TestConcurrentWrites`
+covers the hazard that creates -- Rust code running with the interpreter unlocked
+-- and `TestSaveReleasesTheGil` covers the benefit, which is the only reason to
+accept the hazard.
 """
 
 from __future__ import annotations
@@ -19,14 +20,10 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
+from tests.helpers import active_ws, load_workbook
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-pytestmark = pytest.mark.skipif(
-    not HAS_OPENPYXL, reason="openpyxl required for content verification"
-)
 
 ROWS = 4000
 
@@ -220,10 +217,13 @@ class TestSaveReleasesTheGil:
     passed the same assertion on 4-core runners, which is what pins the cause to the
     build rather than to the core count.
 
-    Both entry points are measured separately, and that is not redundancy: they
-    detach at two different call sites. Removing only the one in `lib.rs` left the
-    whole suite green while `df_to_xlsx` was still covered -- measured, which is how
-    the second case got written.
+    There are two detach sites, and each needs its own case. `df_to_xlsx` and
+    `dfs_to_xlsx` both end in `finish_workbook` in `src/convert.rs`, which
+    detaches for the archive write; both are measured, because the two calls reach
+    that function by different routes. `csv_to_xlsx` detaches separately, in
+    `src/lib.rs`, around its whole conversion. The `csv_to_xlsx` case was added
+    after a review removed that wrapper and the whole suite stayed green: the two
+    DataFrame cases cannot see it, since they never pass through it.
 
     The two legs are **interleaved** -- serial, parallel, serial, parallel,
     serial, parallel -- rather than run as two blocks, and best-of is taken per
@@ -245,9 +245,10 @@ class TestSaveReleasesTheGil:
     `junit_family = "legacy"` would silence it, and is not worth a change to
     `pyproject.toml` while nothing consumes the file.
 
-    To prove either case can fail, delete the matching `py.detach` wrapper
-    around `save_workbook` in `src/convert.rs` or `src/lib.rs`, rebuild, and run
-    this class: the affected case reports about 0.95x and goes red.
+    To prove a case can fail, delete the matching `py.detach` wrapper -- the one in
+    `finish_workbook` in `src/convert.rs` for the two DataFrame cases, the one in
+    `csv_to_xlsx` in `src/lib.rs` for the CSV case -- rebuild, and run this class:
+    the affected cases report about 0.95x and go red.
     """
 
     @staticmethod
@@ -280,7 +281,7 @@ class TestSaveReleasesTheGil:
                 best[leg] = min(best[leg], elapsed)
         return best["s"], best["p"]
 
-    @pytest.mark.parametrize("entry_point", ["df_to_xlsx", "dfs_to_xlsx"])
+    @pytest.mark.parametrize("entry_point", ["df_to_xlsx", "dfs_to_xlsx", "csv_to_xlsx"])
     def test_four_threads_beat_one_by_a_wide_margin(
         self,
         tmp_path: Path,
@@ -302,11 +303,21 @@ class TestSaveReleasesTheGil:
 
             def export(name: str) -> None:
                 xlsxturbo.df_to_xlsx(frame, str(tmp_path / name), sheet_name="S")
-        else:
+        elif entry_point == "dfs_to_xlsx":
             total = 8  # each call writes two sheets, so fewer calls for the same work
 
             def export(name: str) -> None:
                 xlsxturbo.dfs_to_xlsx([(frame, "one"), (frame, "two")], str(tmp_path / name))
+        else:
+            total = 12
+            source = tmp_path / "source.csv"
+            frame.to_csv(source, index=False)
+
+            # `parallel=False`: the four threads are the only parallelism this
+            # measures. With rayon inside each call, both legs would also run on
+            # several cores, and the ratio would no longer say what the GIL does.
+            def export(name: str) -> None:
+                xlsxturbo.csv_to_xlsx(source, tmp_path / name, parallel=False)
 
         # Warm up: the first call in a process pays for lazy initialisation that would
         # otherwise land entirely on whichever leg happens to run first.

@@ -87,6 +87,7 @@ Available per-sheet options:
 - `textboxes` (dict): Floating text shapes (cell_ref -> text or textbox options)
 - `charts` (dict): Native Excel charts (cell_ref -> chart options)
 - `sparklines` (dict): Mini in-cell charts (location ref -> sparkline options; range key = grouped)
+- `pivot_tables` (dict): Native pivot tables over this entry's frame (location -> pivot options; see [Pivot tables](pivot-tables.md))
 - `cells` (dict): Arbitrary cell writes (cell_ref -> value or {value, num_format})
 
 ## Sheet tab colours
@@ -134,7 +135,7 @@ Which entry an option belongs to depends on what the option describes:
 |---|---|---|
 | The frame | `header`, `table_style`, `table_name`, `autofilter`, `startrow`, `header_format`, `column_formats`, `conditional_formats`, `formula_columns`, `validations` | Each entry has its own. A keyword argument is the default for every frame |
 | The whole sheet | `autofit`, `freeze_panes`, `tab_color`, `column_widths`, `row_heights` | The first entry for the sheet sets them. A later entry that sets one raises `ConfigurationError` |
-| A cell reference | `cells`, `merged_ranges`, `hyperlinks`, `comments`, `rich_text`, `images`, `checkboxes`, `textboxes`, `charts`, `sparklines` | Each entry applies what its own options dict gives. A keyword argument is applied once per sheet |
+| A cell reference | `cells`, `merged_ranges`, `hyperlinks`, `comments`, `rich_text`, `images`, `checkboxes`, `textboxes`, `charts`, `sparklines`, `pivot_tables` | Each entry applies what its own options dict gives. A keyword argument is applied once per sheet |
 
 - `autofit` fits each column to the longest content of all frames on the sheet.
   `freeze_panes=True` freezes below the header of the first entry.

@@ -372,10 +372,9 @@ pub(crate) fn input_data(message: impl Into<String>) -> PyErr {
 /// additive.
 ///
 /// `EACCES` and `EPERM` select `FilePermissionError`, the subclass that is also
-/// a `PermissionError`. They are the two numbers CPython itself maps to that
-/// builtin, so the class agrees with what `open()` raises for the same refusal.
+/// a `PermissionError`; see [`is_permission_refusal`].
 pub(crate) fn file(failure: FileFailure) -> PyErr {
-    let refused = matches!(failure.errno, Some(errno::EACCES | errno::EPERM));
+    let refused = is_permission_refusal(failure.errno);
     let error = raise(
         if refused {
             |t| &t.file_permission
@@ -393,6 +392,16 @@ pub(crate) fn file(failure: FileFailure) -> PyErr {
         let _ = error.value(py).setattr("errno", code);
     });
     error
+}
+
+/// Whether a file failure with this `errno` is a refusal of permission, which
+/// [`file`] raises as `FilePermissionError`.
+///
+/// `EACCES` and `EPERM` are the two numbers CPython itself maps to
+/// `PermissionError`, so the class agrees with what `open()` raises for the
+/// same refusal.
+fn is_permission_refusal(errno: Option<i32>) -> bool {
+    matches!(errno, Some(errno::EACCES | errno::EPERM))
 }
 
 /// Well-formed configuration that Excel does not permit. Also a `ValueError`.
@@ -417,5 +426,25 @@ impl From<crate::convert::ConvertError> for PyErr {
             crate::convert::ConvertError::Config(message) => configuration(message),
             crate::convert::ConvertError::File(message) => file(message),
         }
+    }
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::{errno, is_permission_refusal};
+
+    #[test]
+    fn eacces_and_eperm_are_refusals() {
+        // Every Python-level trigger produces EACCES, so EPERM is decided here.
+        assert!(is_permission_refusal(Some(errno::EACCES)));
+        assert!(is_permission_refusal(Some(errno::EPERM)));
+    }
+
+    #[test]
+    fn other_failures_are_not_refusals() {
+        for code in [errno::ENOENT, errno::EEXIST, errno::EINVAL] {
+            assert!(!is_permission_refusal(Some(code)), "errno {code}");
+        }
+        assert!(!is_permission_refusal(None));
     }
 }

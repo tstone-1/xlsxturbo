@@ -22,9 +22,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 # The missing value sits in the middle row, so its row exists in the sheet
 # whichever way the writer handles it: a trailing empty row would simply be

@@ -93,8 +93,11 @@ ExportOptions().as_kwargs()                    # {}
 ExportOptions(table_style=None).as_kwargs()    # {"table_style": None}
 ```
 
-This matters on the multi-sheet path, where an explicit `None` means "not on this
-sheet", deliberately overriding a workbook-wide default:
+This matters on the multi-sheet path. For a value option that accepts `None`, such as
+`table_style` or `tab_color`, an explicit `None` means "not on this sheet", deliberately
+overriding a workbook-wide default. A dict or list option, such as `charts`,
+`pivot_tables`, `header_format` or `hyperlinks`, is different: a per-sheet `None` keeps the
+workbook-wide value, and an empty `{}` or `[]` is what turns it off for that sheet.
 
 ```python
 xlsxturbo.dfs_to_xlsx(

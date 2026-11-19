@@ -230,6 +230,59 @@ class TestPivotTableFields:
         pivot = _only(tmp_xlsx)
         assert (pivot.row_fields, pivot.data_fields[0]["fld"]) == ([1], "1")
 
+    def test_pivot_number_format_reaches_styles(self, tmp_xlsx: str) -> None:
+        """The dataField's numFmtId names the requested format code in xl/styles.xml.
+
+        A custom code, because a built-in one such as '#,##0.00' (id 4) has no
+        numFmt entry to read back.
+        """
+        code = '#,##0.000 "kg"'
+        _write(tmp_xlsx, {"Pivot!A3": {"values": [{"field": "Volume", "num_format": code}]}})
+        (data,) = _only(tmp_xlsx).data_fields
+        with zipfile.ZipFile(tmp_xlsx) as package:
+            formats = {
+                f.attrib["numFmtId"]: f.attrib["formatCode"]
+                for f in _xml(package, "xl/styles.xml").iter(f"{MAIN}numFmt")
+            }
+        assert formats[data["numFmtId"]] == code
+
+    def test_a_formula_column_is_a_pivot_field(self, tmp_xlsx: str) -> None:
+        """A formula column is part of the source range and a field under its own name."""
+        _write(
+            tmp_xlsx,
+            {"Pivot!A3": {"rows": ["Region"], "values": ["Double"]}},
+            sheet_name="Data",
+            formula_columns={"Double": "=C{row}*2"},
+        )
+        pivot = _only(tmp_xlsx)
+        assert pivot.source_ref == "A1:E5"
+        assert pivot.cache_fields == ["Region", "Item", "Volume", "Month", "Double"]
+        assert pivot.data_fields[0]["fld"] == "4"
+
+    def test_a_column_named_like_a_default_caption_is_written(self, tmp_xlsx: str) -> None:
+        """Pins today's output for a column 'Sum of Volume' beside a 'Volume' value field.
+
+        The crate refuses a caption equal to a column name only for a custom `name`,
+        so this is written, with the default caption and the column both named
+        'Sum of Volume'. In the 2026-11-19 review Excel opened such a file (hidden
+        instance, alerts off); what its pivot table shows was not checked, which is
+        why the docs advise a `name` here. A change to refuse or rename this must
+        change the test.
+        """
+        frame = _frame().assign(**{"Sum of Volume": [1, 2, 3, 4]})
+        _write(tmp_xlsx, {"Pivot!A3": {"values": ["Volume"]}}, frame=frame)
+        pivot = _only(tmp_xlsx)
+        assert pivot.cache_fields == ["Region", "Item", "Volume", "Month", "Sum of Volume"]
+        assert [(d["name"], d["fld"]) for d in pivot.data_fields] == [("Sum of Volume", "2")]
+
+    def test_a_non_string_column_name_is_given_by_its_text(self, tmp_xlsx: str) -> None:
+        """A column named 2024 is the field '2024'."""
+        frame = _frame()
+        frame.columns = ["Region", 2024, "Volume", "Month"]
+        _write(tmp_xlsx, {"Pivot!A3": {"rows": ["2024"]}}, frame=frame)
+        pivot = _only(tmp_xlsx)
+        assert (pivot.cache_fields[1], pivot.row_fields) == ("2024", [1])
+
 
 class TestPivotTableAppearance:
     """style, layout and the grand totals."""
@@ -361,8 +414,13 @@ class TestPivotTablePlacement:
             _write(tmp_xlsx, {location: {}})
 
     def test_the_same_location_twice_is_refused(self, tmp_xlsx: str) -> None:
-        """Two pivot tables at one cell, even spelled with another sheet case, are refused."""
-        with pytest.raises(xlsxturbo.ConfigurationError, match="A3"):
+        """Two pivot tables at one cell, even spelled with another sheet case, are refused.
+
+        The crate refuses the same input with its own message; this pins xlsxturbo's,
+        which names both keys.
+        """
+        message = r"cell A3 on sheet 'Summary' already holds sheet 'A': pivot_tables\['Summary!A3'\]"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message):
             xlsxturbo.dfs_to_xlsx(
                 [
                     (_frame(), "A", {"pivot_tables": {"Summary!A3": {}}}),
@@ -370,6 +428,39 @@ class TestPivotTablePlacement:
                 ],
                 tmp_xlsx,
             )
+
+    def test_a_range_key_is_refused_as_a_range(self, tmp_xlsx: str) -> None:
+        """'A1:B2' gets xlsxturbo's message, not the cell parser's."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="one cell, not at a range"):
+            _write(tmp_xlsx, {"Pivot!A3:B4": {}})
+
+    @pytest.mark.parametrize("location", ["More!D1", "More!A5", "More!D5"])
+    def test_the_edges_of_another_frame_are_refused(self, tmp_xlsx: str, location: str) -> None:
+        """The last column, the last row and the last cell of the frame on 'More' (A1:D5)."""
+        message = r"is inside the frame written at A1:D5"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message):
+            xlsxturbo.dfs_to_xlsx(
+                [(_frame(), "Data", {"pivot_tables": {location: {}}}), (_frame(), "More")],
+                tmp_xlsx,
+            )
+
+    def test_the_last_row_of_the_grid_is_accepted(self, tmp_xlsx: str) -> None:
+        """Row 1048576 is Excel's last row and a valid anchor (Excel shows #SPILL! there)."""
+        _write(tmp_xlsx, {"Pivot!B1048576": {}})
+        assert _anchor(_only(tmp_xlsx)) == "B1048576"
+
+    @pytest.mark.parametrize("location", [" Data !A3", "Data !A3", " Data!A3"])
+    def test_spaces_around_an_unquoted_sheet_are_refused(self, tmp_xlsx: str, location: str) -> None:
+        """Sheet names are taken as given, so an unquoted one with spaces is refused, not trimmed."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="white space around it"):
+            _write(tmp_xlsx, {location: {}}, sheet_name="Data")
+
+    def test_a_quoted_sheet_keeps_its_spaces(self, tmp_xlsx: str) -> None:
+        """In quotes the spaces belong to the name; the cell part is trimmed as everywhere."""
+        _write(tmp_xlsx, {"' Data '!A3 ": {}}, sheet_name="Data")
+        pivot = _only(tmp_xlsx)
+        assert (pivot.sheet, _anchor(pivot)) == (" Data ", "A3")
+        assert _sheet_names(tmp_xlsx) == ["Data", " Data "]
 
 
 class TestPivotTableRefusals:
@@ -422,15 +513,61 @@ class TestPivotTableRefusals:
         with pytest.raises(xlsxturbo.ConfigurationError, match="Total"):
             _write(tmp_xlsx, {"Pivot!A3": {"values": values}})
 
+    def test_a_crate_refusal_names_the_key_and_the_sheet(self, tmp_xlsx: str) -> None:
+        """An error from the crate's add_pivot_table carries the same context as the pre-checks."""
+        values = [{"field": "Volume", "name": "Total"}, {"field": "Volume", "function": "count", "name": "Total"}]
+        message = r"^sheet 'Data': pivot_tables\['Pivot!A3'\]: .*Total"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message):
+            _write(tmp_xlsx, {"Pivot!A3": {"values": values}}, sheet_name="Data")
+
+    @pytest.mark.parametrize("caption", ["Item", "item", "VOLUME"])
+    def test_a_caption_equal_to_a_column_name_is_refused(self, tmp_xlsx: str, caption: str) -> None:
+        """Compared without case, as the crate does at save time, where it was a FileError."""
+        message = f"value field name '{caption}' is the column name"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message) as raised:
+            _write(tmp_xlsx, {"Pivot!A3": {"values": [{"field": "Volume", "name": caption}]}})
+        assert not isinstance(raised.value, OSError)
+        assert Path(tmp_xlsx).stat().st_size == 0
+
+    def test_value_field_dict_with_unknown_column_is_refused(self, tmp_xlsx: str) -> None:
+        """The dict form is checked against the frame like a bare name."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"column 'Nope' is not in the frame\. Columns: Region"):
+            _write(tmp_xlsx, {"Pivot!A3": {"values": [{"field": "Nope", "function": "count"}]}})
+
+    def test_a_non_string_field_item_is_refused(self, tmp_xlsx: str) -> None:
+        """A number in rows is a type mistake, not a column called '1'."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"'rows' must hold column names \(str\), got int"):
+            _write(tmp_xlsx, {"Pivot!A3": {"rows": [1]}})
+
+    def test_a_value_item_that_is_neither_str_nor_dict_is_refused(self, tmp_xlsx: str) -> None:
+        """A value item is a column name or a value field dict, nothing else."""
+        message = r"'values' must hold column names or value field dicts, got int"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message):
+            _write(tmp_xlsx, {"Pivot!A3": {"values": [3]}})
+
+    def test_a_field_used_twice_in_rows_columns_and_filters_is_refused(self, tmp_xlsx: str) -> None:
+        """A field may be used once across rows, columns and filters; the crate refuses a second use."""
+        message = r"pivot_tables\['Pivot!A3'\].*'Region' is used more than once"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message):
+            _write(tmp_xlsx, {"Pivot!A3": {"rows": ["Region"], "filters": ["Region"]}})
+
     def test_without_a_header_row_is_refused(self, tmp_xlsx: str) -> None:
         """Without a header row the source has no field names."""
         with pytest.raises(xlsxturbo.ConfigurationError, match="header"):
             _write(tmp_xlsx, {"Pivot!A3": {}}, header=False)
 
     def test_an_empty_frame_is_refused(self, tmp_xlsx: str) -> None:
-        """A source of only a header row is refused, as the crate does."""
-        with pytest.raises(xlsxturbo.ConfigurationError, match="row"):
+        """A source of only a header row is refused by xlsxturbo, before the crate sees it.
+
+        The crate refuses it too, so the message is what tells the two apart.
+        """
+        with pytest.raises(xlsxturbo.ConfigurationError, match="at least one data row; the frame has none"):
             _write(tmp_xlsx, {"Pivot!A3": {}}, frame=_frame().iloc[:0])
+
+    def test_a_frame_without_columns_is_refused(self, tmp_xlsx: str) -> None:
+        """Rows and no columns: the message says what is missing, the columns."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="at least one column; the frame has none"):
+            _write(tmp_xlsx, {"Pivot!A3": {}}, frame=pd.DataFrame(index=range(3)))
 
     def test_duplicate_column_names_are_refused(self, tmp_xlsx: str) -> None:
         """Repeated field names give Excel's repair prompt, so they are refused by name."""
@@ -458,6 +595,108 @@ class TestPivotTableRefusals:
         with pytest.raises(xlsxturbo.ConfigurationError):
             _write(tmp_xlsx, {"Pivot!A3": {"rows": ["Nope"]}})
         assert Path(tmp_xlsx).stat().st_size == 0
+
+
+class TestPivotTableHeaderWrites:
+    """A cell-addressed write into the header row would change a field name after it was recorded.
+
+    The crate compares the names with the header cells only at save time, where a
+    mismatch was a FileError naming PivotTable::set_field_names(). xlsxturbo refuses
+    it before anything is written.
+    """
+
+    def test_a_header_cell_replaced_by_cells_is_refused_before_the_save(self, tmp_xlsx: str) -> None:
+        """The message names both options and the cell; it is not a FileError; nothing is written."""
+        message = r"pivot_tables\['Pivot!A3'\]: cells\['A1'\] writes cell A1, in the header row A1:D1"
+        with pytest.raises(xlsxturbo.ConfigurationError, match=message) as raised:
+            _write(tmp_xlsx, {"Pivot!A3": {}}, cells={"A1": "Area"})
+        assert not isinstance(raised.value, xlsxturbo.FileError)
+        assert Path(tmp_xlsx).stat().st_size == 0
+
+    @pytest.mark.parametrize(
+        ("option", "value", "named"),
+        [
+            ("cells", {"D1": "Other"}, r"cells\['D1'\] writes cell D1"),
+            ("hyperlinks", [("B1", "https://example.com")], r"hyperlinks\['B1'\] writes cell B1"),
+            ("merged_ranges", [("C1:F1", "Title")], r"merged_ranges\['C1:F1'\] writes cell C1"),
+            ("rich_text", {"A1": [("Bold", {"bold": True}), " text"]}, r"rich_text\['A1'\] writes cell A1"),
+            ("checkboxes", {"B1": True}, r"checkboxes\['B1'\] writes cell B1"),
+        ],
+    )
+    def test_every_cell_writing_option_on_the_header_is_refused(
+        self, tmp_xlsx: str, option: str, value: Any, named: str
+    ) -> None:
+        """Each option that writes a cell value is checked; a merged range by every cell it covers."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"pivot_tables\['Pivot!A3'\]: " + named):
+            _write(tmp_xlsx, {"Pivot!A3": {}}, **{option: value})
+
+    def test_writes_outside_the_header_row_are_accepted(self, tmp_xlsx: str) -> None:
+        """Data cells, the row above the header and the column beside it stay writable."""
+        _write(
+            tmp_xlsx,
+            {"Pivot!A3": {"rows": ["Region"]}},
+            startrow=1,
+            cells={"B3": "overwritten data", "A1": "Title"},
+            hyperlinks=[("E2", "https://example.com")],
+            merged_ranges=[("B1:D1", "Above")],
+            checkboxes={"F2": True},
+        )
+        pivot = _only(tmp_xlsx)
+        assert (pivot.source_ref, pivot.cache_fields) == ("A2:D6", ["Region", "Item", "Volume", "Month"])
+
+    def test_another_entry_writing_the_header_on_a_shared_sheet_is_refused(self, tmp_xlsx: str) -> None:
+        """The second frame's cells can overwrite the first frame's header; that is refused too."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"cells\['B1'\] writes cell B1"):
+            xlsxturbo.dfs_to_xlsx(
+                [
+                    (_frame(), "Data", {"pivot_tables": {"Pivot!A3": {}}}),
+                    (_frame(), "Data", {"startrow": 8, "cells": {"B1": "Other"}}),
+                ],
+                tmp_xlsx,
+            )
+
+    def test_under_constant_memory_the_skipped_write_does_not_count(self, tmp_xlsx: str) -> None:
+        """constant_memory skips cells (with its warning), so the header keeps its texts."""
+        with pytest.warns(RuntimeWarning, match="cells"):
+            _write(tmp_xlsx, {"Pivot!A3": {}}, cells={"A1": "Area"}, constant_memory=True)
+        assert _only(tmp_xlsx).cache_fields == ["Region", "Item", "Volume", "Month"]
+
+
+class TestPivotTableSeveralFrames:
+    """How the workbook-wide keyword and the per-sheet dict combine in dfs_to_xlsx."""
+
+    def test_workbook_wide_pivot_tables_skip_a_second_frame_on_the_sheet(self, tmp_xlsx: str) -> None:
+        """Only the first frame of a sheet takes the keyword, as for charts."""
+        xlsxturbo.dfs_to_xlsx(
+            [(_frame(), "Data"), (_frame().iloc[:2], "Data", {"startrow": 8})],
+            tmp_xlsx,
+            pivot_tables={"F3": {"rows": ["Region"]}},
+        )
+        pivot = _only(tmp_xlsx)
+        assert (pivot.sheet, pivot.source_ref) == ("Data", "A1:D5")
+
+    def test_dfs_without_a_header_row_is_refused(self, tmp_xlsx: str) -> None:
+        """The dfs_to_xlsx entry's header=False reaches the check, as df_to_xlsx's does."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match="header=False"):
+            xlsxturbo.dfs_to_xlsx([(_frame(), "Data", {"header": False, "pivot_tables": {"Pivot!A3": {}}})], tmp_xlsx)
+
+    def test_a_workbook_wide_key_naming_a_sheet_fails_from_the_second_sheet_on(self, tmp_xlsx: str) -> None:
+        """Every sheet's first frame puts its pivot table at the same cell, so the second is refused."""
+        with pytest.raises(xlsxturbo.ConfigurationError, match=r"^sheet 'B': .*already holds sheet 'A'"):
+            xlsxturbo.dfs_to_xlsx([(_frame(), "A"), (_frame(), "B")], tmp_xlsx, pivot_tables={"Summary!A3": {}})
+
+    def test_an_empty_dict_switches_the_keyword_off_and_none_does_not(self, tmp_xlsx: str) -> None:
+        """{} for sheet B removes its pivot table; None for sheet C falls back to the keyword."""
+        xlsxturbo.dfs_to_xlsx(
+            [
+                (_frame(), "A"),
+                (_frame(), "B", {"pivot_tables": {}}),
+                (_frame(), "C", {"pivot_tables": None}),
+            ],
+            tmp_xlsx,
+            pivot_tables={"F3": {"rows": ["Region"]}},
+        )
+        assert [p.sheet for p in _pivots(tmp_xlsx)] == ["A", "C"]
 
 
 class TestPivotTableConstantMemory:

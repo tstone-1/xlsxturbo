@@ -24,11 +24,10 @@ pub use convert::{convert_csv_to_xlsx, convert_csv_to_xlsx_parallel, ConvertErro
 pub use types::DateOrder;
 pub use workbook::Destination;
 
-use apply::{apply_pivot_tables, FrameArea, PivotRequest};
 use convert::{
-    add_named_worksheet, apply_cell_options, claimed_table_name, convert_dataframe_to_xlsx,
-    dataframe_row_count, finish_sheet, finish_workbook, frame_area, write_frame, FrameOutcome,
-    WorkbookOptions,
+    add_named_worksheet, add_pivot_tables, apply_cell_options, claimed_table_name,
+    convert_dataframe_to_xlsx, dataframe_row_count, finish_sheet, finish_workbook, write_frame,
+    FrameOutcome, PlacedFrame, WorkbookOptions,
 };
 use extract::{
     extract_cells, extract_charts, extract_checkboxes, extract_column_formats,
@@ -660,8 +659,8 @@ fn csv_to_xlsx(
 ///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
 ///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
 ///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
-///                      Plain column_widths, header_format, column_formats, freeze_panes,
-///                      autofilter and tab_color remain supported.
+///                      Plain column_widths, header_format, column_formats, pivot_tables,
+///                      freeze_panes, autofilter and tab_color remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -721,7 +720,9 @@ fn csv_to_xlsx(
 ///                   and formula columns included, so every field is one of its headers.
 ///                   "A3" places it on the frame's own sheet; "Summary!A3" on sheet
 ///                   "Summary", created empty after every other sheet when the workbook
-///                   has none of that name. An anchor inside any frame is refused. Excel
+///                   has none of that name. An anchor inside any frame is refused, and so
+///                   is a cells, hyperlinks, merged_ranges, rich_text or checkboxes write
+///                   into the frame's header row, whose texts are the field names. Excel
 ///                   builds the table when the file is opened, so anything to the right of
 ///                   or below the anchor can make it show #SPILL!. Keys: rows, columns,
 ///                   filters (lists of column names), values (column names, or dicts with
@@ -753,7 +754,7 @@ fn csv_to_xlsx(
 ///            shorthand keys "num_format", "font_name", "quote_prefix", "align_horizontal",
 ///            "align_vertical" and "wrap_text", which override the same key in "format".
 ///            Cells are written after all DataFrame data, so they can overwrite data cells.
-///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
+///            Example: {"B9": "Label", "D6": {"value": "000123456789", "num_format": "@"}}
 ///
 /// Returns:
 ///     Tuple of (rows, columns) written to the Excel file
@@ -963,7 +964,7 @@ fn version() -> &'static str {
 ///             autofilter, tab_color, column_widths, row_heights, table_name, header_format, column_formats,
 ///             conditional_formats, formula_columns, merged_ranges, hyperlinks,
 ///             comments, validations, rich_text, images, checkboxes, textboxes, charts,
-///             sparklines, cells, startrow
+///             sparklines, pivot_tables, cells, startrow
 ///     output_path: Path for the output XLSX file, or a binary file-like
 ///         object (io.BytesIO, a file opened 'wb') to write the workbook into
 ///     header: Include column names as header row (default: True)
@@ -1001,8 +1002,8 @@ fn version() -> &'static str {
 ///                      row_heights, autofit, column_widths with autofit cap, conditional_formats,
 ///                      formula_columns, merged_ranges, hyperlinks, comments, validations,
 ///                      rich_text, images, checkboxes, textboxes, charts, sparklines, and cells.
-///                      Plain column_widths, header_format, column_formats, freeze_panes,
-///                      autofilter and tab_color remain supported.
+///                      Plain column_widths, header_format, column_formats, pivot_tables,
+///                      freeze_panes, autofilter and tab_color remain supported.
 ///     column_formats: Dict mapping column name patterns to format dicts (default: None)
 ///                     Supports wildcards: "prefix*", "*suffix", "*contains*", or exact match.
 ///                     Format options: bg_color, font_color, num_format, bold, italic, underline, border.
@@ -1042,7 +1043,9 @@ fn version() -> &'static str {
 ///                   and formula columns included, so every field is one of its headers.
 ///                   "A3" places it on the frame's own sheet; "Summary!A3" on sheet
 ///                   "Summary", created empty after every other sheet when the workbook
-///                   has none of that name. An anchor inside any frame is refused. Excel
+///                   has none of that name. An anchor inside any frame is refused, and so
+///                   is a cells, hyperlinks, merged_ranges, rich_text or checkboxes write
+///                   into the frame's header row, whose texts are the field names. Excel
 ///                   builds the table when the file is opened, so anything to the right of
 ///                   or below the anchor can make it show #SPILL!. Keys: rows, columns,
 ///                   filters (lists of column names), values (column names, or dicts with
@@ -1074,10 +1077,11 @@ fn version() -> &'static str {
 ///            shorthand keys "num_format", "font_name", "quote_prefix", "align_horizontal",
 ///            "align_vertical" and "wrap_text", which override the same key in "format".
 ///            Cells are written after all DataFrame data, so they can overwrite data cells.
-///            Example: {"B9": "Label", "D6": {"value": "934728173849", "num_format": "@"}}
+///            Example: {"B9": "Label", "D6": {"value": "000123456789", "num_format": "@"}}
 ///
 /// Returns:
-///     List of (rows, columns) tuples for each sheet
+///     List of (rows, columns) tuples, one per entry of sheets (two entries
+///     that name one sheet give two tuples)
 ///
 /// Raises:
 ///     XlsxTurboError: If the conversion fails. The subclass says what kind of
@@ -1399,38 +1403,20 @@ fn dfs_to_xlsx<'py>(
 
     // Pivot tables go last: one may be placed on a sheet a later entry wrote, or
     // on a new sheet, and every frame must be known to keep its anchor out of them.
-    let sheet_name_of = |index: usize| entries[entries[index].first].name.as_str();
-    let requests: Vec<PivotRequest<'_>> = entries
+    let placed: Vec<PlacedFrame<'_>> = entries
         .iter()
         .enumerate()
-        .filter_map(|(index, entry)| {
-            let tables = effective[index].pivot_tables.filter(|t| !t.is_empty())?;
-            Some(PivotRequest {
-                area: frame_area(sheet_name_of(index), entry.startrow, &frames[index]),
-                sheet: sheet_name_of(index).to_string(),
-                header: entry.header,
-                field_names: frames[index].header_names.clone(),
-                tables,
-            })
+        .map(|(index, entry)| PlacedFrame {
+            // The sheet carries the first entry's spelling of its name.
+            sheet: entries[entry.first].name.as_str(),
+            startrow: entry.startrow,
+            header: entry.header,
+            constant_memory,
+            outcome: &frames[index],
+            opts: &effective[index],
         })
         .collect();
-    if !requests.is_empty() {
-        let sheet_names: Vec<String> = entries
-            .iter()
-            .enumerate()
-            .filter(|&(index, entry)| entry.first == index)
-            .map(|(_, entry)| entry.name.clone())
-            .collect();
-        let areas: Vec<FrameArea> = entries
-            .iter()
-            .enumerate()
-            .filter_map(|(index, entry)| {
-                frame_area(sheet_name_of(index), entry.startrow, &frames[index])
-            })
-            .collect();
-        apply_pivot_tables(py, &mut workbook, &sheet_names, &areas, &requests)
-            .map_err(errors::configuration)?;
-    }
+    add_pivot_tables(py, &mut workbook, &placed)?;
 
     reject_table_name_collisions(&table_names, defined_names.as_ref())
         .map_err(errors::workbook_validation)?;

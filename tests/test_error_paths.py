@@ -13,9 +13,7 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import load_workbook
 
 
 class TestErrorPaths:
@@ -249,8 +247,16 @@ class TestErrorPaths:
         """
         df = pd.DataFrame({"A": [1]})
         xlsxturbo.dfs_to_xlsx([[df, "Sheet1"]], tmp_xlsx)  # type: ignore[list-item]
+        wb = load_workbook(tmp_xlsx)
+        assert wb.sheetnames == ["Sheet1"]
+        assert wb["Sheet1"]["A2"].value == 1
+        wb.close()
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, merged_ranges=[["A1:B1", "Title"]])  # type: ignore[list-item]
-        assert Path(tmp_xlsx).exists()
+        wb = load_workbook(tmp_xlsx)
+        ws = wb["Sheet1"]
+        assert ws["A1"].value == "Title"
+        assert [str(r) for r in ws.merged_cells.ranges] == ["A1:B1"]
+        wb.close()
 
     def test_dfs_to_xlsx_per_sheet_invalid_dict_option_raises(self, tmp_xlsx: str) -> None:
         """Per-sheet dict options reject wrong container types."""

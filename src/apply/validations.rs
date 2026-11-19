@@ -84,6 +84,33 @@ fn validation_i32_field(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<i3
     ))
 }
 
+/// Excel's largest number, as Excel itself displays it.
+const EXCEL_MAX_NUMBER: f64 = 9.99999999999999e307;
+
+/// Extract a finite `f64` for `decimal` validation's `min`/`max` that Excel
+/// can hold.
+///
+/// A finite bound above Excel's largest number (`1e308`, `sys.float_info.max`)
+/// is written out as a 309-digit formula, and Excel refuses to open the
+/// workbook (measured in Excel 16.0 for both; `9.99999999999999e307` opens).
+/// `sys.float_info.max` is what a caller who wants "no upper bound" reaches for
+/// next after `inf` is refused, so it is refused here too, naming the limit.
+fn validation_decimal_field(view: &OptionMap<'_, '_>, key: &str) -> Result<Option<f64>, String> {
+    let value = view.finite_f64(key)?;
+    if let Some(v) = value {
+        if v.abs() > EXCEL_MAX_NUMBER {
+            return Err(format!(
+                "{}: '{}' is {:e}, beyond Excel's largest number 9.99999999999999E+307; \
+                 leave the bound out for a one-sided rule",
+                view.context(),
+                key,
+                v
+            ));
+        }
+    }
+    Ok(value)
+}
+
 /// The rule for a `min`/`max` pair: `Between` when both are given, a one-sided
 /// rule when only one is, `None` when neither is.
 ///
@@ -217,8 +244,8 @@ fn build_validation(view: &OptionMap<'_, '_>, col_pattern: &str) -> Result<DataV
         }
         "decimal" | "number" => {
             view.reject_unknown(&keys_with(&["min", "max"]))?;
-            let min = view.finite_f64("min")?;
-            let max = view.finite_f64("max")?;
+            let min = validation_decimal_field(view, "min")?;
+            let max = validation_decimal_field(view, "max")?;
             // No full-range fallback here: `f64::MAX` is above Excel's largest
             // number (9.99999999999999E+307), and a workbook carrying it in a
             // validation formula is refused by Excel on open (measured for

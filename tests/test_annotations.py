@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestMergedRanges:
@@ -109,7 +105,6 @@ class TestHyperlinks:
             tmp_xlsx,
             hyperlinks=[("A2", "https://example.com")],
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["A2"].hyperlink is not None
@@ -160,7 +155,6 @@ class TestComments:
         """Write a simple string comment."""
         df = pd.DataFrame({"A": [1, 2, 3]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, comments={"A1": "This is a header note"})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # openpyxl stores comments in ws.comments
@@ -174,7 +168,6 @@ class TestComments:
         xlsxturbo.df_to_xlsx(
             df, tmp_xlsx, comments={"A2": {"text": "Data note", "author": "John"}}
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         comment = ws["A2"].comment
@@ -216,7 +209,6 @@ class TestComments:
         xlsxturbo.df_to_xlsx(
             df, tmp_xlsx, comments={"A1": "Column A", "B1": "Column B", "A2": "First value"}
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["A1"].comment is not None
@@ -291,11 +283,11 @@ class TestDefinedNames:
         """Create a defined name with a quoted sheet name containing a space."""
         df = pd.DataFrame({"a": [1]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx,
-            sheet_name="LCA Calculator Parameters",
-            defined_names={"Settings": "='LCA Calculator Parameters'!$B$13:$D$155"})
+            sheet_name="Example Sheet",
+            defined_names={"Settings": "='Example Sheet'!$A$1:$C$10"})
         wb = load_workbook(tmp_xlsx)
-        names = {dn.name for dn in wb.defined_names.values()}
-        assert "Settings" in names
+        names = {dn.name: dn.attr_text for dn in wb.defined_names.values()}
+        assert names.get("Settings") == "'Example Sheet'!$A$1:$C$10"
         wb.close()
 
     # An empty name used to abort the process: rust_xlsxwriter's define_name

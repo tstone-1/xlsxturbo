@@ -42,7 +42,7 @@
 - *The release smoke test runs `pytest tests/` outside the checkout* -- a test that reads repository files must skip via `repo_checkout_available()`; reproduce the job before tagging. Full text: [dev-docs/build-and-release.md](dev-docs/build-and-release.md#the-release-smoke-test-runs-outside-the-checkout).
 - Standard local checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release`, `maturin develop --release`, then `pytest tests/`, then `mkdocs build --strict` when anything under `docs/` moved (needs `uv pip install -r requirements-docs.txt` into the venv once; the `dev` extras deliberately do not carry it). `BUILD.md`'s Pre-Push Checklist is the CI-verbatim list; this line is the short form.
 - *`tests/test_build_is_current.py` fails when the built extension is older than any Rust source, `Cargo.toml`, `Cargo.lock` or `pyproject.toml`* -- a stale `.so` measures the wrong code without erroring; run `maturin develop --release`. Full text: [dev-docs/testing.md](dev-docs/testing.md#a-stale-build-fails-the-suite).
-- *Reading a workbook back is not opening it in Excel* -- openpyxl and the XML passed a one-bound `decimal` validation that Excel refused for ten months; check in Excel with `scripts/excel_open_check.ps1 -Control <good.xlsx> <files>`, which also prints the dialog a refused file shows. Full text: [dev-docs/testing.md](dev-docs/testing.md#reading-a-workbook-back-is-not-opening-it-in-excel).
+- *Reading a workbook back is not opening it in Excel* -- openpyxl and the XML passed a one-bound `decimal` validation that Excel refused for ten months; check in Excel with `scripts/excel_open_check.ps1 -Control <good.xlsx> <files>`, which also prints the dialog a refused file shows; exit 2 and `BUSY` mean it could not check, never a verdict. Full text: [dev-docs/testing.md](dev-docs/testing.md#reading-a-workbook-back-is-not-opening-it-in-excel).
 - Plain `cargo test` must work outside maturin. Keep `pyo3/extension-module` enabled through `pyproject.toml` / maturin, not directly in `Cargo.toml`.
 - Release versions are SemVer and must match in `Cargo.toml` and `pyproject.toml`; update `CHANGELOG.md` before release commits.
 - Before tagging a release, verify the latest GitHub Actions CI on `main` is passing and no relevant Dependabot PRs are unreviewed.
@@ -81,7 +81,7 @@ Read [dev-docs/adding-a-feature.md](dev-docs/adding-a-feature.md) in full before
 - *Closed: #213, `TempFileError` drops the `io::Error`* -- fixed in rust_xlsxwriter 0.101.0; `temp_file_failure` now maps the `io::Error`, so a refused temporary folder is `FilePermissionError`. No open upstream defect is pinned now.
 - *Closed by rust_xlsxwriter 0.103.0: #216, #217 and the unquoted `TRUE`/`FALSE` sheet name* -- `tests/test_attribute_escaping.py` and `tests/test_table_headers.py` pin the escaped output; `unwritable_table_header` keeps only the 255-unit length rule, for its clearer message.
 - *Filed as #221, fixed in 0.103.0: a failed `Workbook::save(path)` leaves a 0-byte file and replaces an existing workbook* -- xlsxturbo saves through `save_to_writer()` into a temporary file and renames it; keep that path.
-- *Pivot tables are `pivot_tables`, on rust_xlsxwriter 0.103.0's `PivotTable`: read the branch findings before changing `src/apply/pivot.rs`* -- the field names are always passed with `set_field_names()` (wrong ones give an empty table), and the crate checks placement in the first column only.
+- *Pivot tables are `pivot_tables`, on rust_xlsxwriter 0.103.0's `PivotTable`: read the branch findings before changing `src/apply/pivot.rs`* -- the field names are always passed with `set_field_names()` (wrong ones give an empty table), and the crate checks placement in the first column only. The crate compares names and captions with the header cells only at the save, which would surface as `FileError`: `plan_pivot_tables` therefore refuses a cell-addressed write into a pivot source's header row and a caption equal to a column name; a new save-time pivot rule upstream needs the same pre-check.
 
 ## Name validation is ours now — upstream has drawn its line
 
@@ -178,7 +178,7 @@ Full text: [dev-docs/python-versions.md](dev-docs/python-versions.md#a-new-cpyth
 
 ## Documentation Sync
 
-- *A feature change updates its `docs/` page (not the README), the generated capability matrix, `CHANGELOG.md` and the stub `xlsxturbo.pyi`* -- full text: [dev-docs/documentation-sync.md](dev-docs/documentation-sync.md).
+- *A feature change updates its `docs/` page (not the README), the generated capability matrix, `CHANGELOG.md` and the stub `xlsxturbo.pyi`* -- every `python` block on a docs page is executed by `tests/test_docs_examples.py`, and an example meant to raise says so in a `# SomeError: message` comment. Full text: [dev-docs/documentation-sync.md](dev-docs/documentation-sync.md).
 - *Unreleased work goes under `## [Unreleased]`, never `## [X.Y.Z] - Unreleased`* -- `release-notes.sh` matches the version heading as a prefix, so the second form publishes a Release whose notes say Unreleased with exit 0; `TestChangelogHeadings` refuses it. This repo's rule wins over the cross-repo note. Full text: [dev-docs/changelog.md](dev-docs/changelog.md#unreleased-work-goes-under-unreleased).
 - Before commit or push, follow the `BUILD.md` checklist.
 

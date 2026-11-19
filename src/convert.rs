@@ -3,8 +3,9 @@
 use crate::apply::{
     apply_cells, apply_charts, apply_checkboxes, apply_column_widths,
     apply_column_widths_with_autofit_cap, apply_comments, apply_conditional_formats,
-    apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_pivot_tables,
-    apply_rich_text, apply_sparklines, apply_textboxes, apply_validations, FrameArea, PivotRequest,
+    apply_formula_columns, apply_hyperlinks, apply_images, apply_merged_ranges, apply_rich_text,
+    apply_sparklines, apply_textboxes, apply_validations, cell_writes, plan_pivot_tables,
+    FrameArea, PivotRequest,
 };
 use crate::errors::FileFailure;
 use crate::parse::{
@@ -13,13 +14,14 @@ use crate::parse::{
 };
 use crate::types::{
     extract_columns, is_polars_dataframe, CellValue, DateOrder, EffectiveOpts, ExtractedOptions,
-    FreezePanes, WriteConfig,
+    FreezePanes, PivotTableConfig, WriteConfig,
 };
 use crate::workbook::{apply_defined_names, save_to, Destination};
 use crate::write::{
     write_cell, write_py_value_with_format, CellFormat, DATETIME_NUM_FORMAT, DATE_NUM_FORMAT,
 };
 use csv::ReaderBuilder;
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use rust_xlsxwriter::{Color, Format, Table, TableColumn, Workbook, Worksheet};
@@ -542,7 +544,7 @@ pub(crate) struct FrameOutcome {
 
 /// The cells a frame wrote, header and formula columns included, or `None`
 /// when it wrote no cell at all.
-pub(crate) fn frame_area(sheet: &str, startrow: u32, frame: &FrameOutcome) -> Option<FrameArea> {
+fn frame_area(sheet: &str, startrow: u32, frame: &FrameOutcome) -> Option<FrameArea> {
     (frame.rows > 0 && frame.total_cols > 0).then(|| FrameArea {
         sheet: sheet.to_string(),
         first_row: startrow,
@@ -1347,6 +1349,80 @@ fn set_compression_level(workbook: &mut Workbook, level: Option<u8>) {
     }
 }
 
+/// One written frame, as the workbook-level pivot step sees it.
+pub(crate) struct PlacedFrame<'a> {
+    /// The frame's sheet, as the workbook spells it.
+    pub(crate) sheet: &'a str,
+    pub(crate) startrow: u32,
+    pub(crate) header: bool,
+    /// The cell-addressed options are skipped under constant memory, so they
+    /// cannot overwrite a header cell there.
+    pub(crate) constant_memory: bool,
+    pub(crate) outcome: &'a FrameOutcome,
+    pub(crate) opts: &'a EffectiveOpts<'a>,
+}
+
+/// Add every frame's `pivot_tables`, after every frame and every cell option.
+///
+/// The one pivot step of both DataFrame entry points: `frames` is every frame
+/// of the workbook in entry order, with or without pivot tables, because an
+/// anchor inside any of them is refused. Everything is checked before the
+/// first new sheet is created.
+pub(crate) fn add_pivot_tables(
+    py: Python<'_>,
+    workbook: &mut Workbook,
+    frames: &[PlacedFrame<'_>],
+) -> Result<(), ConvertError> {
+    fn wanted<'a>(frame: &PlacedFrame<'a>) -> Option<&'a IndexMap<String, PivotTableConfig>> {
+        frame.opts.pivot_tables.filter(|t| !t.is_empty())
+    }
+    if !frames.iter().any(|frame| wanted(frame).is_some()) {
+        return Ok(());
+    }
+
+    let areas: Vec<Option<FrameArea>> = frames
+        .iter()
+        .map(|frame| frame_area(frame.sheet, frame.startrow, frame.outcome))
+        .collect();
+    let mut sheets: Vec<&str> = Vec::new();
+    for frame in frames {
+        if !sheets.contains(&frame.sheet) {
+            sheets.push(frame.sheet);
+        }
+    }
+    let requests: Vec<PivotRequest<'_>> = frames
+        .iter()
+        .zip(&areas)
+        .filter_map(|(frame, area)| {
+            Some(PivotRequest {
+                area: area.as_ref(),
+                sheet: frame.sheet,
+                header: frame.header,
+                field_names: &frame.outcome.header_names,
+                tables: wanted(frame)?,
+            })
+        })
+        .collect();
+    let writes: Vec<_> = frames
+        .iter()
+        .filter(|frame| !frame.constant_memory)
+        .flat_map(|frame| cell_writes(frame.sheet, frame.opts))
+        .collect();
+    let all_areas: Vec<&FrameArea> = areas.iter().flatten().collect();
+
+    let plan = plan_pivot_tables(py, &sheets, &all_areas, &requests, &writes)
+        .map_err(ConvertError::Config)?;
+    for (name, context) in plan.new_sheets() {
+        add_named_worksheet(workbook, name, false).map_err(|e| match e {
+            ConvertError::Config(message) => {
+                ConvertError::Config(format!("{}: {}", context, message))
+            }
+            file @ ConvertError::File(_) => file,
+        })?;
+    }
+    plan.add_to(workbook).map_err(ConvertError::Config)
+}
+
 /// Convert a DataFrame (pandas or polars) to XLSX format
 pub(crate) fn convert_dataframe_to_xlsx(
     py: Python<'_>,
@@ -1368,26 +1444,19 @@ pub(crate) fn convert_dataframe_to_xlsx(
         opts.as_effective(),
     )?;
 
-    if let Some(tables) = opts.pivot_tables.as_ref().filter(|t| !t.is_empty()) {
-        let areas: Vec<FrameArea> = frame_area(sheet_name, config.startrow, &frame)
-            .into_iter()
-            .collect();
-        let request = PivotRequest {
-            area: frame_area(sheet_name, config.startrow, &frame),
-            sheet: sheet_name.to_string(),
+    let effective = opts.as_effective();
+    add_pivot_tables(
+        py,
+        &mut workbook,
+        &[PlacedFrame {
+            sheet: sheet_name,
+            startrow: config.startrow,
             header: config.include_header,
-            field_names: frame.header_names.clone(),
-            tables,
-        };
-        apply_pivot_tables(
-            py,
-            &mut workbook,
-            &[sheet_name.to_string()],
-            &areas,
-            &[request],
-        )
-        .map_err(ConvertError::Config)?;
-    }
+            constant_memory: config.constant_memory,
+            outcome: &frame,
+            opts: &effective,
+        }],
+    )?;
 
     finish_workbook(py, &mut workbook, options, output)?;
 

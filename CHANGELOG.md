@@ -13,9 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the workbook has none of that name. Row, column, filter and value fields, the eleven
   value functions, captions, number formats, the style gallery, the three layouts and the
   grand totals. Works under `constant_memory`. Excel builds the table when the file is
-  opened. See [Pivot tables](https://tstone-1.github.io/xlsxturbo/pivot-tables/).
+  opened. A mistake is refused before anything is written, as `ConfigurationError`:
+  among others a value field caption equal to a column name, and a `cells`,
+  `hyperlinks`, `merged_ranges`, `rich_text` or `checkboxes` entry that writes into the
+  header row of a frame a pivot table reads. See [Pivot tables](https://tstone-1.github.io/xlsxturbo/pivot-tables/).
 
 ### Fixed
+- A `decimal` validation with a `min` or `max` beyond Excel's largest number,
+  9.99999999999999E+307, gave a workbook Excel refused to open, with no error from the
+  export. `validations={"n": {"type": "decimal", "max": sys.float_info.max}}` and
+  `"max": 1e308` wrote the bound as given. Such a bound now raises `ConfigurationError`;
+  leave the bound out for a one-sided rule. A bound up to 9.99999999999999E+307 is
+  written as before.
+- The release workflow uploads to PyPI only after the SBOM job has succeeded, so a failed
+  SBOM job can no longer leave a PyPI release without a GitHub Release.
+- `scripts/coverage_report.py` exits 1 when the report succeeded but the uninstrumented
+  build could not be restored.
+- `scripts/excel_open_check.ps1` reported a workbook Excel was still busy with as
+  `REFUSED`, skipped a path that matched nothing and exited 0, and exited 1 when Excel
+  could not be started. It now retries a busy call and reports `BUSY`, and exits 2
+  whenever it could not check; a file name with `[` or `]` is found.
+- Documentation: the `except ValueError` example in the errors page used a call that
+  raises a `TypeError`; the rich-text option list named `bg_color`, which is not accepted,
+  and left out `font_name`; formula columns beside a table are sized by `column_widths`
+  and `autofit`; a CSV cell `Inf.` stays text; an all-timedelta frame in nanoseconds is
+  written as a number; a per-sheet `None` switches off only value options such as
+  `table_style`, a dict or list option needs `{}` or `[]`; the capability matrix stated a
+  fixed count of constant-memory options.
 - A control character such as U+0001, U+000B or U+001F, or U+FFFE or U+FFFF, in a sheet
   name, a font name, a number format, a validation title or message, a hyperlink, a
   textbox or an image alt text gave a workbook Excel refused to open. It is now written in
@@ -1736,7 +1760,7 @@ These two tighten validation and can raise where a previous version silently pro
   - Available in both `df_to_xlsx()` and `dfs_to_xlsx()`
 - **Arbitrary cell writes** - `cells` parameter for writing values to specific cells
   - Simple values: `cells={"B9": "Label", "B10": 42}`
-  - With number format: `cells={"D6": {"value": "934728173849", "num_format": "@"}}`
+  - With number format: `cells={"D6": {"value": "000123456789", "num_format": "@"}}`
   - Cells are written after DataFrame data, allowing overwrite of data cells
   - Available in both `df_to_xlsx()` and `dfs_to_xlsx()` with per-sheet overrides
 

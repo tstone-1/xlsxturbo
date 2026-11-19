@@ -297,9 +297,9 @@ def build_matrix() -> str:
         "",
         f"`constant_memory=True` keeps {len(cm_safe)} of the feature options "
         f"({', '.join(f'`{o}`' for o in cm_safe)}) and skips",
-        f"{len(cm_disabled)}. Those three are the ones applied while rows are being written; everything",
-        "else needs to revisit a cell after the fact, which streaming output cannot do. A new",
-        "option defaults to skipped, so this list only grows deliberately.",
+        f"{len(cm_disabled)}. None of the kept options needs to revisit a cell that was already written;",
+        "everything else does, which streaming output cannot do. A new option defaults to skipped,",
+        "so this list only grows deliberately.",
         "",
         f"Of the {len(ordered)} options, {len(per_sheet)} can be overridden per sheet in `dfs_to_xlsx`. The rest are",
         "workbook-wide.",

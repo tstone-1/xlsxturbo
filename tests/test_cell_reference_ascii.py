@@ -11,9 +11,7 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 SHARP_S = chr(0xDF)  # uppercases to "SS"
 DOTLESS_I = chr(0x131)  # uppercases to "I"

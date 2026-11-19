@@ -36,9 +36,9 @@ Formula columns appear after data columns (A=price, B=quantity, C=tax_rate, D=Su
 - Column order is preserved (first formula = first new column)
 - Works with both `df_to_xlsx` and `dfs_to_xlsx` (global or per-sheet)
 - Combined with `table_style`, formula columns sit **outside** the Excel table: the table
-  covers the DataFrame columns only, so formula columns get no banded fill, no autofilter
-  dropdown, and are not covered by `column_widths`/`autofit`. Add the calculated column to
-  the DataFrame instead if you need it inside the table.
+  covers the DataFrame columns only, so formula columns get no banded fill and no autofilter
+  dropdown. `column_widths` and `autofit` still size them like any other column. Add the
+  calculated column to the DataFrame instead if you need it inside the table.
 
 ## Defined Names
 

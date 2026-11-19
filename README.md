@@ -100,6 +100,7 @@ The finished file is held in memory before it is written out, including with
 - **Conditional formatting** — colour scales, data bars, icon sets
 - **Formulas** — calculated columns and workbook-level defined names
 - **Native Excel charts** and in-cell sparklines, both editable in Excel
+- **Native Excel pivot tables** over the exported frame, on its own sheet or another
 - **Data validation** — dropdowns, numeric ranges, text-length constraints
 - **Cell-level extras** — arbitrary cell writes, hyperlinks, comments, checkboxes,
   images, textboxes
@@ -128,7 +129,8 @@ scripts live in [`benchmarks/`](benchmarks/) so you can measure your own hardwar
   timezone concept, so the UTC offset is not preserved.
 - **Integers above 2^53** are written as text to avoid silent precision loss.
 - **Durations** (`Timedelta` / `timedelta64`) are written as text; Excel has no duration
-  type.
+  type. The exception is a pandas frame whose every column is a nanosecond timedelta (the
+  pandas 2 default): it is written as the number of nanoseconds.
 
 The [compatibility page](https://tstone-1.github.io/xlsxturbo/compatibility/) has the
 complete list with the workaround for each.

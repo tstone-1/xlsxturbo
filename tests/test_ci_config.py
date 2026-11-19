@@ -681,8 +681,11 @@ class TestCodeqlActionPinsMoveTogether:
 # *dependencies*, not the tool. The release job's SBOM step was unpinned, six
 # lines above a comment recording that the Python SBOM tool had been unpinned,
 # floated to 7.x and failed the v0.19.0 release on a renamed flag -- and the
-# release path is the worse place for it, because `github-release` needs the
-# `sbom` artifact and PyPI publish has already happened by then.
+# release path is the worse place for it: `github-release` needs the `sbom`
+# artifact, and at the time the PyPI upload did not wait for `sbom`, so the
+# upload had already happened. It waits for it now
+# (`test_the_upload_waits_for_every_job_the_github_release_needs`), so a failure
+# here stops the release before the upload instead.
 CARGO_INSTALL = re.compile(r"cargo install\s+(?P<spec>[A-Za-z0-9_.@-]+)")
 
 
@@ -876,6 +879,26 @@ class TestTheReleaseIsCheckedBeforeItIsUploaded:
             f"the PyPI upload (`release`) does not need `{RELEASE_CHECK}`, so a tag with no "
             f"CHANGELOG section or the wrong package version can still be uploaded; it "
             f"needs {_needs(jobs['release'])}"
+        )
+
+    def test_the_upload_waits_for_every_job_the_github_release_needs(self) -> None:
+        """A job that can fail the GitHub Release must finish before the upload.
+
+        `github-release` needed `sbom` and `release` did not, so an `sbom` failure
+        left a version on PyPI with no GitHub Release beside it.
+        """
+        jobs = _release_jobs()
+        assert "github-release" in jobs, f"release.yml has no `github-release` job; found {sorted(jobs)}"
+        others = [name for name in _needs(jobs["github-release"]) if name != "release"]
+        assert "sbom" in others, (
+            f"`github-release` no longer needs `sbom` ({_needs(jobs['github-release'])}); "
+            "update this test to what the Release now depends on"
+        )
+        missing = [name for name in others if name not in _needs(jobs["release"])]
+        assert not missing, (
+            f"`github-release` needs {missing}, which the PyPI upload (`release`) does not wait "
+            f"for, so their failure leaves a PyPI release without a GitHub Release; "
+            f"`release` needs {_needs(jobs['release'])}"
         )
 
     def test_every_wheel_build_waits_for_the_check(self) -> None:

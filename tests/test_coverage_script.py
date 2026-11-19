@@ -158,6 +158,26 @@ def test_a_failed_rebuild_warns_instead_of_raising(
     assert "[WARN] the venv still holds the INSTRUMENTED build" in capsys.readouterr().out
 
 
+def test_a_failed_rebuild_after_a_good_report_fails_the_run(
+    script: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report succeeded and the restore did not: the run must not exit 0.
+
+    The restore's result was once ignored, so a run that left the instrumented
+    build in the venv reported success to whatever called it.
+    """
+    recorder = Recorder(tmp_path / "coverage", restore_code=1)
+    install(script, recorder, monkeypatch)
+
+    assert script.main() == 1
+    out = capsys.readouterr().out
+    # The control: the report steps ran to the end before the failed rebuild.
+    assert len([command for _, command, _ in recorder.calls if "pytest" in command]) == 2
+    assert is_develop(recorder.calls[-1][1])
+    assert "[WARN] the venv still holds the INSTRUMENTED build" in out
+    assert "[FAIL] the coverage report is complete, but the venv was not restored" in out
+
+
 def test_an_inherited_instrument_flag_is_dropped(
     script: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

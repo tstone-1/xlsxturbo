@@ -92,6 +92,7 @@ tool.
 - **Textboxes** - floating text shapes with configurable font, fill, and line colors
 - **Native Excel charts** - editable bar, column, line, pie, scatter, and other chart types
 - **Sparklines** - mini in-cell line, column, and win/loss charts for inline trends
+- **Pivot tables** - native Excel pivot tables over the exported frame, on its sheet or another
 - **Defined names** - workbook-level named ranges for formulas and references
 - **Arbitrary cell writes** - write values to specific cells with optional formatting
 - **Border styles** - per-side borders (left, right, top, bottom) with 13 style options

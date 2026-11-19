@@ -16,9 +16,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 DATE = dt.date(2026, 9, 24)
 DATETIME = dt.datetime(2026, 9, 24, 13, 45, 30)

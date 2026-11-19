@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
@@ -12,9 +13,7 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestBackwardCompatibility:
@@ -24,7 +23,6 @@ class TestBackwardCompatibility:
         """Integer key column_widths still works."""
         df = pd.DataFrame({"A": [1], "B": [2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={0: 20, 1: 30})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws.column_dimensions["A"].width > 15
@@ -48,7 +46,6 @@ class TestPolarsSupport:
         """Polars column width cap is respected."""
         df = pl.DataFrame({"A": ["x" * 100], "B": ["y" * 100]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, column_widths={"_all": 20})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws.column_dimensions["A"].width <= 21
@@ -74,7 +71,6 @@ class TestPolarsSupport:
         """Polars DataFrame with a custom table name creates that table."""
         df = pl.DataFrame({"A": [1, 2, 3]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2", table_name="PolarsTable")
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert "PolarsTable" in ws.tables
@@ -84,7 +80,6 @@ class TestPolarsSupport:
         """Polars DataFrame honors header_format."""
         df = pl.DataFrame({"A": [1], "B": [2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, header_format={"bold": True})
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["A1"].font.bold is True
@@ -155,7 +150,9 @@ class TestEdgeCases:
         rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx)
         assert rows == 1  # Just header
         assert cols == 2
-        assert Path(tmp_xlsx).exists()
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert (ws["A1"].value, ws["B1"].value) == ("A", "B")
+        assert ws.max_row == 1
 
     def test_pathlib_output_path(self, tmp_xlsx: str) -> None:
         """pathlib.Path is accepted for output_path."""
@@ -164,13 +161,13 @@ class TestEdgeCases:
         rows, cols = xlsxturbo.df_to_xlsx(df, output_path)
         assert rows == 2
         assert cols == 1
-        assert output_path.exists()
+        ws = active_ws(load_workbook(output_path))
+        assert (ws["A1"].value, ws["A2"].value) == ("A", 1)
 
     def test_empty_dataframe_with_table_style(self, tmp_xlsx: str) -> None:
         """Empty DataFrame with table_style writes without creating table."""
         df = pd.DataFrame({"A": [], "B": []})
         _rows, _cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx, table_style="Medium2")
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # No table should be created for empty DataFrame
@@ -204,7 +201,6 @@ class TestEdgeCases:
                 "price_*": {"bg_color": "#0000FF"},  # General - should match price_eur
             },
         )
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         # price_usd should be red (specific match)
@@ -220,16 +216,18 @@ class TestEdgeCases:
         rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx, header=False)
         assert rows == 0
         assert cols == 2
-        assert Path(tmp_xlsx).exists()
+        ws = active_ws(load_workbook(tmp_xlsx))
+        # No header row and no data: the sheet holds no value at all.
+        assert [cell.value for row in ws.iter_rows() for cell in row if cell.value is not None] == []
 
     def test_table_style_skipped_when_header_false(self, tmp_xlsx: str) -> None:
         """table_style is skipped when header=False (tables require headers)."""
         df = pd.DataFrame({"A": [1, 2]})
         xlsxturbo.df_to_xlsx(df, tmp_xlsx, header=False, table_style="Medium2")
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
         ws = active_ws(wb)
         assert ws["A1"].value == 1  # data in row 1, no header
+        assert len(ws.tables) == 0
         wb.close()
 
     def test_dfs_per_sheet_header_false_with_global_table_style(self, tmp_xlsx: str) -> None:
@@ -240,12 +238,13 @@ class TestEdgeCases:
             (df1, "WithHeader"),
             (df2, "NoHeader", {"header": False}),
         ], tmp_xlsx, table_style="Medium2")
-        assert Path(tmp_xlsx).exists()
         wb = load_workbook(tmp_xlsx)
-        # WithHeader sheet should have table
+        # WithHeader sheet gets the workbook-wide table
         assert wb["WithHeader"]["A1"].value == "A"
-        # NoHeader sheet should have data in row 1
+        assert len(wb["WithHeader"].tables) == 1
+        # NoHeader sheet has data in row 1 and no table
         assert wb["NoHeader"]["A1"].value == 2
+        assert len(wb["NoHeader"].tables) == 0
         wb.close()
 
 
@@ -512,6 +511,41 @@ class TestCsvConversion:
         wb_s.close()
         wb_p.close()
 
+    def test_csv_parallel_across_chunk_boundaries(self, tmp_xlsx_factory: Callable[..., str]) -> None:
+        """Parallel mode writes every row once, in place, across its 10,000-row chunks.
+
+        ``convert_csv_to_xlsx_parallel`` reads ``PARALLEL_CHUNK_ROWS`` (10,000)
+        records at a time, and the mode exists for files larger than that. The
+        test above writes 100 rows, one chunk, so a chunk that was never cleared
+        -- each one written again on top of the next -- stayed green. 25,001
+        data rows make three chunks and one left-over row. The values asserted
+        are each row's own number, not agreement with the sequential output:
+        both modes share ``write_cell``, so agreement alone could be shared error.
+        """
+        import csv
+
+        data_rows = 25_001
+        csv_path = tmp_xlsx_factory(".csv")
+        xlsx_path = tmp_xlsx_factory()
+        with Path(csv_path).open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["num", "text"])
+            for i in range(1, data_rows + 1):
+                writer.writerow([str(i), f"row_{i}"])
+
+        assert xlsxturbo.csv_to_xlsx(csv_path, xlsx_path, parallel=True) == (data_rows + 1, 2)
+
+        wb = load_workbook(xlsx_path, read_only=True)
+        ws = wb.active
+        assert ws is not None
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        assert len(rows) == data_rows + 1
+        assert rows[0] == ("num", "text")
+        # Data row i sits at index i; both sides of each chunk boundary, and the last row.
+        for i in (1, 9_999, 10_000, 10_001, 10_002, 19_999, 20_000, 20_001, 20_002, data_rows):
+            assert rows[i] == (i, f"row_{i}"), f"data row {i}: {rows[i]!r}"
+
     def test_csv_with_sheet_name(self, tmp_xlsx_factory: Callable[..., str]) -> None:
         """CSV conversion with custom sheet name."""
         import csv
@@ -771,6 +805,10 @@ class TestUnicodeAndSpecialData:
         rows, cols = xlsxturbo.df_to_xlsx(df, tmp_xlsx)
         assert rows == 4
         assert cols == 1
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["A1"].value == "empty"
+        for ref in ("A2", "A3", "A4"):
+            assert ws[ref].value in (None, ""), f"{ref} should be empty, got {ws[ref].value!r}"
 
     def test_large_integers_written_as_strings(self, tmp_xlsx: str) -> None:
         """Integers > 2^53 should be written as strings to prevent precision loss."""
@@ -795,6 +833,10 @@ class TestUnicodeAndSpecialData:
         rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
         assert rows == 3  # header + 2 data rows
         assert cols == 2
+        ws = active_ws(load_workbook(xlsx_path))
+        # The BOM is not part of the first header: "﻿name" would fail here.
+        assert ws["A1"].value == "name"
+        assert ws["A2"].value == "Alice"
 
     def test_csv_with_crlf(self, tmp_xlsx_factory: Callable[..., str]) -> None:
         """CSV file with Windows CRLF line endings."""
@@ -805,6 +847,9 @@ class TestUnicodeAndSpecialData:
         rows, cols = xlsxturbo.csv_to_xlsx(csv_path, xlsx_path)
         assert rows == 3
         assert cols == 2
+        ws = active_ws(load_workbook(xlsx_path))
+        # The last field of each line carries no stray "\r": "b" and 4, not "b\r" and "4\r".
+        assert (ws["B1"].value, ws["B3"].value) == ("b", 4)
 
     def test_csv_quoted_fields_with_delimiters(self, tmp_xlsx_factory: Callable[..., str]) -> None:
         """CSV with quoted fields containing commas and newlines."""
@@ -934,8 +979,9 @@ class TestPreEpochDates:
     def test_1900_leap_year_bug_window_datetime64_becomes_string(self, tmp_xlsx: str) -> None:
         """A datetime64[ns] column value inside the 1900 leap-year-bug window is written as a string.
 
-        Regression coverage for the datetime64 guard at src/write.rs:232-240,
-        which is separate from the datetime.date path exercised above. The
+        Regression coverage for the guard in the ``datetime64`` branch of
+        ``write_py_value_with_format`` in src/write.rs, which is separate from
+        the datetime.date path exercised above. The
         fallback string is numpy's own str() of the datetime64 scalar (a full
         timestamp), not the plain "YYYY-MM-DD" used by the datetime.date path.
         """
@@ -958,6 +1004,43 @@ class TestPreEpochDates:
         assert value is not None
         assert (value.year, value.month, value.day) == (1900, 3, 1)
         wb.close()
+
+    @pytest.mark.parametrize(
+        "make_column",
+        [
+            pytest.param(lambda days: pd.Series(pd.to_datetime(days)), id="datetime64"),
+            pytest.param(
+                lambda days: pd.Series([datetime.datetime.fromisoformat(d) for d in days], dtype=object),
+                id="object_datetime",
+            ),
+            pytest.param(
+                lambda days: pd.Series([datetime.date.fromisoformat(d) for d in days], dtype=object),
+                id="object_date",
+            ),
+        ],
+    )
+    def test_last_day_before_the_gap_is_text_on_every_dataframe_path(
+        self, tmp_xlsx: str, make_column: Callable[[list[str]], pd.Series]
+    ) -> None:
+        """1900-02-28 is text and 1900-03-01 a date, on all three DataFrame branches.
+
+        The day count from 1899-12-30 gives 1900-02-28 the number 60, which in
+        Excel is the phantom 1900-02-29. So the guard is ``< 61``, and the day it
+        decides is 02-28: a threshold of 60 would write it as a number Excel
+        shows as a day that never existed. The tests above use 1900-01-15, which
+        both thresholds send to text, so only the CSV path had the boundary day.
+        Each branch (numpy ``datetime64``, ``datetime``, ``date``) has its own
+        copy of the guard in src/write.rs.
+        """
+        df = pd.DataFrame({"d": make_column(["1900-02-28", "1900-03-01"])})
+        xlsxturbo.df_to_xlsx(df, tmp_xlsx)
+        ws = active_ws(load_workbook(tmp_xlsx))
+        last_day = ws["A2"].value
+        assert isinstance(last_day, str), f"1900-02-28 written as {last_day!r}, not text"
+        assert last_day.startswith("1900-02-28")
+        first_date = ws["A3"].value
+        assert isinstance(first_date, datetime.datetime), f"1900-03-01 written as {first_date!r}"
+        assert (first_date.year, first_date.month, first_date.day) == (1900, 3, 1)
 
 
 class TestDatetimeDateSubclasses:

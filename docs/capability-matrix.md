@@ -56,9 +56,9 @@ reduced-feature version of the DataFrame path: to format a CSV export, read it i
 DataFrame and use `df_to_xlsx`.
 
 `constant_memory=True` keeps 4 of the feature options (`column_widths`, `header_format`, `column_formats`, `pivot_tables`) and skips
-16. Those three are the ones applied while rows are being written; everything
-else needs to revisit a cell after the fact, which streaming output cannot do. A new
-option defaults to skipped, so this list only grows deliberately.
+16. None of the kept options needs to revisit a cell that was already written;
+everything else does, which streaming output cannot do. A new option defaults to skipped,
+so this list only grows deliberately.
 
 Of the 32 options, 26 can be overridden per sheet in `dfs_to_xlsx`. The rest are
 workbook-wide.

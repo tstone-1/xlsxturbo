@@ -18,9 +18,7 @@ import pytest
 import xlsxturbo
 from xlsxturbo.types import SheetOptions
 
-from tests.helpers import HAS_OPENPYXL, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import load_workbook
 
 
 def _summary() -> pd.DataFrame:

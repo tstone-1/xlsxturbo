@@ -249,8 +249,8 @@ def df_to_xlsx(
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
             images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
-            header_format, column_formats, freeze_panes, autofilter and tab_color remain
-            supported.
+            header_format, column_formats, pivot_tables, freeze_panes, autofilter and
+            tab_color remain supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             First matching pattern wins (order preserved).
@@ -308,8 +308,10 @@ def df_to_xlsx(
             frame. The source is the frame's written range, header row included, so every
             field is one of its column names. 'A3' places the pivot table on the frame's
             own sheet; 'Summary!A3' places it on sheet 'Summary', which is created empty
-            when the workbook has no sheet of that name. A location inside the frame's
-            data is refused. Excel builds the table when the file is opened, so its size
+            when the workbook has no sheet of that name. A location inside any frame is
+            refused, and so is a cells, hyperlinks, merged_ranges, rich_text or
+            checkboxes write into the frame's header row, whose texts are the field
+            names. Excel builds the table when the file is opened, so its size
             is not known when it is written: anything to the right of or below the
             location can make Excel show #SPILL!. Needs header=True and at least one
             data row, and the column names must be unique and not empty.
@@ -342,7 +344,7 @@ def df_to_xlsx(
             shorthand keys 'num_format', 'font_name', 'quote_prefix', 'align_horizontal',
             'align_vertical' and 'wrap_text', which override the same key in 'format'.
             Cells are written after DataFrame data, so they can overwrite existing values.
-            Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
+            Example: {'B9': 'Label', 'D6': {'value': '000123456789', 'num_format': '@'}}
 
     Note:
         date/datetime values before 1900-03-01 cannot be represented as a
@@ -431,8 +433,8 @@ def dfs_to_xlsx(
             row_heights, autofit, column_widths with autofit cap, conditional_formats,
             formula_columns, merged_ranges, hyperlinks, comments, validations, rich_text,
             images, checkboxes, textboxes, charts, sparklines, and cells. Plain column_widths,
-            header_format, column_formats, freeze_panes, autofilter and tab_color remain
-            supported.
+            header_format, column_formats, pivot_tables, freeze_panes, autofilter and
+            tab_color remain supported.
         column_formats: Dict mapping column name patterns to format options.
             Patterns: 'prefix*', '*suffix', '*contains*', or exact match.
             Every pattern must match at least one column or ValueError is raised.
@@ -471,8 +473,10 @@ def dfs_to_xlsx(
             frame. The source is the frame's written range, header row included, so every
             field is one of its column names. 'A3' places the pivot table on the frame's
             own sheet; 'Summary!A3' places it on sheet 'Summary', which is created empty
-            when the workbook has no sheet of that name. A location inside the frame's
-            data is refused. Excel builds the table when the file is opened, so its size
+            when the workbook has no sheet of that name. A location inside any frame is
+            refused, and so is a cells, hyperlinks, merged_ranges, rich_text or
+            checkboxes write into the frame's header row, whose texts are the field
+            names. Excel builds the table when the file is opened, so its size
             is not known when it is written: anything to the right of or below the
             location can make Excel show #SPILL!. Needs header=True and at least one
             data row, and the column names must be unique and not empty.
@@ -504,7 +508,7 @@ def dfs_to_xlsx(
             'value' and an optional 'format' dict (the keys column_formats accepts), plus the
             shorthand keys 'num_format', 'font_name', 'quote_prefix', 'align_horizontal',
             'align_vertical' and 'wrap_text', which override the same key in 'format'.
-            Example: {'B9': 'Label', 'D6': {'value': '934728173849', 'num_format': '@'}}
+            Example: {'B9': 'Label', 'D6': {'value': '000123456789', 'num_format': '@'}}
 
     Note:
         date/datetime values before 1900-03-01 cannot be represented as a
@@ -516,7 +520,8 @@ def dfs_to_xlsx(
         str() representation.
 
     Returns:
-        List of (rows, columns) tuples, one per written sheet.
+        List of (rows, columns) tuples, one per entry of ``sheets``: two entries
+        that name one sheet give two tuples.
     """
 
 def version() -> str:

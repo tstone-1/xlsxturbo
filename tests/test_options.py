@@ -25,7 +25,7 @@ import xlsxturbo
 from xlsxturbo.options import ExportOptions
 from xlsxturbo.types import SheetOptions, SparklineOptions
 
-from tests.helpers import HAS_OPENPYXL, TIMESTAMPED_PART, active_ws, load_workbook
+from tests.helpers import TIMESTAMPED_PART, active_ws, load_workbook
 
 # `df_to_xlsx` parameters that are not options: the data, where it goes, and the
 # name of the single sheet it goes to.
@@ -190,7 +190,6 @@ class TestLowering:
         )
 
 
-@pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 class TestEquivalence:
     """A bundle produces the same workbook as the keywords it lowers to."""
 
@@ -416,5 +415,12 @@ class TestDataBarBesideSparklines:
             conditional_formats={"Score": {"type": "data_bar"}},
         )
         with zipfile.ZipFile(out) as zf:
-            for member in ("xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"):
-                ElementTree.fromstring(zf.read(member))  # noqa: S314 - our own output
+            first, second = (zf.read(f"xl/worksheets/sheet{n}.xml") for n in (1, 2))
+        for xml in (first, second):
+            ElementTree.fromstring(xml)  # noqa: S314 - our own output
+        # The control, as in the single-sheet case: both features reached sheet B,
+        # where the two sources meet, and only the workbook-wide one reached A.
+        assert b"dataBar" in second
+        assert b"sparkline" in second
+        assert b"dataBar" in first
+        assert b"sparkline" not in first

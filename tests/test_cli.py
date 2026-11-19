@@ -18,9 +18,7 @@ import pytest
 import xlsxturbo
 from xlsxturbo import cli
 
-from tests.helpers import HAS_OPENPYXL, REPO_ROOT, active_ws, load_workbook, repo_checkout_available
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import REPO_ROOT, active_ws, load_workbook, repo_checkout_available
 
 
 @pytest.fixture
@@ -99,9 +97,27 @@ class TestExitCodes:
         assert exc.value.code == cli.EXIT_USAGE
 
     def test_every_accepted_date_order_is_accepted_by_csv_to_xlsx(self, csv_file: Path, tmp_path: Path) -> None:
-        """The CLI's list comes from ``types.DateOrder``; the extension must agree with it."""
+        """The CLI's list comes from ``types.DateOrder``; the extension must agree with it.
+
+        Agreeing means taking the value *and* reading the date that way: the
+        fixture's ``01-02-2024`` is 2 January read month first and 1 February
+        read day first. ``auto`` tries day first before month first, as
+        ``docs/csv-conversion.md`` says.
+        """
+        month_first, day_first = dt.datetime(2024, 1, 2), dt.datetime(2024, 2, 1)
+        expected = {
+            "auto": day_first,
+            "mdy": month_first,
+            "us": month_first,
+            "dmy": day_first,
+            "eu": day_first,
+            "european": day_first,
+        }
+        assert set(expected) == set(cli.DATE_ORDERS)
         for order in cli.DATE_ORDERS:
-            xlsxturbo.csv_to_xlsx(csv_file, tmp_path / f"{order}.xlsx", date_order=order)
+            out = tmp_path / f"{order}.xlsx"
+            xlsxturbo.csv_to_xlsx(csv_file, out, date_order=order)
+            assert active_ws(load_workbook(out))["B2"].value == expected[order], order
 
 
 class TestInstallation:

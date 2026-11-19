@@ -87,7 +87,11 @@ Released in 0.101.0 (2026-10-20) and taken the next day: `temp_file_failure` map
 deny for Everyone on Windows, `chmod 0o555` on POSIX). Reverting the mapping turns that test
 and the `ENOENT` assertion in `tests/test_constant_memory.py` red.
 
-**Open, fixed upstream but not released: a sheet named `TRUE` or `FALSE` with
+**Closed by rust_xlsxwriter 0.103.0, which quotes the name (`'TRUE'!`);
+`tests/test_attribute_escaping.py::TestBooleanSheetNameIsQuoted` pins it.** The record below
+is the state before that release.
+
+**Was open, fixed upstream but not released: a sheet named `TRUE` or `FALSE` with
 `autofilter=True` gives a workbook Excel cannot open** (measured 2026-11-13, xlsxturbo 1.13.1
 on rust_xlsxwriter 0.102.0, any letter case). `quote_sheet_name` does not quote a boolean
 sheet name, so the hidden filter name is written as
@@ -98,10 +102,17 @@ and sheet `TRUE` with no filter and with a `table_style`. The autofilter is the 
 where the crate builds a sheet reference for us; chart and sparkline ranges are strings the
 caller writes. The fix is upstream commit `0c034f85b` (2026-11-08, "utility: add boolean
 values to sheet quoting rules"), one commit after `v0.102.0`; no issue was filed for it.
-Nothing here guards or tests it yet. Take the release that carries the commit and add a test
-that opens the definedName back (`'TRUE'!`).
+At the time nothing here guarded or tested it; the plan was to take the release that carries
+the commit and add a test that reads the definedName back (`'TRUE'!`), which is what 0.103.0
+and `TestBooleanSheetNameIsQuoted` did.
 
-**Filed as #216 and #217, both fixed upstream, not released: three more ways
+**Closed by rust_xlsxwriter 0.103.0: #216 and #217.** The release escapes all three cases
+below; `tests/test_attribute_escaping.py` and
+`tests/test_table_headers.py::TestHeadersTheWriterNowEscapes` pin the escaped output, and
+`unwritable_table_header` keeps only its length rule. The paragraphs up to the one on
+#221 record the state on 0.102.0 and the main-branch measurements before the release.
+
+**Filed as #216 and #217, both fixed upstream before 0.103.0: three more ways
 rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open** (measured and filed 2026-11-13).
 [#216](https://github.com/jmcnamara/rust_xlsxwriter/issues/216) is case 1 below,
 [#217](https://github.com/jmcnamara/rust_xlsxwriter/issues/217) is cases 2 and 3. Each report
@@ -116,7 +127,8 @@ opened, and the crate returned `Ok` for all 19.
    name, table column header, data-validation titles and messages, hyperlink URL and internal
    link, font name, number format, a `containing` conditional format, textbox alt text and
    font, image alt text. The same characters in a cell value are written as `_x0001_` and
-   open (the control). **Fixed upstream, not released:** #216 was closed 2026-11-15 by commit
+   open (the control). **Released in 0.103.0; before that, fixed upstream, not released:**
+   #216 was closed 2026-11-15 by commit
    `da60a0138` ("xmlwriter: escape control characters in attributes and urls"), changelog
    entry `0.102.1`. On 2026-11-15 the issue's program against main `1bd0291fa` found no raw
    U+0001 in any part, and Excel 16.0 build 20527 through COM opened all seven files, where
@@ -133,7 +145,7 @@ opened, and the crate returned `Ok` for all 19.
 3. *A sheet named `_x000D_` with an autofilter*, and a table named `_x000D_`. The sheet
    without the filter opens.
 
-**2 and 3 are fixed upstream, not released:** #217 was closed 2026-11-15 by commit
+**2 and 3 are released in 0.103.0; before that, fixed upstream, not released:** #217 was closed 2026-11-15 by commit
 `a94fc21cf` ("xmlwriter: escape tabs, CRs and _xHHHH_ strings in more places"), changelog
 entry `0.102.1`, which also adds an error for a column name over 255 characters. On
 2026-11-15 the report's headers plus both case-3 workbooks were built against main
@@ -144,13 +156,15 @@ Read back through COM, every main table column name equals its header cell, code
 for code point (tab, CR, CR LF, `_x000D_`, `_x000d_`, `a_x0041_b`), the table named
 `_x000D_` keeps that name, and the `_x000D_` sheet keeps its filter.
 
-The realistic one for xlsxturbo is 2: a DataFrame column name with a tab or `\r\n` in it and
-a `table_style`. That one is guarded: `unwritable_table_header` (`src/parse/tables.rs`),
-called from `reject_unwritable_table_headers` in `apply_frame_features`, refuses the table
-with a `ConfigurationError`; `tests/test_table_headers.py` covers it, and replacing the call's
-`?` with a discarded result reddens 13 of its 32 tests. It cannot escape instead of refusing:
-the header string we pass is used for both the cell and the attribute, and the two need
-different escaping. 1 and 3 are not guarded.
+**On 0.103.0 the next paragraph is history: the guard keeps only its length rule (the
+paragraph after it).** The realistic one for xlsxturbo is 2: a DataFrame column name with a
+tab or `\r\n` in it and a `table_style`. Before 0.103.0 that one was guarded:
+`unwritable_table_header` (`src/parse/tables.rs`), called from
+`reject_unwritable_table_headers` in `apply_frame_features`, refused the table with a
+`ConfigurationError`; `tests/test_table_headers.py` covered it, and replacing the call's `?`
+with a discarded result reddened 13 of its 32 tests. It could not escape instead of
+refusing: the header string we pass is used for both the cell and the attribute, and the
+two need different escaping. 1 and 3 were not guarded; the crate update closed them.
 
 With 0.103.0 the guard keeps only its length rule: the release writes every other header
 it refused in the form Excel opened on main `a94fc21cf`, and
@@ -185,9 +199,14 @@ name, so pair them with sheets by `localSheetId`, never by position; and the man
 for `formula_columns`, `defined_names` values and `num_format` in the first run are invalid
 input, not defects.
 
-**Filed as [#221](https://github.com/jmcnamara/rust_xlsxwriter/issues/221), open
-(2026-11-17): a failed `Workbook::save(path)` leaves a 0-byte file and replaces a workbook
-that was at that path.** `save()` calls `File::create(path)` before `save_internal()`, and
+**Closed by rust_xlsxwriter 0.103.0: [#221](https://github.com/jmcnamara/rust_xlsxwriter/issues/221).**
+In 0.103.0 `save()` runs `prepare_save()`, the save-time checks, before `File::create(path)`
+(read in the crate source; its changelog cites #221). That covers the checks, not an error
+while the parts are written, so the rule at the end of this paragraph stands. The rest of
+the paragraph is the report as filed.
+
+**Filed as #221 (2026-11-17): a failed `Workbook::save(path)` leaves a 0-byte file and
+replaces a workbook that was at that path.** `save()` calls `File::create(path)` before `save_internal()`, and
 the save-time checks (duplicate table names, a chart series naming a missing sheet) run
 inside it. Measured on 0.102.0 and main `e6476c5`: 5437 bytes before, `Err(NameReused)`,
 0 bytes after. `save_to_buffer()` is not affected, and `save_to_writer()` returns these
@@ -197,10 +216,28 @@ replace that path with `Workbook::save()`, also not after #221 is closed without
 what the fix covers: a check moved before `File::create` does not help an error that occurs
 while the parts are written.
 
+**Exposed as `pivot_tables` on rust_xlsxwriter 0.103.0.** `src/apply/pivot.rs` always passes
+the frame's header texts with `set_field_names()`, refuses an empty or (without case) repeated
+column name and an anchor inside a written frame before the save, and works under
+`constant_memory`. What was re-run against the release, on 2026-11-19 with Excel 16.0 build
+20625 through `scripts/excel_open_check.ps1 -NoDialog`: four workbooks written by xlsxturbo
+with `pivot_tables` opened, namely a basic pivot table on a new sheet, the same with
+`constant_memory=True`, a pivot table on the frame's own sheet beside a table named
+`PivotTable1`, and a frame with a column named `Sum of Volume` beside a value field on
+`Volume`. The basic one was reported `REFUSED ... RPC_E_CALL_REJECTED` in two of three runs:
+that is Excel busy refreshing the table on load, not a refusal, and the script now retries
+it and reports a call still rejected as `BUSY`. **The full set of branch probes below was
+not re-run against the release.**
+
+Measured the same day through the same script, outside the pivot work: a `decimal`
+validation bound of `1e308` and of `1.7976931348623157e308` (the largest double) was refused
+by Excel on open, while `9.99999999999999e307` opened; a `whole_number` validation with
+`min` 10 and `max` 0 opened.
+
 **Pivot tables shipped in rust_xlsxwriter 0.103.0 (2026-11-18) as `PivotTable` and
 `Worksheet::add_pivot_table()`; PR [#220](https://github.com/jmcnamara/rust_xlsxwriter/pull/220)
 was closed and the feature landed separately. The findings below were measured on the branch
-(`238bc5b`, then `30147bb`); re-run them against the release before xlsxturbo exposes the feature.**
+(`238bc5b`, then `30147bb`), before the release.**
 The branch at `238bc5b` was probed with about 130 workbooks, each opened in Excel 16.0 build
 20527 with the dialog text read. Normal use works (all 36 combinations of layout, field shape
 and grand totals). Inputs that saved with `Ok` and got Excel's repair prompt: two source
@@ -211,15 +248,19 @@ source range past the grid; a pivot table placed on a worksheet table; first and
 column swapped (panic in a debug build). A pivot table on a chartsheet is dropped without an
 error. Three things matter for xlsxturbo in particular, whatever the final API looks like:
 
-- *The header row is read from the worksheet's in-memory cells at save time.* A source on a
-  constant-memory worksheet cannot be used: the header row is flushed and its strings are
+- *The header row is read from the worksheet's in-memory cells at save time.* Superseded at
+  `30147bb` by `set_field_names()` (the first item of the re-run below), which xlsxturbo
+  always calls. On `238bc5b` a source on a constant-memory worksheet could not be used: the header row is flushed and its strings are
   `InlineString`, so every field lookup fails with "doesn't match a header in the source
-  data". xlsxturbo's `constant_memory` path would need its own refusal.
+  data".
 - *Column names come from the DataFrame, so duplicate and empty names are ordinary input
-  here.* Each needs a pre-check with a `ConfigurationError` unless the released crate
-  validates them itself; re-run the cases against the release, do not assume.
+  here.* xlsxturbo now refuses both before the save with a `ConfigurationError`
+  (`src/apply/pivot.rs`); whether the released crate also refuses them was not re-run.
 - *A pivot table over a table is refused by Excel, and one over other cells shows `#SPILL!`.*
-  xlsxturbo writes tables by default paths (`table_style`), so placement needs a rule.
+  xlsxturbo writes tables by default paths (`table_style`), so placement needs a rule. The
+  rule taken: an anchor inside any written frame is refused before the save; a table body
+  that grows into a frame below or beside the anchor is not checked (see the placement item
+  of the re-run below).
 
 **Re-run at `30147bb` (2026-11-17, the branch squashed to one commit after the maintainer's
 fixes).** Debug and release builds give the same output and nothing panics. The inputs that
@@ -271,8 +312,10 @@ What that showed:
 Three method notes from this run. Reading a pivot table back through COM: with alerts off, the
 refresh on load had not run two seconds after `Workbooks.Open` for most files, so `TableRange2`
 was one cell and the field names were the ones stored in the file; call `RefreshTable()` first,
-then read. `excel_open_check.ps1` prints `REFUSED ... RPC_E_CALL_REJECTED ... no dialog, the
-workbook loaded` for a workbook that Excel is still refreshing; that line is not a refusal.
+then read. `excel_open_check.ps1` printed `REFUSED ... RPC_E_CALL_REJECTED ... no dialog, the
+workbook loaded` for a workbook that Excel was still refreshing; that line was not a refusal.
+The script now retries a rejected call and reports one still rejected as `BUSY`, with exit
+code 2 ("could not check").
 And the first wrong-names case differed from its control in two things (the names and a
 missing value field), which an independent read-only review found; the claim held only after
 both controls were added.
@@ -402,7 +445,7 @@ rust_xlsxwriter 0.100.0 added `Workbook::set_zip_compression_level(1..=9)`; the 
 is 6. xlsxturbo exposes it as `compression_level` since 1.12.0; the measurement through
 xlsxturbo is on `docs/performance.md`. The crate only prints a warning to stderr for a
 level outside 1 to 9 and keeps 6, which is why `extract_compression_level` validates it.
-Measured 2026-10-19 on the Windows desktop
+Measured 2026-10-19 on Windows
 against the crate directly, not through xlsxturbo: a seeded 10-column frame (ints,
 floats, 20 repeated strings, unique ids), `save_to_buffer`, levels interleaved, median
 of 9 rounds after a warmup.

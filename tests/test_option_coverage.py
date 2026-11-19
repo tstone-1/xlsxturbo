@@ -29,9 +29,7 @@ import pandas as pd
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, TINY_PNG_B64, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import TINY_PNG_B64, active_ws, load_workbook
 
 # kwargs of df_to_xlsx that are not per-sheet "options": the DataFrame, the
 # output path, the (single-sheet) sheet name, and defined_names, which is a
@@ -131,10 +129,12 @@ def _check_startrow(path: str, _factory: PathFactory) -> None:
 
 
 def _check_constant_memory(path: str, _factory: PathFactory) -> None:
-    """constant_memory=True must emit a RuntimeWarning naming a skipped feature."""
+    """constant_memory=True must emit a RuntimeWarning naming a skipped feature, and skip it."""
     with pytest.warns(RuntimeWarning, match="constant_memory=True disables these features"):
         xlsxturbo.df_to_xlsx(_base_df(), path, constant_memory=True, table_style="Medium9")
-    assert Path(path).exists()
+    ws = active_ws(load_workbook(path))
+    assert len(ws.tables) == 0, "the table constant_memory reports as disabled was written"
+    assert (ws["A1"].value, ws["A2"].value) == ("Name", "Alice")
 
 
 def _check_column_widths(path: str, _factory: PathFactory) -> None:

@@ -18,6 +18,9 @@ def tmp_xlsx() -> Iterator[str]:
     unlinked with ``missing_ok=True`` during teardown, so tests that never
     end up writing the file (e.g. because an exception is raised first) do
     not fail cleanup.
+
+    Because the file exists before the test runs, asserting that it exists
+    afterwards proves nothing; read back what the test is about instead.
     """
     path = get_temp_path()
     yield path

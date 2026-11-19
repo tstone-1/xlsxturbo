@@ -281,10 +281,12 @@ xlsxturbo.df_to_xlsx(df, "rich.xlsx",
 **Available format options:**
 - `bold` (bool)
 - `italic` (bool)
-- `font_color` (str): '#RRGGBB' or named color
-- `bg_color` (str): Background color
-- `font_size` (float)
 - `underline` (bool)
+- `font_color` (str): '#RRGGBB' or named color
+- `font_size` (float)
+- `font_name` (str)
+
+Any other key, such as `bg_color`, raises a `ConfigurationError` that lists the valid ones.
 
 **Notes:**
 - Rich text writes to the specified cell position (overwrites existing content)

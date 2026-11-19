@@ -525,7 +525,7 @@ class SheetOptions(TypedDict, total=False):
     For the dict/list-valued options below (column_widths, header_format,
     column_formats, conditional_formats, formula_columns, merged_ranges,
     hyperlinks, comments, validations, rich_text, images, checkboxes,
-    textboxes, charts, sparklines, cells): passing an explicitly empty dict/list for a sheet
+    textboxes, charts, sparklines, pivot_tables, cells): passing an explicitly empty dict/list for a sheet
     disables that global default for that sheet rather than falling back to
     it. Omitting the key entirely (or passing None) still falls back to the
     global default as before.

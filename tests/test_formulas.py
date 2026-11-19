@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
+from tests.helpers import active_ws, load_workbook
 
 
 class TestFormulaColumns:
@@ -128,3 +125,27 @@ class TestFormulaColumnsHeaderFalse:
         # Row 2 should have data
         assert ws["A2"].value == 10
         wb.close()
+
+
+class TestFormulaColumnHeaderFormat:
+    """``header_format`` reaches a formula column's header, not only the frame's."""
+
+    def test_header_format_reaches_the_formula_header(self, tmp_xlsx: str) -> None:
+        """The formula header is written by ``apply_formula_columns``, a separate site.
+
+        The frame's own header cells are formatted while the frame is written;
+        the formula column's header is written later, and the format has to be
+        handed to it. The frame header is asserted too, as the control.
+        """
+        df = pd.DataFrame({"A": [10, 20], "B": [1, 2]})
+        xlsxturbo.df_to_xlsx(
+            df,
+            tmp_xlsx,
+            header_format={"bold": True},
+            formula_columns={"Sum": "=A{row}+B{row}"},
+        )
+        ws = active_ws(load_workbook(tmp_xlsx))
+        assert ws["C1"].value == "Sum"
+        assert ws["A1"].font.bold is True
+        assert ws["C1"].font.bold is True, "the formula column header lost header_format"
+        assert ws["C2"].font.bold is not True, "header_format leaked into the formula cells"

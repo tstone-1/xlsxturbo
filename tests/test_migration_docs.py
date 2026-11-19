@@ -20,12 +20,11 @@ from typing import Any
 
 import pytest
 
-from tests.helpers import HAS_OPENPYXL, REPO_ROOT, load_workbook, repo_checkout_available
+from tests.helpers import REPO_ROOT, load_workbook, repo_checkout_available
 
-pytestmark = [
-    pytest.mark.skipif(not repo_checkout_available(), reason="reads docs/migrating.md from a source checkout"),
-    pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification"),
-]
+pytestmark = pytest.mark.skipif(
+    not repo_checkout_available(), reason="reads docs/migrating.md from a source checkout"
+)
 
 PAGE = REPO_ROOT / "docs" / "migrating.md"
 

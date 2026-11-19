@@ -11,12 +11,10 @@ import polars as pl
 import pytest
 import xlsxturbo
 
-from tests.helpers import HAS_OPENPYXL, active_ws, load_workbook
+from tests.helpers import active_ws, load_workbook
 
 if TYPE_CHECKING:
     from xlsxturbo.types import ConditionalFormat
-
-pytestmark = pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for content verification")
 
 
 class TestConditionalFormatting:
