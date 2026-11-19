@@ -78,10 +78,10 @@ Read [dev-docs/adding-a-feature.md](dev-docs/adding-a-feature.md) in full before
 - *A report lands with a reproducer that needs no Excel, controls in the same program, and only what was measured* -- review the draft against what you actually ran.
 - *Pin an unreachable upstream defect in a test that fails when it is fixed* -- delete that test together with the workaround.
 - *Closed: #213, `TempFileError` drops the `io::Error`* -- fixed in rust_xlsxwriter 0.101.0; `temp_file_failure` now maps the `io::Error`, so a refused temporary folder is `FilePermissionError`. No open upstream defect is pinned now.
-- *Open, fixed upstream but not released: a sheet named `TRUE` or `FALSE` with `autofilter=True` gives a workbook Excel cannot open* -- fix is upstream commit `0c034f85b`, after `v0.102.0`; no guard or test here yet.
-- *Filed as #216 and #217, both fixed upstream, not released: three more ways rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open* -- control characters in attributes, a tab or CR in a table column header, `_x000D_`-shaped names. Only the header case is guarded (`unwritable_table_header`); see the notes before removing it.
-- *Filed as #221, open: a failed `Workbook::save(path)` leaves a 0-byte file and replaces an existing workbook* -- xlsxturbo saves through `save_to_writer()` into a temporary file and renames it; keep that path.
-- *Pivot tables are upstream PR #220, not merged: read the findings before exposing them* -- at `238bc5b` bad headers got Excel's repair prompt; `30147bb` handles them; a constant-memory source needs `set_field_names()`, wrong names there give an empty table, and placement is checked in the first column only.
+- *Fixed in rust_xlsxwriter 0.103.0 (2026-11-18), not yet taken here: a sheet named `TRUE` or `FALSE` with `autofilter=True` gives a workbook Excel cannot open* -- upstream commit `0c034f85b`; no guard or test here yet. The 3-day publish-age rule holds 0.103.0 back until 2026-11-21 23:25 UTC.
+- *Filed as #216 and #217, both fixed in 0.103.0, not yet taken here: three more ways rust_xlsxwriter 0.102.0 writes a workbook Excel cannot open* -- control characters in attributes, a tab or CR in a table column header, `_x000D_`-shaped names. Only the header case is guarded (`unwritable_table_header`); see the notes before removing it.
+- *Filed as #221, fixed in 0.103.0: a failed `Workbook::save(path)` leaves a 0-byte file and replaces an existing workbook* -- xlsxturbo saves through `save_to_writer()` into a temporary file and renames it; keep that path.
+- *Pivot tables shipped in 0.103.0 (`PivotTable`; PR #220 was closed, the feature landed separately): read the findings before exposing them* -- at `238bc5b` bad headers got Excel's repair prompt; `30147bb` handles them; a constant-memory source needs `set_field_names()`, wrong names there give an empty table, and placement is checked in the first column only.
 
 ## Name validation is ours now — upstream has drawn its line
 
