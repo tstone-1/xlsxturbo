@@ -467,3 +467,15 @@ save is roughly 58% of a `df_to_xlsx` call (the GIL-release measurement in
 Measured through xlsxturbo it cut `df_to_xlsx` by 28% and `csv_to_xlsx` by 34%: the
 estimate was close for the CSV path and a little high for the DataFrame path, where reading
 values out of the frame takes a larger share.
+
+## Custom ribbon UI is not exposed — xlsxturbo writes no macros
+
+rust_xlsxwriter 0.104.0 added `Workbook::add_custom_ui()`, which stores ribbon XML in the
+workbook. Checked 2026-11-23 and decided against exposing it. Ribbon controls call VBA
+callbacks, and xlsxturbo writes `.xlsx` only, never a macro-enabled `.xlsm`
+(`docs/migrating.md`), so a ribbon written by xlsxturbo would show buttons that do
+nothing. The release adds the variant `XlsxError::CustomUiError`; both matches on
+`XlsxError` (`temp_file_failure` in `src/convert.rs`, `save_failure` in
+`src/workbook.rs`) end in an `other =>` arm, so a new variant compiles and reaches the
+user through the crate's own message. Reconsider only if xlsxturbo ever writes VBA
+projects.

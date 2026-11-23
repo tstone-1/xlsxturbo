@@ -106,6 +106,7 @@ Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwri
 ## Zip compression level
 
 - *Zip compression level — measured before exposing it* -- exposed as `compression_level` in 1.12.0; the crate only warns on stderr for a level outside 1-9, so we validate it. Level 1 cut `df_to_xlsx` by 28%. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#zip-compression-level--measured-before-exposing-it).
+- *Custom ribbon UI (`add_custom_ui()`, rust_xlsxwriter 0.104.0) is not exposed* -- ribbon buttons call VBA, and xlsxturbo writes no macros. Full text: [dev-docs/upstream-rust-xlsxwriter.md](dev-docs/upstream-rust-xlsxwriter.md#custom-ribbon-ui-is-not-exposed--xlsxturbo-writes-no-macros).
 
 ## The bundled license notice
 
