@@ -1012,7 +1012,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [zeroize 1.9.1](https://github.com/RustCrypto/utils)
+- [zeroize 1.9.2](https://github.com/RustCrypto/utils)
 
 ```text
 Copyright (c) 2018-2026 The RustCrypto Project Developers
@@ -1198,10 +1198,10 @@ Applies to:
 - [anstyle-query 1.1.5](https://github.com/rust-cli/anstyle.git)
 - [anstyle-wincon 3.0.11](https://github.com/rust-cli/anstyle.git)
 - [anstyle 1.0.14](https://github.com/rust-cli/anstyle.git)
-- [clap 4.6.7](https://github.com/clap-rs/clap)
+- [clap 4.6.9](https://github.com/clap-rs/clap)
 - [clap_builder 4.6.7](https://github.com/clap-rs/clap)
-- [clap_derive 4.6.7](https://github.com/clap-rs/clap)
-- [clap_lex 1.1.1](https://github.com/clap-rs/clap)
+- [clap_derive 4.6.9](https://github.com/clap-rs/clap)
+- [clap_lex 1.1.2](https://github.com/clap-rs/clap)
 - [colorchoice 1.0.5](https://github.com/rust-cli/anstyle.git)
 - [is_terminal_polyfill 1.70.2](https://github.com/polyfill-rs/is_terminal_polyfill)
 - [once_cell_polyfill 1.70.2](https://github.com/polyfill-rs/once_cell_polyfill)
@@ -1441,7 +1441,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Applies to:
 
-- [zip 9.6.0](https://github.com/zip-rs/zip2)
+- [zip 9.8.1](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
