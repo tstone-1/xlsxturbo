@@ -45,7 +45,7 @@ required-features = ["cli"]
 # quoted a sheet named `TRUE` or `FALSE` in the autofilter's defined name; and
 # fixed a failed `Workbook::save(path)` leaving a 0-byte file (#221), a path
 # xlsxturbo avoids anyway by saving through `save_to_writer()`.
-rust_xlsxwriter = { version = "0.103.0", features = ["constant_memory"] }
+rust_xlsxwriter = { version = "0.104.0", features = ["constant_memory"] }
 csv = "1.4"
 clap = { version = "4.6", features = ["derive"], optional = true }
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
