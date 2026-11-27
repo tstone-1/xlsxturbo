@@ -872,7 +872,7 @@ DEALINGS IN THE SOFTWARE.
 
 Applies to:
 
-- [hashbrown 0.17.1](https://github.com/rust-lang/hashbrown)
+- [hashbrown 0.17.2](https://github.com/rust-lang/hashbrown)
 
 ```text
 Copyright (c) 2016 Amanieu d'Antras
@@ -1319,7 +1319,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 Applies to:
 
 - [r-efi 6.0.0](https://github.com/r-efi/r-efi)
-- [rust_xlsxwriter 0.103.0](https://github.com/jmcnamara/rust_xlsxwriter)
+- [rust_xlsxwriter 0.104.0](https://github.com/jmcnamara/rust_xlsxwriter)
 - [windows-link 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.61.2](https://github.com/microsoft/windows-rs)
 
@@ -1441,7 +1441,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Applies to:
 
-- [zip 9.8.1](https://github.com/zip-rs/zip2)
+- [zip 9.8.2](https://github.com/zip-rs/zip2)
 
 ```text
 The MIT License (MIT)
@@ -1658,7 +1658,7 @@ authorization of the copyright holder.
 
 Applies to:
 
-- [zlib-rs 0.6.8](https://github.com/trifectatechfoundation/zlib-rs)
+- [zlib-rs 0.6.9](https://github.com/trifectatechfoundation/zlib-rs)
 
 ```text
 (C) 2024 Trifecta Tech Foundation 
